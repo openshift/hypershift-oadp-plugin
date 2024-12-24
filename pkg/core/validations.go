@@ -59,3 +59,29 @@ func checkAgentPlatform(hcp *hyperv1.HostedControlPlane, dpa oadpv1.DataProtecti
 	// Check if the Agent platform is configured properly
 	return nil
 }
+
+func (p *BackupPlugin) validatePluginConfig() error {
+	// Validate the plugin configuration
+	p.log.Debugf("%s validating plugin configuration", logHeader)
+	if len(p.config) == 0 {
+		p.log.Debug("no configuration provided")
+		return nil
+	}
+
+	for key, value := range p.config {
+		p.log.Debugf("%s configuration key: %s, value: %s", logHeader, key, value)
+		switch key {
+		case "migration":
+			p.BackupOptions.migration = value == "true"
+		case "readoptNodes":
+			p.BackupOptions.readoptNodes = value == "true"
+		case "configureJob":
+			p.BackupOptions.configureJob.Name = value
+			p.BackupOptions.configureJob.Schedule = p.config["schedule"]
+		default:
+			p.log.Warnf("unknown configuration key: %s with value %s", key, value)
+		}
+	}
+
+	return nil
+}

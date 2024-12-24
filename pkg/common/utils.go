@@ -2,11 +2,14 @@ package common
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
 	hyperv1 "github.com/openshift/hypershift/api/hypershift/v1beta1"
+	cronv3 "github.com/robfig/cron/v3"
 	"github.com/sirupsen/logrus"
 	v1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
@@ -164,8 +167,7 @@ func ManagePauseHostedCluster(ctx context.Context, client crclient.Client, log l
 }
 
 func ManagePauseNodepools(ctx context.Context, client crclient.Client, log logrus.FieldLogger, paused string, header string, namespaces []string) error {
-	log.Debugf("%s Listing NodePools", header)
-	log.Debug("Checking namespaces to inspect")
+	log.Debugf("%s Listing NodePools, checking namespaces to inspect", header)
 	nps := &hyperv1.NodePoolList{}
 
 	for _, ns := range namespaces {
@@ -186,6 +188,35 @@ func ManagePauseNodepools(ctx context.Context, client crclient.Client, log logru
 			if err := client.Update(ctx, &np); err != nil {
 				return err
 			}
+		}
+	}
+
+	return nil
+}
+
+// ValidateCronSchedule validates if a string is a valid cron schedule and rejects disallowed characters.
+func ValidateCronSchedule(schedule string) error {
+	_, err := cronv3.ParseStandard(schedule) // Verifica compatibilidad con cron estándar
+	if err != nil {
+		return fmt.Errorf("invalid format according to cron standard: %w", err)
+	}
+
+	// Reject specific disallowed characters
+	if strings.ContainsAny(schedule, "?LV") {
+		return errors.New("the schedule contains disallowed characters: ?, L, or V")
+	}
+
+	// Reject specific patterns using regular expressions
+	disallowedPatterns := []string{
+		`\bL\b`,
+		`\bV\b`,
+		`\?`,
+	}
+
+	for _, pattern := range disallowedPatterns {
+		matched, _ := regexp.MatchString(pattern, schedule)
+		if matched {
+			return fmt.Errorf("the schedule contains a disallowed pattern: %s", pattern)
 		}
 	}
 
