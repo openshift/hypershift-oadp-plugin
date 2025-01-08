@@ -7,6 +7,7 @@ require (
 	github.com/openshift/hypershift/api v0.0.0-20250108163049-830af0531d12
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/sirupsen/logrus v1.9.3
+	github.com/stretchr/testify v1.9.0
 	github.com/vmware-tanzu/velero v1.13.1
 	sigs.k8s.io/controller-runtime v0.17.2
 )
@@ -22,6 +23,7 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/imdario/mergo v0.3.16 // indirect
 	github.com/openshift/api v0.0.0-20240524162738-d899f8877d22 // indirect
+	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/client_golang v1.18.0 // indirect
 	github.com/prometheus/client_model v0.6.0 // indirect
 	github.com/prometheus/common v0.47.0 // indirect

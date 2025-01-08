@@ -4,9 +4,63 @@ import (
 	"testing"
 
 	. "github.com/onsi/gomega"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
-func TestValidaetCronSchedule(t *testing.T) {
+func TestGetMetadataAndAnnotations(t *testing.T) {
+	tests := []struct {
+		name           string
+		item           *unstructured.Unstructured
+		expectError    bool
+		expectAnnotations map[string]string
+	}{
+		{
+			name: "valid metadata with annotations",
+			item: &unstructured.Unstructured{
+				Object: map[string]interface{}{
+					"metadata": map[string]interface{}{
+						"name": "test",
+						"annotations": map[string]interface{}{
+							"test": "value",
+						},
+					},
+				},
+			},
+			expectError: false,
+			expectAnnotations: map[string]string{
+				"test": "value",
+			},
+		},
+		{
+			name: "valid metadata without annotations",
+			item: &unstructured.Unstructured{
+				Object: map[string]interface{}{
+					"metadata": map[string]interface{}{
+						"name": "test",
+					},
+				},
+			},
+			expectError: false,
+			expectAnnotations: map[string]string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+			metadata, annotations, err := getMetadataAndAnnotations(tt.item)
+			if tt.expectError {
+				g.Expect(err).To(HaveOccurred())
+			} else {
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(metadata).NotTo(BeNil())
+				g.Expect(annotations).To(Equal(tt.expectAnnotations))
+			}
+		})
+	}
+}
+
+func TestValidateCronSchedule(t *testing.T) {
 	tests := []struct {
 		name      string
 		schedule  string
