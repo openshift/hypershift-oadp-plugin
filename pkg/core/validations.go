@@ -2,60 +2,59 @@ package core
 
 import (
 	"fmt"
+	"strconv"
+	"time"
 
 	hyperv1 "github.com/openshift/hypershift/api/hypershift/v1beta1"
-	oadpv1 "github.com/openshift/oadp-operator/api/v1alpha1"
 )
 
-func checkPlatformConfig(hcp *hyperv1.HostedControlPlane, dpa oadpv1.DataProtectionApplication) error {
+func (p *BackupPlugin) checkPlatformConfig(hcp *hyperv1.HostedControlPlane) error {
 	switch hcp.Spec.Platform.Type {
 	case hyperv1.AWSPlatform:
-		return checkAWSPlatform(hcp, dpa)
+		return p.checkAWSPlatform(hcp)
 	case hyperv1.AzurePlatform:
-		return checkAzurePlatform(hcp, dpa)
+		return p.checkAzurePlatform(hcp)
 	case hyperv1.IBMCloudPlatform:
-		return checkIBMCloudPlatform(hcp, dpa)
+		return p.checkIBMCloudPlatform(hcp)
 	case hyperv1.KubevirtPlatform:
-		return checkKubevirtPlatform(hcp, dpa)
+		return p.checkKubevirtPlatform(hcp)
 	case hyperv1.OpenStackPlatform:
-		return checkOpenStackPlatform(hcp, dpa)
+		return p.checkOpenStackPlatform(hcp)
 	case hyperv1.AgentPlatform:
-		return checkAgentPlatform(hcp, dpa)
+		return p.checkAgentPlatform(hcp)
 	default:
 		return fmt.Errorf("unsupported platform type %s", hcp.Spec.Platform.Type)
 	}
 }
 
-func checkAWSPlatform(hcp *hyperv1.HostedControlPlane, dpa oadpv1.DataProtectionApplication) error {
+func (p *BackupPlugin) checkAWSPlatform(hcp *hyperv1.HostedControlPlane) error {
 	// Check if the AWS platform is configured properly
-
 	// Check ROSA
 	return nil
 }
 
-func checkAzurePlatform(hcp *hyperv1.HostedControlPlane, dpa oadpv1.DataProtectionApplication) error {
+func (p *BackupPlugin) checkAzurePlatform(hcp *hyperv1.HostedControlPlane) error {
 	// Check if the Azure platform is configured properly
-
 	// Check ARO
 	return nil
 }
 
-func checkIBMCloudPlatform(hcp *hyperv1.HostedControlPlane, dpa oadpv1.DataProtectionApplication) error {
+func (p *BackupPlugin) checkIBMCloudPlatform(hcp *hyperv1.HostedControlPlane) error {
 	// Check if the IBM Cloud platform is configured properly
 	return nil
 }
 
-func checkKubevirtPlatform(hcp *hyperv1.HostedControlPlane, dpa oadpv1.DataProtectionApplication) error {
+func (p *BackupPlugin) checkKubevirtPlatform(hcp *hyperv1.HostedControlPlane) error {
 	// Check if the Kubevirt platform is configured properly
 	return nil
 }
 
-func checkOpenStackPlatform(hcp *hyperv1.HostedControlPlane, dpa oadpv1.DataProtectionApplication) error {
+func (p *BackupPlugin) checkOpenStackPlatform(hcp *hyperv1.HostedControlPlane) error {
 	// Check if the OpenStack platform is configured properly
 	return nil
 }
 
-func checkAgentPlatform(hcp *hyperv1.HostedControlPlane, dpa oadpv1.DataProtectionApplication) error {
+func (p *BackupPlugin) checkAgentPlatform(hcp *hyperv1.HostedControlPlane) error {
 	// Check if the Agent platform is configured properly
 	return nil
 }
@@ -78,6 +77,20 @@ func (p *BackupPlugin) validatePluginConfig() error {
 		case "configureJob":
 			p.BackupOptions.configureJob.Name = value
 			p.BackupOptions.configureJob.Schedule = p.config["schedule"]
+		case "managedServices":
+			p.BackupOptions.managedServices = value == "true"
+		case "dataUploadTimeout":
+			minutes, err := strconv.ParseInt(value, 10, 64)
+			if err != nil {
+				return fmt.Errorf("error parsing dataUploadTimeout: %s", err.Error())
+			}
+			p.dataUploadTimeout = time.Duration(minutes)
+		case "dataUploadCheckPace":
+			seconds, err := strconv.ParseInt(value, 10, 64)
+			if err != nil {
+				return fmt.Errorf("error parsing dataUploadCheckPace: %s", err.Error())
+			}
+			p.dataUploadCheckPace = time.Duration(seconds)
 		default:
 			p.log.Warnf("unknown configuration key: %s with value %s", key, value)
 		}
