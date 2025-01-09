@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -150,8 +152,9 @@ func WaitForPausedPropagated(ctx context.Context, client crclient.Client, log lo
 
 func ManagePauseHostedCluster(ctx context.Context, client crclient.Client, log logrus.FieldLogger, paused string, header string, namespaces []string) error {
 	log.Debugf("%s listing HostedClusters", header)
-	log.Debug("checking namespaces to inspect")
-	hostedClusters := &hyperv1.HostedClusterList{}
+	hostedClusters := &hyperv1.HostedClusterList{
+		Items: []hyperv1.HostedCluster{},
+	}
 
 	for _, ns := range namespaces {
 		if err := client.List(ctx, hostedClusters, crclient.InNamespace(ns)); err != nil {
@@ -238,4 +241,13 @@ func ValidateCronSchedule(schedule string) error {
 	}
 
 	return nil
+}
+
+func GetCurrentNamespace() (string, error) {
+	namespaceFilePath := filepath.Join("/var/run/secrets/kubernetes.io/serviceaccount", "namespace")
+	namespace, err := os.ReadFile(namespaceFilePath)
+	if err != nil {
+		return "", err
+	}
+	return string(namespace), nil
 }

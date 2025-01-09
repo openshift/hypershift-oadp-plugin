@@ -1,0 +1,41 @@
+apiVersion: oadp.openshift.io/v1alpha1
+kind: DataProtectionApplication
+metadata:
+  name: dpa-instance
+  namespace: openshift-adp
+spec:
+  backupLocations:
+    - name: default
+      velero:
+        config:
+          region: us-west-2
+          profile: "default"
+        credential:
+          key: cloud
+          name: cloud-credentials
+        default: true
+        objectStorage:
+          bucket: jparrill-oadp
+          prefix: backup-objects
+        provider: aws
+  snapshotLocations:
+    - velero:
+        provider: aws
+        config:
+          region: us-west-2
+          profile: "default"
+        credential:
+          key: cloud
+          name: cloud-credentials
+  configuration:
+    restic:
+      enable: false
+    velero:
+      defaultPlugins:
+        - openshift
+        - aws
+        - kubevirt
+      customPlugins:
+        - name: hypershift-oadp-plugin
+          image: quay.io/jparrill/hypershift-oadp-plugin:latest
+      resourceTimeout: 2h

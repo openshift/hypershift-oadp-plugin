@@ -10,13 +10,15 @@ import (
 	"github.com/sirupsen/logrus"
 	velerov1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
 	component = "core"
-	debug     = "DEBUG"
 )
 
 var (
@@ -59,28 +61,39 @@ type cronJob struct {
 }
 
 // NewBackupPlugin instantiates BackupPlugin.
-func NewBackupPlugin(log logrus.FieldLogger) *BackupPlugin {
-	return &BackupPlugin{
-		log: log,
-	}
-}
-
-// Init initializes the BackupPlugin.
-func (p *BackupPlugin) Init(config map[string]string) error {
-	p.log.Debugf("%s initializing plugin", logHeader)
+func NewBackupPlugin(log logrus.FieldLogger) (*BackupPlugin, error) {
+	log.Infof("%s initializing hypershift OADP plugin", logHeader)
 	client, err := common.GetClient()
 	if err != nil {
-		return fmt.Errorf("error recovering the k8s client: %s", err.Error())
+		return nil, fmt.Errorf("error recovering the k8s client: %s", err.Error())
 	}
-	p.log.Debugf("%s client recovered", logHeader)
+	log.Debugf("%s client recovered", logHeader)
 
-	p.config = config
-	p.client = client
-	if err := p.validatePluginConfig(); err != nil {
-		return fmt.Errorf("error validating plugin configuration: %s", err.Error())
+	pluginConfig := corev1.ConfigMap{}
+	ns, err := common.GetCurrentNamespace()
+	if err != nil {
+		return nil, fmt.Errorf("error getting current namespace: %s", err.Error())
 	}
 
-	return nil
+	err = client.Get(context.TODO(), types.NamespacedName{Name: common.PluginConfigMapName, Namespace: ns}, &pluginConfig)
+	if err != nil {
+		if !apierrors.IsNotFound(err) {
+			return nil, fmt.Errorf("error getting plugin configuration: %s", err.Error())
+		}
+		log.Warnf("%s configuration for hypershift OADP plugin not found", logHeader)
+	}
+
+	bp := &BackupPlugin{
+		log:    log,
+		client: client,
+		config: pluginConfig.Data,
+	}
+
+	if err := bp.validatePluginConfig(); err != nil {
+		return nil, fmt.Errorf("error validating plugin configuration: %s", err.Error())
+	}
+
+	return bp, nil
 }
 
 // Name is required to implement the interface, but the Velero pod does not delegate this
@@ -130,12 +143,11 @@ func (p *BackupPlugin) AppliesTo() (velero.ResourceSelector, error) {
 }
 
 // Execute allows the ItemAction to perform arbitrary logic with the item being backed up,
-// in this case, setting a custom annotation on the item being backed up.
 func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backup) (runtime.Unstructured, []velero.ResourceIdentifier, error) {
 	p.log.Debugf("%s Entering Hypershift backup plugin", logHeader)
-	var err error
+	//var err error
 
-	ctx := context.Context(context.TODO())
+	ctx := context.Context(context.Background())
 
 	switch item.GetObjectKind().GroupVersionKind().Kind {
 	case "HostedControlPlane":
@@ -159,29 +171,29 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 		}
 	}
 
-	if !p.dataUploadDone {
-		p.log.Debugf("%s DataUpload not finished yet", logHeader)
-		if item.GetObjectKind().GroupVersionKind().Kind == "Secret" {
-			p.log.Infof("%s Secret section reached", logHeader)
-			// This function will wait before the secrets got backed up.
-			// This is a workaround because of the limitations of velero plugins and hooks.
-			// We need to think how to acomplish that in a better way in the final solution.
-			if p.dataUploadDone, err = common.WaitForDataUpload(ctx, p.client, p.log, backup, p.dataUploadTimeout, p.dataUploadCheckPace); err != nil {
-				return nil, nil, err
-			}
-		}
-	} else {
-		p.log.Debugf("%s DataUpload done, unpausing HC and NPs", logHeader)
-		// Unpausing NodePools
-		if err := common.ManagePauseNodepools(ctx, p.client, p.log, "false", logHeader, backup.Spec.IncludedNamespaces); err != nil {
-			return nil, nil, fmt.Errorf("error unpausing NodePools: %v", err)
-		}
+	//if !p.dataUploadDone {
+	//	p.log.Debugf("%s DataUpload not finished yet", logHeader)
+	//	if item.GetObjectKind().GroupVersionKind().Kind == "Secret" {
+	//		p.log.Infof("%s Secret section reached", logHeader)
+	//		// This function will wait before the secrets got backed up.
+	//		// This is a workaround because of the limitations of velero plugins and hooks.
+	//		// We need to think how to acomplish that in a better way in the final solution.
+	//		if p.dataUploadDone, err = common.WaitForDataUpload(ctx, p.client, p.log, backup, p.dataUploadTimeout, p.dataUploadCheckPace); err != nil {
+	//			return nil, nil, err
+	//		}
+	//	}
+	//} else {
+	//	p.log.Debugf("%s DataUpload done, unpausing HC and NPs", logHeader)
+	//	// Unpausing NodePools
+	//	if err := common.ManagePauseNodepools(ctx, p.client, p.log, "false", logHeader, backup.Spec.IncludedNamespaces); err != nil {
+	//		return nil, nil, fmt.Errorf("error unpausing NodePools: %v", err)
+	//	}
 
-		// Unpausing HostedClusters
-		if err := common.ManagePauseHostedCluster(ctx, p.client, p.log, "false", logHeader, backup.Spec.IncludedNamespaces); err != nil {
-			return nil, nil, fmt.Errorf("error unpausing HostedClusters: %v", err)
-		}
-	}
+	//	// Unpausing HostedClusters
+	//	if err := common.ManagePauseHostedCluster(ctx, p.client, p.log, "false", logHeader, backup.Spec.IncludedNamespaces); err != nil {
+	//		return nil, nil, fmt.Errorf("error unpausing HostedClusters: %v", err)
+	//	}
+	//}
 
 	return item, nil, nil
 }

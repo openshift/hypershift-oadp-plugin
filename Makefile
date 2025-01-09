@@ -14,10 +14,7 @@
 
 PKG := github.com/openshift/hypershift-oadp-plugin
 BIN := hypershift-oadp-plugin
-
-REGISTRY ?= quay.io/jparrill
-IMAGE    ?= $(REGISTRY)/hypershift-oadp-plugin
-VERSION  ?= main
+IMG ?= hypershift-oadp-plugin:latest
 
 ARCH ?= amd64
 DOCKER_BUILD_ARGS ?= --platform=linux/$(ARCH)
@@ -35,19 +32,15 @@ ci: verify-modules local test
 
 .PHONY: docker-build
 docker-build:
-	docker build -t $(IMAGE):$(VERSION) . $(DOCKER_BUILD_ARGS)
+	docker build -t ${IMG} . $(DOCKER_BUILD_ARGS)
 
 .PHONY: docker-push
 docker-push:
-	@docker push $(IMAGE):$(VERSION)
-ifeq ($(TAG_LATEST), true)
-	docker tag $(IMAGE):$(VERSION) $(IMAGE):latest
-	docker push $(IMAGE):latest
-endif
+	@docker push $(IMG)
 
 .PHONY: modules
 modules:
-	go mod tidy -compat=1.23
+	go mod tidy -compat=1.22
 
 # verify-modules ensures Go module files are up to date
 .PHONY: verify-modules

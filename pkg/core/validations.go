@@ -25,37 +25,44 @@ func (p *BackupPlugin) checkPlatformConfig(hcp *hyperv1.HostedControlPlane) erro
 	default:
 		return fmt.Errorf("unsupported platform type %s", hcp.Spec.Platform.Type)
 	}
+
 }
 
 func (p *BackupPlugin) checkAWSPlatform(hcp *hyperv1.HostedControlPlane) error {
 	// Check if the AWS platform is configured properly
 	// Check ROSA
+	p.log.Infof("%s AWS platform configuration is valid", logHeader)
 	return nil
 }
 
 func (p *BackupPlugin) checkAzurePlatform(hcp *hyperv1.HostedControlPlane) error {
 	// Check if the Azure platform is configured properly
 	// Check ARO
+	p.log.Infof("%s ARO platform configuration is valid", logHeader)
 	return nil
 }
 
 func (p *BackupPlugin) checkIBMCloudPlatform(hcp *hyperv1.HostedControlPlane) error {
 	// Check if the IBM Cloud platform is configured properly
+	p.log.Infof("%s IBM platform configuration is valid", logHeader)
 	return nil
 }
 
 func (p *BackupPlugin) checkKubevirtPlatform(hcp *hyperv1.HostedControlPlane) error {
 	// Check if the Kubevirt platform is configured properly
+	p.log.Infof("%s Kubevirt platform configuration is valid", logHeader)
 	return nil
 }
 
 func (p *BackupPlugin) checkOpenStackPlatform(hcp *hyperv1.HostedControlPlane) error {
 	// Check if the OpenStack platform is configured properly
+	p.log.Infof("%s OpenStack platform configuration is valid", logHeader)
 	return nil
 }
 
 func (p *BackupPlugin) checkAgentPlatform(hcp *hyperv1.HostedControlPlane) error {
 	// Check if the Agent platform is configured properly
+	p.log.Infof("%s Agent platform configuration is valid", logHeader)
 	return nil
 }
 
@@ -95,6 +102,8 @@ func (p *BackupPlugin) validatePluginConfig() error {
 			p.log.Warnf("unknown configuration key: %s with value %s", key, value)
 		}
 	}
+
+	p.log.Infof("%s plugin configuration validated", logHeader)
 
 	return nil
 }

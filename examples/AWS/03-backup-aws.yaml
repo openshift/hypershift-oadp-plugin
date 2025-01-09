@@ -1,0 +1,44 @@
+apiVersion: velero.io/v1
+kind: Backup
+metadata:
+  name: hcp-aws-backup
+  namespace: openshift-adp
+  labels:
+    velero.io/storage-location: default
+spec:
+  includedNamespaces:
+  - clusters
+  - clusters-jparrill-hosted
+  includedResources:
+  - sa
+  - role
+  - rolebinding
+  - pod
+  - pvc
+  - pv
+  - configmap
+  - priorityclasses
+  - pdb
+  - hostedcluster
+  - nodepool
+  - secrets
+  - services
+  - deployments
+  - statefulsets
+  - hostedcontrolplane
+  - cluster
+  - awscluster
+  - awsmachinetemplate
+  - awsmachine
+  - machinedeployment
+  - machineset
+  - machine
+  - route
+  - clusterdeployment
+  excludedResources: []
+  storageLocation: dpa-instance-1
+  ttl: 720h0m0s
+  snapshotMoveData: true
+  datamover: "velero"
+  defaultVolumesToFsBackup: false
+  snapshotVolumes: true

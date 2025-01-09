@@ -16,7 +16,7 @@ func main() {
 }
 
 func newHCPBackupPlugin(logger logrus.FieldLogger) (interface{}, error) {
-	return core.NewBackupPlugin(logger), nil
+	return core.NewBackupPlugin(logger)
 }
 
 //func newHCPRestorePlugin(logger logrus.FieldLogger) (interface{}, error) {

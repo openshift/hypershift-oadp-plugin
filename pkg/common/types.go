@@ -10,6 +10,8 @@ const (
 	BackupStatusCompleted  BackupStatus  = "Completed"
 	RestoreDone            RestoreStatus = "true"
 
+	PluginConfigMapName string = "hypershift-oadp-plugin-config"
+
 	// Default values for the backup plugin.
 	defaultDataUploadTimeout    time.Duration = 30 // Minutes
 	defaultDataUploadCheckPace  time.Duration = 10 // Seconds
