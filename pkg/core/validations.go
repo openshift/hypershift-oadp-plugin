@@ -74,8 +74,8 @@ func (p *BackupPlugin) validatePluginConfig() error {
 			p.BackupOptions.migration = value == "true"
 		case "readoptNodes":
 			p.BackupOptions.readoptNodes = value == "true"
-		case "configureJob":
-			p.BackupOptions.configureJob.Name = value
+		case "configureJob", "schedule":
+			p.BackupOptions.configureJob.Name = p.config["configureJob"]
 			p.BackupOptions.configureJob.Schedule = p.config["schedule"]
 		case "managedServices":
 			p.BackupOptions.managedServices = value == "true"

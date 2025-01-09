@@ -108,8 +108,17 @@ func WaitForDataUpload(ctx context.Context, client crclient.Client, log logrus.F
 	return true, err
 }
 
-func WaitForPausedPropagated(ctx context.Context, client crclient.Client, log logrus.FieldLogger, hc *hyperv1.HostedCluster) error {
-	waitCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+func WaitForPausedPropagated(ctx context.Context, client crclient.Client, log logrus.FieldLogger, hc *hyperv1.HostedCluster, timeout time.Duration) error {
+	if timeout == 0 {
+		timeout = defaultWaitForPausedTimeout
+	}
+
+	log = log.WithFields(logrus.Fields{
+		"namespace": hc.Namespace,
+		"name":      hc.Name,
+	})
+
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	err := wait.PollUntilContextCancel(waitCtx, 5*time.Second, true, func(ctx context.Context) (bool, error) {
@@ -118,13 +127,13 @@ func WaitForPausedPropagated(ctx context.Context, client crclient.Client, log lo
 			if apierrors.IsNotFound(err) {
 				return true, nil
 			}
-			log.Error(err, "failed to get HostedControlPlane", "namespace", hc.Namespace, "name", hc.Name)
+			log.Error(err, "failed to get HostedControlPlane")
 			return false, err
 		}
-		log.Infof("waiting for HCP to be paused", "namespace", hc.Namespace, "name", hc.Name)
+		log.Infof("waiting for HCP to be paused")
 
 		if hcp.Spec.PausedUntil != nil {
-			log.Debug("HostedControlPlane is paused", "namespace", hc.Namespace, "name", hc.Name)
+			log.Debug("HostedControlPlane is paused")
 			return true, nil
 		}
 
@@ -132,7 +141,7 @@ func WaitForPausedPropagated(ctx context.Context, client crclient.Client, log lo
 	})
 
 	if err != nil {
-		log.Error(err, "giving up, HCP was not updated in the expecteed timeout", "namespace", hc.Namespace, "name", hc.Name)
+		log.Errorf("giving up, HCP was not updated in the expecteed timeout: %v", err)
 		return err
 	}
 
@@ -165,7 +174,7 @@ func ManagePauseHostedCluster(ctx context.Context, client crclient.Client, log l
 
 			// Checking the hc Object to validate the propagation of the PausedUntil field
 			log.Debugf("%s checking paused state propagation", header)
-			if err := WaitForPausedPropagated(ctx, client, log, &hc); err != nil {
+			if err := WaitForPausedPropagated(ctx, client, log, &hc, defaultWaitForPausedTimeout); err != nil {
 				return err
 			}
 		}

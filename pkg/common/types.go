@@ -11,8 +11,9 @@ const (
 	RestoreDone            RestoreStatus = "true"
 
 	// Default values for the backup plugin.
-	defaultDataUploadTimeout   time.Duration = 30 // Minutes
-	defaultDataUploadCheckPace time.Duration = 10 // Seconds
+	defaultDataUploadTimeout    time.Duration = 30 // Minutes
+	defaultDataUploadCheckPace  time.Duration = 10 // Seconds
+	defaultWaitForPausedTimeout time.Duration = 2 * time.Minute
 )
 
 type BackupStatus string
