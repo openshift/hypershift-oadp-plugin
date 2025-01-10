@@ -1,4 +1,4 @@
-package core
+package validation
 
 import (
 	"testing"
@@ -21,13 +21,11 @@ func TestValidatePluginConfig(t *testing.T) {
 		{
 			name: "valid config with all options",
 			config: map[string]string{
-				"migration":            "true",
-				"readoptNodes":         "true",
-				"configureJob":         "test-job",
-				"schedule":             "0 0 * * *",
-				"managedServices":      "true",
-				"dataUploadTimeout":    "60",
-				"dataUploadCheckPace":  "30",
+				"migration":           "true",
+				"readoptNodes":        "true",
+				"managedServices":     "true",
+				"dataUploadTimeout":   "60",
+				"dataUploadCheckPace": "30",
 			},
 			expectError: false,
 		},
@@ -49,12 +47,12 @@ func TestValidatePluginConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			p := &BackupPlugin{
-				log:    logrus.New(),
-				config: tt.config,
+			p := &BackupPluginValidator{
+				Log:       logrus.New(),
+				LogHeader: "[unit test]",
 			}
 
-			err := p.validatePluginConfig()
+			_, err := p.ValidatePluginConfig(tt.config)
 			if tt.expectError {
 				assert.Error(t, err)
 			} else {

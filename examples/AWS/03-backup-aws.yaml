@@ -36,7 +36,7 @@ spec:
   - route
   - clusterdeployment
   excludedResources: []
-  storageLocation: dpa-instance-1
+  storageLocation: default
   ttl: 720h0m0s
   snapshotMoveData: true
   datamover: "velero"

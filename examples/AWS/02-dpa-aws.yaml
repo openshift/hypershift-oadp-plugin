@@ -36,6 +36,7 @@ spec:
         - openshift
         - aws
         - kubevirt
+        - csi
       customPlugins:
         - name: hypershift-oadp-plugin
           image: quay.io/jparrill/hypershift-oadp-plugin:latest

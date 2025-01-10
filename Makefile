@@ -27,6 +27,11 @@ local: build-dirs
 test:
 	CGO_ENABLED=0 go test -v -timeout 60s ./...
 
+.PHONY: cover
+cover:
+	CGO_ENABLED=0 go test --cover -timeout 60s ./...
+
+
 .PHONY: ci
 ci: verify-modules local test
 
