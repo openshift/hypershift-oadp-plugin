@@ -28,8 +28,9 @@ spec:
           key: cloud
           name: cloud-credentials
   configuration:
-    restic:
-      enable: false
+    nodeAgent:
+      enable: true
+      uploaderType: kopia
     velero:
       defaultPlugins:
         - openshift

@@ -145,8 +145,6 @@ func (p *BackupPlugin) AppliesTo() (velero.ResourceSelector, error) {
 // Execute allows the ItemAction to perform arbitrary logic with the item being backed up,
 func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backup) (runtime.Unstructured, []velero.ResourceIdentifier, error) {
 	p.log.Debugf("%s Entering Hypershift backup plugin", logHeader)
-	//var err error
-
 	ctx := context.Context(context.Background())
 
 	switch item.GetObjectKind().GroupVersionKind().Kind {
@@ -171,29 +169,27 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 		}
 	}
 
-	//if !p.dataUploadDone {
-	//	p.log.Debugf("%s DataUpload not finished yet", logHeader)
-	//	if item.GetObjectKind().GroupVersionKind().Kind == "Secret" {
-	//		p.log.Infof("%s Secret section reached", logHeader)
-	//		// This function will wait before the secrets got backed up.
-	//		// This is a workaround because of the limitations of velero plugins and hooks.
-	//		// We need to think how to acomplish that in a better way in the final solution.
-	//		if p.dataUploadDone, err = common.WaitForDataUpload(ctx, p.client, p.log, backup, p.dataUploadTimeout, p.dataUploadCheckPace); err != nil {
-	//			return nil, nil, err
-	//		}
-	//	}
-	//} else {
-	//	p.log.Debugf("%s DataUpload done, unpausing HC and NPs", logHeader)
-	//	// Unpausing NodePools
-	//	if err := common.ManagePauseNodepools(ctx, p.client, p.log, "false", logHeader, backup.Spec.IncludedNamespaces); err != nil {
-	//		return nil, nil, fmt.Errorf("error unpausing NodePools: %v", err)
-	//	}
+	if !p.dataUploadDone {
+		var err error
+		p.log.Debugf("%s DataUpload not finished yet", logHeader)
+		if item.GetObjectKind().GroupVersionKind().Kind == "Secret" {
+			p.log.Infof("%s Secret section reached", logHeader)
+			if p.dataUploadDone, err = common.WaitForDataUpload(ctx, p.client, p.log, backup, p.dataUploadTimeout, p.dataUploadCheckPace); err != nil {
+				return nil, nil, err
+			}
+		}
+	} else {
+		p.log.Debugf("%s DataUpload done, unpausing HC and NPs", logHeader)
+		// Unpausing NodePools
+		if err := common.ManagePauseNodepools(ctx, p.client, p.log, "false", logHeader, backup.Spec.IncludedNamespaces); err != nil {
+			return nil, nil, fmt.Errorf("error unpausing NodePools: %v", err)
+		}
 
-	//	// Unpausing HostedClusters
-	//	if err := common.ManagePauseHostedCluster(ctx, p.client, p.log, "false", logHeader, backup.Spec.IncludedNamespaces); err != nil {
-	//		return nil, nil, fmt.Errorf("error unpausing HostedClusters: %v", err)
-	//	}
-	//}
+		// Unpausing HostedClusters
+		if err := common.ManagePauseHostedCluster(ctx, p.client, p.log, "false", logHeader, backup.Spec.IncludedNamespaces); err != nil {
+			return nil, nil, fmt.Errorf("error unpausing HostedClusters: %v", err)
+		}
+	}
 
 	return item, nil, nil
 }

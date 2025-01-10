@@ -25,7 +25,7 @@ metadata:
 spec:
   channel: "stable-1.4"
   name: redhat-oadp-operator
-  source: community-operators
+  source: redhat-operators
   sourceNamespace: openshift-marketplace
   startingCSV: oadp-operator.v1.4.1
   installPlanApproval: Automatic
