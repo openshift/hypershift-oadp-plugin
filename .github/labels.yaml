@@ -2,4 +2,5 @@
 # the label to a PR/Issue
 # See https://github.com/jpmcb/prow-github-actions/blob/main/docs/labeling.md
 area:
-- 'core-plugin'
+- 'backup-plugin'
+- 'restore-plugin'

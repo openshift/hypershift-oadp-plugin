@@ -48,8 +48,7 @@ func TestValidatePluginConfig(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			p := &BackupPluginValidator{
-				Log:       logrus.New(),
-				LogHeader: "[unit test]",
+				Log: logrus.New(),
 			}
 
 			_, err := p.ValidatePluginConfig(tt.config)

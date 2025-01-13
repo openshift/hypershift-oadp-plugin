@@ -3,7 +3,6 @@ package core
 import (
 	"context"
 	"fmt"
-	"time"
 
 	common "github.com/openshift/hypershift-oadp-plugin/pkg/common"
 	plugtypes "github.com/openshift/hypershift-oadp-plugin/pkg/core/types"
@@ -23,14 +22,9 @@ import (
 type RestorePlugin struct {
 	log logrus.FieldLogger
 
-	client      crclient.Client
-	config      map[string]string
-	validator   validation.RestoreValidator
-	pvTriggered bool
-
-	// uploadTimeout is the time in minutes to wait for the data upload to finish.
-	dataUploadTimeout time.Duration
-	dataUploadDone    bool
+	client    crclient.Client
+	config    map[string]string
+	validator validation.RestoreValidator
 
 	*plugtypes.RestoreOptions
 }
@@ -42,18 +36,20 @@ type RestoreOptions struct {
 	readoptNodes bool
 	// ManagedServices is a flag to indicate if the backup is done for ManagedServices like ROSA, ARO, etc.
 	managedServices bool
+	// AWSRegenPrivateLink is a flag to indicate if the PrivateLink should be regenerated in AWS.
+	awsRegenPrivateLink bool
 }
 
 // NewRestorePlugin instantiates RestorePlugin.
 func NewRestorePlugin(log logrus.FieldLogger) (*RestorePlugin, error) {
 	var err error
 
-	log.Infof("%s initializing hypershift OADP restore plugin", restoreLogHeader)
+	log.Info("initializing hypershift OADP restore plugin")
 	client, err := common.GetClient()
 	if err != nil {
 		return nil, fmt.Errorf("error recovering the k8s client: %s", err.Error())
 	}
-	log.Debugf("%s client recovered", restoreLogHeader)
+	log.Debug("client recovered")
 
 	pluginConfig := corev1.ConfigMap{}
 	ns, err := common.GetCurrentNamespace()
@@ -66,7 +62,7 @@ func NewRestorePlugin(log logrus.FieldLogger) (*RestorePlugin, error) {
 		if !apierrors.IsNotFound(err) {
 			return nil, fmt.Errorf("error getting plugin configuration: %s", err.Error())
 		}
-		log.Infof("%s configuration for hypershift OADP plugin not found", restoreLogHeader)
+		log.Info("configuration for hypershift OADP plugin not found")
 	}
 
 	rp := &RestorePlugin{
@@ -74,8 +70,7 @@ func NewRestorePlugin(log logrus.FieldLogger) (*RestorePlugin, error) {
 		client: client,
 		config: pluginConfig.Data,
 		validator: &validation.RestorePluginValidator{
-			Log:       log,
-			LogHeader: restoreLogHeader,
+			Log: log,
 		},
 	}
 
@@ -123,32 +118,33 @@ func (p *RestorePlugin) AppliesTo() (velero.ResourceSelector, error) {
 			"persistentvolumes",
 			"persistentvolumeclaims",
 			"pods",
+			"pvc",
+			"pv",
 		},
 	}, nil
 }
 
 func (p *RestorePlugin) Execute(item runtime.Unstructured, backup *velerov1.Backup) (runtime.Unstructured, []velero.ResourceIdentifier, error) {
-	p.log.Debugf("%s Entering Hypershift backup plugin", restoreLogHeader)
+	p.log.Debugf("Entering Hypershift backup plugin")
 	ctx := context.Context(context.Background())
 
 	switch item.GetObjectKind().GroupVersionKind().Kind {
 	case "HostedControlPlane":
-		p.log.Debugf("%s HostedControlPlane section reached", restoreLogHeader)
 		hcp := &hyperv1.HostedControlPlane{}
 		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(item.UnstructuredContent(), hcp); err != nil {
 			return nil, nil, fmt.Errorf("error converting item to HostedControlPlane: %v", err)
 		}
-		if err := p.validator.ValidatePlatformConfig(hcp); err != nil {
+		if err := p.validator.ValidatePlatformConfig(hcp, p.config); err != nil {
 			return nil, nil, fmt.Errorf("error checking platform configuration: %v", err)
 		}
 	case "HostedCluster", "NodePool", "pv", "pvc":
 		// Unpausing NodePools
-		if err := common.ManagePauseNodepools(ctx, p.client, p.log, "false", restoreLogHeader, backup.Spec.IncludedNamespaces); err != nil {
+		if err := common.ManagePauseNodepools(ctx, p.client, p.log, "false", backup.Spec.IncludedNamespaces); err != nil {
 			return nil, nil, fmt.Errorf("error unpausing NodePools: %v", err)
 		}
 
 		// Unpausing HostedClusters
-		if err := common.ManagePauseHostedCluster(ctx, p.client, p.log, "false", restoreLogHeader, backup.Spec.IncludedNamespaces); err != nil {
+		if err := common.ManagePauseHostedCluster(ctx, p.client, p.log, "false", backup.Spec.IncludedNamespaces); err != nil {
 			return nil, nil, fmt.Errorf("error unpausing HostedClusters: %v", err)
 		}
 

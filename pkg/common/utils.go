@@ -150,8 +150,8 @@ func WaitForPausedPropagated(ctx context.Context, client crclient.Client, log lo
 	return err
 }
 
-func ManagePauseHostedCluster(ctx context.Context, client crclient.Client, log logrus.FieldLogger, paused string, header string, namespaces []string) error {
-	log.Debugf("%s listing HostedClusters", header)
+func ManagePauseHostedCluster(ctx context.Context, client crclient.Client, log logrus.FieldLogger, paused string, namespaces []string) error {
+	log.Debug("listing HostedClusters")
 	hostedClusters := &hyperv1.HostedClusterList{
 		Items: []hyperv1.HostedCluster{},
 	}
@@ -162,21 +162,21 @@ func ManagePauseHostedCluster(ctx context.Context, client crclient.Client, log l
 		}
 
 		if len(hostedClusters.Items) > 0 {
-			log.Debugf("%s found HostedClusters in namespace %s", header, ns)
+			log.Debug("found HostedClusters in namespace %s", ns)
 			break
 		}
 	}
 
 	for _, hc := range hostedClusters.Items {
 		if hc.Spec.PausedUntil == nil || *hc.Spec.PausedUntil != paused {
-			log.Infof("%s setting PauseUntil to %s in HostedCluster %s", header, paused, hc.Name)
+			log.Infof("setting PauseUntil to %s in HostedCluster %s", paused, hc.Name)
 			hc.Spec.PausedUntil = ptr.To(paused)
 			if err := client.Update(ctx, &hc); err != nil {
 				return err
 			}
 
 			// Checking the hc Object to validate the propagation of the PausedUntil field
-			log.Debugf("%s checking paused state propagation", header)
+			log.Debug("checking paused state propagation")
 			if err := WaitForPausedPropagated(ctx, client, log, &hc, defaultWaitForPausedTimeout); err != nil {
 				return err
 			}
@@ -186,8 +186,8 @@ func ManagePauseHostedCluster(ctx context.Context, client crclient.Client, log l
 	return nil
 }
 
-func ManagePauseNodepools(ctx context.Context, client crclient.Client, log logrus.FieldLogger, paused string, header string, namespaces []string) error {
-	log.Debugf("%s listing NodePools, checking namespaces to inspect", header)
+func ManagePauseNodepools(ctx context.Context, client crclient.Client, log logrus.FieldLogger, paused string, namespaces []string) error {
+	log.Debug("listing NodePools, checking namespaces to inspect")
 	nodepools := &hyperv1.NodePoolList{}
 
 	for _, ns := range namespaces {
@@ -196,14 +196,14 @@ func ManagePauseNodepools(ctx context.Context, client crclient.Client, log logru
 		}
 
 		if len(nodepools.Items) > 0 {
-			log.Debugf("%s found NodePools in namespace %s", header, ns)
+			log.Debug("found NodePools in namespace %s", ns)
 			break
 		}
 	}
 
 	for _, np := range nodepools.Items {
 		if np.Spec.PausedUntil == nil || *np.Spec.PausedUntil != paused {
-			log.Infof("%s setting PauseUntil to %s in NodePool: %s", header, paused, np.Name)
+			log.Infof("%s setting PauseUntil to %s in NodePool: %s", paused, np.Name)
 			np.Spec.PausedUntil = ptr.To(paused)
 			if err := client.Update(ctx, &np); err != nil {
 				return err

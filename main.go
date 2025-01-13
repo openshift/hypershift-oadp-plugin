@@ -14,9 +14,17 @@ func main() {
 }
 
 func newHCPBackupPlugin(logger logrus.FieldLogger) (interface{}, error) {
-	return core.NewBackupPlugin(logger)
+	return core.NewBackupPlugin(logger.WithFields(
+		logrus.Fields{
+			"type": "core-backup",
+		},
+	))
 }
 
 func newHCPRestorePlugin(logger logrus.FieldLogger) (interface{}, error) {
-	return core.NewRestorePlugin(logger)
+	return core.NewRestorePlugin(logger.WithFields(
+		logrus.Fields{
+			"type": "core-restore",
+		},
+	))
 }

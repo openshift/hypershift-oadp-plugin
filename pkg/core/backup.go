@@ -19,16 +19,6 @@ import (
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-const (
-	backupPlugin  = "core-backup"
-	restorePlugin = "core-restore"
-)
-
-var (
-	backupLogHeader  = fmt.Sprintf("[%s]", backupPlugin)
-	restoreLogHeader = fmt.Sprintf("[%s]", restorePlugin)
-)
-
 // BackupPlugin is a backup item action plugin for Hypershift common objects.
 type BackupPlugin struct {
 	log logrus.FieldLogger
@@ -48,12 +38,12 @@ type BackupPlugin struct {
 // NewBackupPlugin instantiates BackupPlugin.
 func NewBackupPlugin(log logrus.FieldLogger) (*BackupPlugin, error) {
 	var err error
-	log.Infof("%s initializing hypershift OADP backup plugin", backupLogHeader)
+	log.Infof("initializing hypershift OADP backup plugin")
 	client, err := common.GetClient()
 	if err != nil {
 		return nil, fmt.Errorf("error recovering the k8s client: %s", err.Error())
 	}
-	log.Debugf("%s client recovered", backupLogHeader)
+	log.Debugf("client recovered")
 
 	pluginConfig := corev1.ConfigMap{}
 	ns, err := common.GetCurrentNamespace()
@@ -66,7 +56,7 @@ func NewBackupPlugin(log logrus.FieldLogger) (*BackupPlugin, error) {
 		if !apierrors.IsNotFound(err) {
 			return nil, fmt.Errorf("error getting plugin configuration: %s", err.Error())
 		}
-		log.Infof("%s configuration for hypershift OADP plugin not found", backupLogHeader)
+		log.Infof("configuration for hypershift OADP plugin not found")
 	}
 
 	bp := &BackupPlugin{
@@ -74,8 +64,7 @@ func NewBackupPlugin(log logrus.FieldLogger) (*BackupPlugin, error) {
 		client: client,
 		config: pluginConfig.Data,
 		validator: &validation.BackupPluginValidator{
-			Log:       log,
-			LogHeader: backupLogHeader,
+			Log: log,
 		},
 	}
 
@@ -131,18 +120,19 @@ func (p *BackupPlugin) AppliesTo() (velero.ResourceSelector, error) {
 			"persistentvolumes",
 			"persistentvolumeclaims",
 			"pods",
+			"pvc",
+			"pv",
 		},
 	}, nil
 }
 
 // Execute allows the ItemAction to perform arbitrary logic with the item being backed up,
 func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backup) (runtime.Unstructured, []velero.ResourceIdentifier, error) {
-	p.log.Debugf("%s Entering Hypershift backup plugin", backupLogHeader)
+	p.log.Debug("Entering Hypershift backup plugin")
 	ctx := context.Context(context.Background())
 
 	switch item.GetObjectKind().GroupVersionKind().Kind {
 	case "HostedControlPlane":
-		p.log.Debugf("%s HostedControlPlane section reached", backupLogHeader)
 		hcp := &hyperv1.HostedControlPlane{}
 		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(item.UnstructuredContent(), hcp); err != nil {
 			return nil, nil, fmt.Errorf("error converting item to HostedControlPlane: %v", err)
@@ -152,12 +142,12 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 		}
 	case "HostedCluster", "NodePool", "pv", "pvc":
 		// Pausing HostedClusters
-		if err := common.ManagePauseHostedCluster(ctx, p.client, p.log, "true", backupLogHeader, backup.Spec.IncludedNamespaces); err != nil {
+		if err := common.ManagePauseHostedCluster(ctx, p.client, p.log, "true", backup.Spec.IncludedNamespaces); err != nil {
 			return nil, nil, fmt.Errorf("error pausing HostedClusters: %v", err)
 		}
 
 		// Pausing NodePools
-		if err := common.ManagePauseNodepools(ctx, p.client, p.log, "true", backupLogHeader, backup.Spec.IncludedNamespaces); err != nil {
+		if err := common.ManagePauseNodepools(ctx, p.client, p.log, "true", backup.Spec.IncludedNamespaces); err != nil {
 			return nil, nil, fmt.Errorf("error pausing NodePools: %v", err)
 		}
 
@@ -169,23 +159,23 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 
 	if !p.dataUploadDone {
 		var err error
-		p.log.Debugf("%s DataUpload not finished yet", backupLogHeader)
+		p.log.Debug("DataUpload not finished yet")
 		if p.pvTriggered {
 			if p.dataUploadDone, err = common.WaitForDataUpload(ctx, p.client, p.log, backup, p.dataUploadTimeout, p.DataUploadCheckPace); err != nil {
 				return nil, nil, err
 			}
 		}
 	} else {
-		p.log.Debugf("%s DataUpload done, unpausing HC and NPs", backupLogHeader)
+		p.log.Debug("DataUpload done, unpausing HC and NPs")
 		// If the config is set to migration: true, the NodePools and HostedClusters will not be unpaused
 		if !p.Migration {
 			// Unpausing NodePools
-			if err := common.ManagePauseNodepools(ctx, p.client, p.log, "false", backupLogHeader, backup.Spec.IncludedNamespaces); err != nil {
+			if err := common.ManagePauseNodepools(ctx, p.client, p.log, "false", backup.Spec.IncludedNamespaces); err != nil {
 				return nil, nil, fmt.Errorf("error unpausing NodePools: %v", err)
 			}
 
 			// Unpausing HostedClusters
-			if err := common.ManagePauseHostedCluster(ctx, p.client, p.log, "false", backupLogHeader, backup.Spec.IncludedNamespaces); err != nil {
+			if err := common.ManagePauseHostedCluster(ctx, p.client, p.log, "false", backup.Spec.IncludedNamespaces); err != nil {
 				return nil, nil, fmt.Errorf("error unpausing HostedClusters: %v", err)
 			}
 		}

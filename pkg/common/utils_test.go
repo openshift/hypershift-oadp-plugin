@@ -102,7 +102,6 @@ func TestManagePauseHostedCluster(t *testing.T) {
 		name       string
 		namespaces []string
 		paused     string
-		header     string
 		hcList     *hyperv1.HostedClusterList
 		expectErr  bool
 	}{
@@ -110,7 +109,6 @@ func TestManagePauseHostedCluster(t *testing.T) {
 			name:       "Pause HostedCluster",
 			namespaces: []string{"test-namespace"},
 			paused:     "true",
-			header:     "TestHeader",
 			hcList: &hyperv1.HostedClusterList{
 				Items: []hyperv1.HostedCluster{
 					{
@@ -130,7 +128,6 @@ func TestManagePauseHostedCluster(t *testing.T) {
 			name:       "Already paused HostedCluster",
 			namespaces: []string{"test-namespace"},
 			paused:     "true",
-			header:     "TestHeader",
 			hcList: &hyperv1.HostedClusterList{
 				Items: []hyperv1.HostedCluster{
 					{
@@ -150,7 +147,6 @@ func TestManagePauseHostedCluster(t *testing.T) {
 			name:       "No HostedCluster found",
 			namespaces: []string{"test-namespace"},
 			paused:     "true",
-			header:     "TestHeader",
 			hcList:     &hyperv1.HostedClusterList{},
 			expectErr:  false,
 		},
@@ -165,7 +161,7 @@ func TestManagePauseHostedCluster(t *testing.T) {
 			client := fake.NewClientBuilder().WithScheme(scheme).WithLists(tt.hcList).Build()
 			log := logrus.New()
 
-			err := ManagePauseHostedCluster(context.TODO(), client, log, tt.paused, tt.header, tt.namespaces)
+			err := ManagePauseHostedCluster(context.TODO(), client, log, tt.paused, tt.namespaces)
 			if tt.expectErr {
 				g.Expect(err).To(HaveOccurred())
 			} else {
@@ -248,7 +244,7 @@ func TestManagePauseNodepools(t *testing.T) {
 			client := fake.NewClientBuilder().WithScheme(scheme).WithLists(tt.npList).Build()
 			log := logrus.New()
 
-			err := ManagePauseNodepools(context.TODO(), client, log, tt.paused, tt.header, tt.namespaces)
+			err := ManagePauseNodepools(context.TODO(), client, log, tt.paused, tt.namespaces)
 			if tt.expectErr {
 				g.Expect(err).To(HaveOccurred())
 			} else {

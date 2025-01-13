@@ -16,13 +16,12 @@ type BackupValidator interface {
 }
 
 type BackupPluginValidator struct {
-	Log       logrus.FieldLogger
-	LogHeader string
+	Log logrus.FieldLogger
 }
 
 func (p *BackupPluginValidator) ValidatePluginConfig(config map[string]string) (*plugtypes.BackupOptions, error) {
 	// Validate the plugin configuration
-	p.Log.Debugf("%s validating plugin configuration", p.LogHeader)
+	p.Log.Debug("validating plugin configuration")
 	if len(config) == 0 {
 		p.Log.Debug("no configuration provided")
 		return &plugtypes.BackupOptions{}, nil
@@ -30,7 +29,7 @@ func (p *BackupPluginValidator) ValidatePluginConfig(config map[string]string) (
 	bo := &plugtypes.BackupOptions{}
 
 	for key, value := range config {
-		p.Log.Debugf("%s configuration key: %s, value: %s", p.LogHeader, key, value)
+		p.Log.Debugf("configuration key: %s, value: %s", key, value)
 		switch key {
 		case "migration":
 			bo.Migration = value == "true"
@@ -55,7 +54,7 @@ func (p *BackupPluginValidator) ValidatePluginConfig(config map[string]string) (
 		}
 	}
 
-	p.Log.Infof("%s plugin configuration validated", p.LogHeader)
+	p.Log.Infof("plugin configuration validated")
 
 	return bo, nil
 
@@ -84,37 +83,37 @@ func (p *BackupPluginValidator) ValidatePlatformConfig(hcp *hyperv1.HostedContro
 func (p *BackupPluginValidator) checkAWSPlatform(hcp *hyperv1.HostedControlPlane) error {
 	// Check if the AWS platform is configured properly
 	// Check ROSA
-	p.Log.Infof("%s AWS platform configuration is valid for HCP: %s", p.LogHeader, hcp.Name)
+	p.Log.Infof("AWS platform configuration is valid for HCP: %s", hcp.Name)
 	return nil
 }
 
 func (p *BackupPluginValidator) checkAzurePlatform(hcp *hyperv1.HostedControlPlane) error {
 	// Check if the Azure platform is configured properly
 	// Check ARO
-	p.Log.Infof("%s ARO platform configuration is valid for HCP: %s", p.LogHeader, hcp.Name)
+	p.Log.Infof("ARO platform configuration is valid for HCP: %s", hcp.Name)
 	return nil
 }
 
 func (p *BackupPluginValidator) checkIBMCloudPlatform(hcp *hyperv1.HostedControlPlane) error {
 	// Check if the IBM Cloud platform is configured properly
-	p.Log.Infof("%s IBM platform configuration is valid for HCP: %s", p.LogHeader, hcp.Name)
+	p.Log.Infof("IBM platform configuration is valid for HCP: %s", hcp.Name)
 	return nil
 }
 
 func (p *BackupPluginValidator) checkKubevirtPlatform(hcp *hyperv1.HostedControlPlane) error {
 	// Check if the Kubevirt platform is configured properly
-	p.Log.Infof("%s Kubevirt platform configuration is valid for HCP: %s", p.LogHeader, hcp.Name)
+	p.Log.Infof("Kubevirt platform configuration is valid for HCP: %s", hcp.Name)
 	return nil
 }
 
 func (p *BackupPluginValidator) checkOpenStackPlatform(hcp *hyperv1.HostedControlPlane) error {
 	// Check if the OpenStack platform is configured properly
-	p.Log.Infof("%s OpenStack platform configuration is valid for HCP: %s", p.LogHeader, hcp.Name)
+	p.Log.Infof("OpenStack platform configuration is valid for HCP: %s", hcp.Name)
 	return nil
 }
 
 func (p *BackupPluginValidator) checkAgentPlatform(hcp *hyperv1.HostedControlPlane) error {
 	// Check if the Agent platform is configured properly
-	p.Log.Infof("%s Agent platform configuration is valid for HCP: %s", p.LogHeader, hcp.Name)
+	p.Log.Infof("Agent platform configuration is valid for HCP: %s", hcp.Name)
 	return nil
 }
