@@ -1,4 +1,4 @@
-apiVersion: cluster.open-cluster-management.io/v1beta1
+apiVersion: velero.io/v1
 kind: Restore
 metadata:
   name: hcp-aws-restore
@@ -6,7 +6,7 @@ metadata:
 spec:
   includedNamespaces:
   - clusters
-  - clusters-jparrill-hosted
+  - clusters-example-hosted
   backupName: hcp-aws-backup
   cleanupBeforeRestore: CleanupRestored
   veleroManagedClustersBackupName: hcp-aws-backup
@@ -16,12 +16,9 @@ spec:
   preserveNodePorts: true
   existingResourcePolicy: update
   excludedResources:
-  - pod
   - nodes
   - events
   - events.events.k8s.io
   - backups.velero.io
   - restores.velero.io
   - resticrepositories.velero.io
-  - pv
-  - pvc

@@ -23,7 +23,7 @@ type RestorePluginValidator struct {
 
 func (p *RestorePluginValidator) ValidatePluginConfig(config map[string]string) (*plugtypes.RestoreOptions, error) {
 	// Validate the plugin configuration
-	p.Log.Debugf("%s validating plugin configuration", p.LogHeader)
+	p.Log.Debug("validating plugin configuration")
 	if len(config) == 0 {
 		p.Log.Debug("no configuration provided")
 		return &plugtypes.RestoreOptions{}, nil

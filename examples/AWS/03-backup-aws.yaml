@@ -8,7 +8,7 @@ metadata:
 spec:
   includedNamespaces:
   - clusters
-  - clusters-jparrill-hosted
+  - clusters-example-hosted
   includedResources:
   - sa
   - role

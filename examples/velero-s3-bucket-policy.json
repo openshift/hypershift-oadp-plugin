@@ -23,7 +23,7 @@
                 "s3:ListMultipartUploadParts"
             ],
             "Resource": [
-                "arn:aws:s3:::jparrill-oadp/*"
+                "arn:aws:s3:::example-oadp/*"
             ]
         },
         {
@@ -34,7 +34,7 @@
                 "s3:ListBucketMultipartUploads"
             ],
             "Resource": [
-                "arn:aws:s3:::jparrill-oadp"
+                "arn:aws:s3:::example-oadp"
             ]
         }
     ]
