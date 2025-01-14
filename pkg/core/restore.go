@@ -9,7 +9,6 @@ import (
 	validation "github.com/openshift/hypershift-oadp-plugin/pkg/core/validation"
 	hyperv1 "github.com/openshift/hypershift/api/hypershift/v1beta1"
 	"github.com/sirupsen/logrus"
-	velerov1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -124,31 +123,32 @@ func (p *RestorePlugin) AppliesTo() (velero.ResourceSelector, error) {
 	}, nil
 }
 
-func (p *RestorePlugin) Execute(item runtime.Unstructured, backup *velerov1.Backup) (runtime.Unstructured, []velero.ResourceIdentifier, error) {
-	p.log.Debugf("Entering Hypershift backup plugin")
+func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*velero.RestoreItemActionExecuteOutput, error) {
+
+	p.log.Debugf("Entering Hypershift restore plugin")
 	ctx := context.Context(context.Background())
 
-	switch item.GetObjectKind().GroupVersionKind().Kind {
+	switch input.Item.GetObjectKind().GroupVersionKind().Kind {
 	case "HostedControlPlane":
 		hcp := &hyperv1.HostedControlPlane{}
-		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(item.UnstructuredContent(), hcp); err != nil {
-			return nil, nil, fmt.Errorf("error converting item to HostedControlPlane: %v", err)
+		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(input.Item.UnstructuredContent(), hcp); err != nil {
+			return nil, fmt.Errorf("error converting item to HostedControlPlane: %v", err)
 		}
 		if err := p.validator.ValidatePlatformConfig(hcp, p.config); err != nil {
-			return nil, nil, fmt.Errorf("error checking platform configuration: %v", err)
+			return nil, fmt.Errorf("error checking platform configuration: %v", err)
 		}
 	case "HostedCluster", "NodePool", "pv", "pvc":
 		// Unpausing NodePools
-		if err := common.ManagePauseNodepools(ctx, p.client, p.log, "false", backup.Spec.IncludedNamespaces); err != nil {
-			return nil, nil, fmt.Errorf("error unpausing NodePools: %v", err)
+		if err := common.ManagePauseNodepools(ctx, p.client, p.log, "false", input.Restore.Spec.IncludedNamespaces); err != nil {
+			return nil, fmt.Errorf("error unpausing NodePools: %v", err)
 		}
 
 		// Unpausing HostedClusters
-		if err := common.ManagePauseHostedCluster(ctx, p.client, p.log, "false", backup.Spec.IncludedNamespaces); err != nil {
-			return nil, nil, fmt.Errorf("error unpausing HostedClusters: %v", err)
+		if err := common.ManagePauseHostedCluster(ctx, p.client, p.log, "false", input.Restore.Spec.IncludedNamespaces); err != nil {
+			return nil, fmt.Errorf("error unpausing HostedClusters: %v", err)
 		}
 
 	}
 
-	return item, nil, nil
+	return velero.NewRestoreItemActionExecuteOutput(input.Item), nil
 }
