@@ -1,0 +1,48 @@
+apiVersion: velero.io/v1
+kind: Backup
+metadata:
+  name: hosted-backup
+  namespace: open-cluster-management-backup
+  labels:
+    velero.io/storage-location: default
+spec:
+  includedNamespaces:
+  - clusters
+  - clusters-hosted-0
+  - infraenv-0
+  includedResources:
+  - sa
+  - role
+  - rolebinding
+  - pod
+  - pvc
+  - pv
+  - bmh
+  - configmap
+  - infraenv
+  - priorityclasses
+  - pdb
+  - agents
+  - hostedcluster
+  - nodepool
+  - secrets
+  - services
+  - deployments
+  - statefulsets
+  - hostedcontrolplane
+  - cluster
+  - agentcluster
+  - agentmachinetemplate
+  - agentmachine
+  - machinedeployment
+  - machineset
+  - machine
+  - route
+  - clusterdeployment
+  excludedResources: []
+  storageLocation: oadp-minio-1
+  ttl: 720h0m0s
+  snapshotMoveData: true
+  datamover: "velero"
+  defaultVolumesToFsBackup: false
+  snapshotVolumes: true
