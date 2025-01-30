@@ -24,5 +24,3 @@ spec:
   - backups.velero.io
   - restores.velero.io
   - resticrepositories.velero.io
-  - pv
-  - pvc

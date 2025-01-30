@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	common "github.com/openshift/hypershift-oadp-plugin/pkg/common"
 	plugtypes "github.com/openshift/hypershift-oadp-plugin/pkg/core/types"
@@ -12,6 +13,7 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -86,50 +88,33 @@ func (p *RestorePlugin) Name() string {
 
 func (p *RestorePlugin) AppliesTo() (velero.ResourceSelector, error) {
 	return velero.ResourceSelector{
-		IncludedResources: []string{
-			"hostedcluster",
-			"nodepool",
-			"secrets",
-			"hostedcontrolplane",
-			"cluster",
-			"machinedeployment",
-			"machineset",
-			"machine",
-			"machinepools",
-			"agentmachines",
-			"agentmachinetemplates",
-			"awsmachinepools",
-			"awsmachines",
-			"awsmachinetemplates",
-			"azuremachines",
-			"azuremachinetemplates",
-			"azuremanagedmachinepools",
-			"azuremanagedmachinepooltemplates",
-			"controllerconfigs",
-			"ibmpowervsmachines",
-			"ibmpowervsmachinetemplates",
-			"ibmvpcmachines",
-			"ibmvpcmachinetemplates",
-			"kubevirtmachines",
-			"kubevirtmachinetemplates",
-			"openstackmachines",
-			"openstackmachinetemplates",
-			"persistentvolumes",
-			"persistentvolumeclaims",
-			"pods",
-			"pvc",
-			"pv",
-		},
+		IncludedResources: slices.Concat(
+			plugtypes.BackupCommonResources,
+			plugtypes.BackupAWSResources,
+			plugtypes.BackupAzureResources,
+			plugtypes.BackupIBMPowerVSResources,
+			plugtypes.BackupOpenStackResources,
+			plugtypes.BackupKubevirtResources,
+			plugtypes.BackupAgentResources,
+		),
 	}, nil
 }
 
 func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*velero.RestoreItemActionExecuteOutput, error) {
-
 	p.log.Debugf("Entering Hypershift restore plugin")
 	ctx := context.Context(context.Background())
 
-	switch input.Item.GetObjectKind().GroupVersionKind().Kind {
-	case "HostedControlPlane":
+	kind := input.Item.GetObjectKind().GroupVersionKind().Kind
+	switch {
+	case common.MatchSuffixKind(kind, "clusters", "machines"):
+		metadata, err := meta.Accessor(input.Item)
+		if err != nil {
+			return nil, fmt.Errorf("error getting metadata accessor: %v", err)
+		}
+		p.log.Debugf("Removing Annotation: %s to %s", common.CAPIPausedAnnotationName, metadata.GetName())
+		common.RemoveAnnotation(metadata, common.CAPIPausedAnnotationName)
+
+	case kind == "HostedControlPlane":
 		hcp := &hyperv1.HostedControlPlane{}
 		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(input.Item.UnstructuredContent(), hcp); err != nil {
 			return nil, fmt.Errorf("error converting item to HostedControlPlane: %v", err)
@@ -137,7 +122,8 @@ func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*v
 		if err := p.validator.ValidatePlatformConfig(hcp, p.config); err != nil {
 			return nil, fmt.Errorf("error checking platform configuration: %v", err)
 		}
-	case "HostedCluster", "NodePool", "pv", "pvc":
+
+	case common.MainKinds[kind]:
 		// Unpausing NodePools
 		if err := common.ManagePauseNodepools(ctx, p.client, p.log, "false", input.Restore.Spec.IncludedNamespaces); err != nil {
 			return nil, fmt.Errorf("error unpausing NodePools: %v", err)

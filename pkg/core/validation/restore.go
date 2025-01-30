@@ -62,7 +62,7 @@ func (p *RestorePluginValidator) ValidatePlatformConfig(hcp *hyperv1.HostedContr
 		return p.validateKubevirtPlatform(hcp, config)
 	case hyperv1.OpenStackPlatform:
 		return p.validateOpenStackPlatform(hcp, config)
-	case hyperv1.AgentPlatform:
+	case hyperv1.AgentPlatform, hyperv1.NonePlatform:
 		return p.validateAgentPlatform(hcp, config)
 	default:
 		return fmt.Errorf("unsupported platform type %s", hcp.Spec.Platform.Type)
