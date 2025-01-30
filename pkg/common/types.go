@@ -3,6 +3,8 @@ package common
 import "time"
 
 const (
+	CAPIPausedAnnotationName string = "cluster.x-k8s.io/paused"
+
 	CommonBackupAnnotationName  string = "hypershift.openshift.io/common-backup-plugin"
 	CommonRestoreAnnotationName string = "hypershift.openshift.io/common-restore-plugin"
 
@@ -16,6 +18,15 @@ const (
 	defaultDataUploadTimeout    time.Duration = 30 // Minutes
 	defaultDataUploadCheckPace  time.Duration = 10 // Seconds
 	defaultWaitForPausedTimeout time.Duration = 2 * time.Minute
+)
+
+var (
+	MainKinds = map[string]bool{
+		"HostedCluster": true,
+		"NodePool":      true,
+		"pv":            true,
+		"pvc":           true,
+	}
 )
 
 type BackupStatus string

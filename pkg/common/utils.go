@@ -251,3 +251,31 @@ func GetCurrentNamespace() (string, error) {
 	}
 	return string(namespace), nil
 }
+
+func MatchSuffixKind(kind string, suffixes ...string) bool {
+	for _, suffix := range suffixes {
+		if strings.HasSuffix(kind, suffix) {
+			return true
+		}
+	}
+	return false
+
+}
+
+func AddAnnotation(metadata metav1.Object, key, value string) {
+	annotations := metadata.GetAnnotations()
+	if annotations == nil {
+		annotations = make(map[string]string)
+	}
+	annotations[key] = value
+	metadata.SetAnnotations(annotations)
+}
+
+func RemoveAnnotation(metadata metav1.Object, key string) {
+	annotations := metadata.GetAnnotations()
+	if annotations == nil {
+		return
+	}
+	delete(annotations, key)
+	metadata.SetAnnotations(annotations)
+}

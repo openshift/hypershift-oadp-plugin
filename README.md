@@ -9,7 +9,7 @@ This velero/OADP plugin is designed to perform backup and restore of HostedContr
 3. Create the Cloud credentials for you storage provider to store the backups (In this case AWS)
 ```
 kubectl create secret generic cloud-credentials \
-    --namespace openshift-oadp \
+    --namespace openshift-adp \
     --from-file cloud=<AWS_CREDS_FILE>
 ```
 4. Create the DataProtectionApplication (sample in `examples` folder)

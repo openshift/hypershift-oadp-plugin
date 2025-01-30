@@ -1,27 +1,38 @@
 apiVersion: oadp.openshift.io/v1alpha1
 kind: DataProtectionApplication
 metadata:
-  name: oadp-minio
-  namespace: open-cluster-management-backup
+  name: dpa-instance
+  namespace: openshift-adp
 spec:
   backupLocations:
-    - velero:
+    - name: default
+      velero:
         config:
-          profile: default
           region: minio
+          profile: "default"
           s3ForcePathStyle: 'true'
-          s3Url: 'http://minio-minio.apps.ocp-edge-cluster-0.qe.lab.redhat.com'
+          s3Url: 'http://registry.hypershiftbm-2.lab:9002'
         credential:
           key: cloud
           name: cloud-credentials
         default: true
         objectStorage:
-          bucket: dr4hub
-          prefix: velero
+          bucket: jparrill-oadp
+          prefix: backup-objects
         provider: aws
+  snapshotLocations:
+    - velero:
+        provider: aws
+        config:
+          region: minio
+          profile: default
+        credential:
+          key: cloud
+          name: cloud-credentials
   configuration:
-    restic:
-      enable: false
+    nodeAgent:
+      enable: true
+      uploaderType: kopia
     velero:
       defaultPlugins:
         - openshift
@@ -31,9 +42,3 @@ spec:
       customPlugins:
         - name: hypershift-oadp-plugin
           image: quay.io/hypershift/hypershift-oadp-plugin:latest
-  snapshotLocations:
-    - velero:
-        config:
-          profile: default
-          region: minio
-        provider: aws

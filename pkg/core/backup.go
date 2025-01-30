@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	common "github.com/openshift/hypershift-oadp-plugin/pkg/common"
@@ -14,6 +15,7 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -89,38 +91,15 @@ func (p *BackupPlugin) Name() string {
 // selector. A zero-valued ResourceSelector matches all resources.
 func (p *BackupPlugin) AppliesTo() (velero.ResourceSelector, error) {
 	return velero.ResourceSelector{
-		IncludedResources: []string{
-			"hostedcluster",
-			"nodepool",
-			"secrets",
-			"hostedcontrolplane",
-			"cluster",
-			"machinedeployment",
-			"machineset",
-			"machine",
-			"machinepools",
-			"agentmachines",
-			"agentmachinetemplates",
-			"awsmachinepools",
-			"awsmachines",
-			"awsmachinetemplates",
-			"azuremachines",
-			"azuremachinetemplates",
-			"azuremanagedmachinepools",
-			"azuremanagedmachinepooltemplates",
-			"controllerconfigs",
-			"ibmpowervsmachines",
-			"ibmpowervsmachinetemplates",
-			"ibmvpcmachines",
-			"ibmvpcmachinetemplates",
-			"kubevirtmachines",
-			"kubevirtmachinetemplates",
-			"openstackmachines",
-			"openstackmachinetemplates",
-			"persistentvolumes",
-			"persistentvolumeclaims",
-			"pods",
-		},
+		IncludedResources: slices.Concat(
+			plugtypes.BackupCommonResources,
+			plugtypes.BackupAWSResources,
+			plugtypes.BackupAzureResources,
+			plugtypes.BackupIBMPowerVSResources,
+			plugtypes.BackupOpenStackResources,
+			plugtypes.BackupKubevirtResources,
+			plugtypes.BackupAgentResources,
+		),
 	}, nil
 }
 
@@ -129,8 +108,17 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 	p.log.Debug("Entering Hypershift backup plugin")
 	ctx := context.Context(context.Background())
 
-	switch item.GetObjectKind().GroupVersionKind().Kind {
-	case "HostedControlPlane":
+	kind := item.GetObjectKind().GroupVersionKind().Kind
+	switch {
+	case common.MatchSuffixKind(kind, "clusters", "machines"):
+		metadata, err := meta.Accessor(item)
+		if err != nil {
+			return nil, nil, fmt.Errorf("error getting metadata accessor: %v", err)
+		}
+		p.log.Debugf("Adding Annotation: %s to %s", common.CAPIPausedAnnotationName, metadata.GetName())
+		common.AddAnnotation(metadata, common.CAPIPausedAnnotationName, "true")
+
+	case kind == "HostedControlPlane":
 		hcp := &hyperv1.HostedControlPlane{}
 		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(item.UnstructuredContent(), hcp); err != nil {
 			return nil, nil, fmt.Errorf("error converting item to HostedControlPlane: %v", err)
@@ -138,7 +126,8 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 		if err := p.validator.ValidatePlatformConfig(hcp); err != nil {
 			return nil, nil, fmt.Errorf("error checking platform configuration: %v", err)
 		}
-	case "HostedCluster", "NodePool", "pv", "pvc":
+
+	case common.MainKinds[kind]:
 		// Pausing HostedClusters
 		if err := common.ManagePauseHostedCluster(ctx, p.client, p.log, "true", backup.Spec.IncludedNamespaces); err != nil {
 			return nil, nil, fmt.Errorf("error pausing HostedClusters: %v", err)
@@ -164,9 +153,9 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 			}
 		}
 	} else {
-		p.log.Debug("DataUpload done, unpausing HC and NPs")
 		// If the config is set to migration: true, the NodePools and HostedClusters will not be unpaused
 		if !p.Migration {
+			p.log.Debug("DataUpload done, unpausing HC and NPs")
 			// Unpausing NodePools
 			if err := common.ManagePauseNodepools(ctx, p.client, p.log, "false", backup.Spec.IncludedNamespaces); err != nil {
 				return nil, nil, fmt.Errorf("error unpausing NodePools: %v", err)
@@ -176,6 +165,14 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 			if err := common.ManagePauseHostedCluster(ctx, p.client, p.log, "false", backup.Spec.IncludedNamespaces); err != nil {
 				return nil, nil, fmt.Errorf("error unpausing HostedClusters: %v", err)
 			}
+		} else {
+			p.log.Debug("Migration backup detected, adding preserverOnDelete to ClusterDeployment object")
+			//	clusterdDeployment := &hivev1.ClusterDeployment{}
+			//	if err := p.client.List(ctx, clusterdDeployment, crclient.InNamespace(backup.Namespace)); err != nil {
+			//		return nil, nil, fmt.Errorf("error listing ClusterDeployments: %v", err)
+			//	}
+			// TODO (jparrill): Add preserverOnDelete to ClusterDeployment object and fix Hive import
+
 		}
 	}
 
