@@ -22,10 +22,10 @@ const (
 
 var (
 	MainKinds = map[string]bool{
-		"HostedCluster": true,
-		"NodePool":      true,
-		"pv":            true,
-		"pvc":           true,
+		"HostedCluster":         true,
+		"NodePool":              true,
+		"PersistentVolume":      true,
+		"PersistentVolumeClaim": true,
 	}
 )
 
