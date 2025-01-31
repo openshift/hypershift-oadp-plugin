@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 
+	hive "github.com/openshift/hive/apis/hive/v1"
 	common "github.com/openshift/hypershift-oadp-plugin/pkg/common"
 	plugtypes "github.com/openshift/hypershift-oadp-plugin/pkg/core/types"
 	validation "github.com/openshift/hypershift-oadp-plugin/pkg/core/validation"
@@ -132,6 +133,19 @@ func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*v
 		// Unpausing HostedClusters
 		if err := common.ManagePauseHostedCluster(ctx, p.client, p.log, "false", input.Restore.Spec.IncludedNamespaces); err != nil {
 			return nil, fmt.Errorf("error unpausing HostedClusters: %v", err)
+		}
+
+	case kind == "ClusterDeployment":
+		clusterdDeployment := &hive.ClusterDeployment{}
+		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(input.Item.UnstructuredContent(), clusterdDeployment); err != nil {
+			return nil, fmt.Errorf("error converting item to CusterdDeployment: %v", err)
+		}
+
+		clusterDeploymentCP := clusterdDeployment.DeepCopy()
+		clusterDeploymentCP.Spec.PreserveOnDelete = true
+
+		if err := p.client.Update(ctx, clusterDeploymentCP); err != nil {
+			return nil, fmt.Errorf("error updating ClusterDeployment resource with PreserveOnDelete option: %w", err)
 		}
 
 	}

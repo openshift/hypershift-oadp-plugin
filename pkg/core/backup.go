@@ -9,6 +9,7 @@ import (
 	common "github.com/openshift/hypershift-oadp-plugin/pkg/common"
 	plugtypes "github.com/openshift/hypershift-oadp-plugin/pkg/core/types"
 	validation "github.com/openshift/hypershift-oadp-plugin/pkg/core/validation"
+	"github.com/openshift/hypershift-oadp-plugin/pkg/platform/agent"
 	hyperv1 "github.com/openshift/hypershift/api/hypershift/v1beta1"
 	"github.com/sirupsen/logrus"
 	velerov1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
@@ -29,6 +30,7 @@ type BackupPlugin struct {
 	config      map[string]string
 	validator   validation.BackupValidator
 	pvTriggered bool
+	hcp         *hyperv1.HostedControlPlane
 
 	// uploadTimeout is the time in minutes to wait for the data upload to finish.
 	dataUploadTimeout time.Duration
@@ -123,6 +125,11 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(item.UnstructuredContent(), hcp); err != nil {
 			return nil, nil, fmt.Errorf("error converting item to HostedControlPlane: %v", err)
 		}
+
+		if p.hcp == nil {
+			p.hcp = hcp
+		}
+
 		if err := p.validator.ValidatePlatformConfig(hcp); err != nil {
 			return nil, nil, fmt.Errorf("error checking platform configuration: %v", err)
 		}
@@ -142,6 +149,24 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 			p.pvTriggered = true
 		}()
 
+	case kind == "ClusterDeployment":
+		if p.hcp == nil {
+			hcp := &hyperv1.HostedControlPlane{}
+			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(item.UnstructuredContent(), hcp); err != nil {
+				return nil, nil, fmt.Errorf("error converting item to HostedControlPlane: %v", err)
+			}
+
+			if err := p.client.Get(ctx, crclient.ObjectKeyFromObject(hcp), hcp); err != nil {
+				return nil, nil, fmt.Errorf("error getting HostedControlPlane: %v", err)
+			}
+			p.hcp = hcp
+		}
+
+		if p.Migration && p.hcp.Spec.Platform.Type == hyperv1.AgentPlatform {
+			if err := agent.MigrationTasks(ctx, item, p.client, p.log, p.config, backup); err != nil {
+				return nil, nil, fmt.Errorf("error performing migration tasks for agent platform: %v", err)
+			}
+		}
 	}
 
 	if !p.dataUploadDone {
@@ -165,14 +190,6 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 			if err := common.ManagePauseHostedCluster(ctx, p.client, p.log, "false", backup.Spec.IncludedNamespaces); err != nil {
 				return nil, nil, fmt.Errorf("error unpausing HostedClusters: %v", err)
 			}
-		} else {
-			p.log.Debug("Migration backup detected, adding preserverOnDelete to ClusterDeployment object")
-			//	clusterdDeployment := &hivev1.ClusterDeployment{}
-			//	if err := p.client.List(ctx, clusterdDeployment, crclient.InNamespace(backup.Namespace)); err != nil {
-			//		return nil, nil, fmt.Errorf("error listing ClusterDeployments: %v", err)
-			//	}
-			// TODO (jparrill): Add preserverOnDelete to ClusterDeployment object and fix Hive import
-
 		}
 	}
 
