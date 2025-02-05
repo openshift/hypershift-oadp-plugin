@@ -1,7 +1,7 @@
 apiVersion: velero.io/v1
 kind: Backup
 metadata:
-  name: hosted-backup
+  name: hcp-minio-backup-csi
   namespace: open-cluster-management-backup
   labels:
     velero.io/storage-location: default

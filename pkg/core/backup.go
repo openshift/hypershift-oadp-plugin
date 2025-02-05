@@ -26,15 +26,17 @@ import (
 type BackupPlugin struct {
 	log logrus.FieldLogger
 
-	client      crclient.Client
-	config      map[string]string
-	validator   validation.BackupValidator
-	pvTriggered bool
-	hcp         *hyperv1.HostedControlPlane
+	client       crclient.Client
+	config       map[string]string
+	validator    validation.BackupValidator
+	pvTriggered  bool
+	hcp          *hyperv1.HostedControlPlane
+	hcpNamespace string
+	ha           bool
 
 	// uploadTimeout is the time in minutes to wait for the data upload to finish.
 	dataUploadTimeout time.Duration
-	dataUploadDone    bool
+	finished          bool
 
 	*plugtypes.BackupOptions
 }
@@ -64,9 +66,10 @@ func NewBackupPlugin(log logrus.FieldLogger) (*BackupPlugin, error) {
 	}
 
 	bp := &BackupPlugin{
-		log:    log,
-		client: client,
-		config: pluginConfig.Data,
+		log:      log,
+		client:   client,
+		config:   pluginConfig.Data,
+		finished: false,
 		validator: &validation.BackupPluginValidator{
 			Log: log,
 		},
@@ -110,6 +113,20 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 	p.log.Debug("Entering Hypershift backup plugin")
 	ctx := context.Context(context.Background())
 
+	if p.hcp == nil {
+		var err error
+		p.hcp, err = common.GetHCP(ctx, backup.Spec.IncludedNamespaces, p.client, p.log)
+		if err != nil {
+			return nil, nil, fmt.Errorf("error getting HCP namespace: %v", err)
+		}
+
+		if p.hcp.Spec.ControllerAvailabilityPolicy == hyperv1.HighlyAvailable {
+			p.ha = true
+		} else {
+			p.ha = false
+		}
+	}
+
 	kind := item.GetObjectKind().GroupVersionKind().Kind
 	switch {
 	case common.MatchSuffixKind(kind, "clusters", "machines"):
@@ -124,10 +141,6 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 		hcp := &hyperv1.HostedControlPlane{}
 		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(item.UnstructuredContent(), hcp); err != nil {
 			return nil, nil, fmt.Errorf("error converting item to HostedControlPlane: %v", err)
-		}
-
-		if p.hcp == nil {
-			p.hcp = hcp
 		}
 
 		if err := p.validator.ValidatePlatformConfig(hcp); err != nil {
@@ -150,18 +163,6 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 		}()
 
 	case kind == "ClusterDeployment":
-		if p.hcp == nil {
-			hcp := &hyperv1.HostedControlPlane{}
-			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(item.UnstructuredContent(), hcp); err != nil {
-				return nil, nil, fmt.Errorf("error converting item to HostedControlPlane: %v", err)
-			}
-
-			if err := p.client.Get(ctx, crclient.ObjectKeyFromObject(hcp), hcp); err != nil {
-				return nil, nil, fmt.Errorf("error getting HostedControlPlane: %v", err)
-			}
-			p.hcp = hcp
-		}
-
 		if p.Migration && p.hcp.Spec.Platform.Type == hyperv1.AgentPlatform {
 			if err := agent.MigrationTasks(ctx, item, p.client, p.log, p.config, backup); err != nil {
 				return nil, nil, fmt.Errorf("error performing migration tasks for agent platform: %v", err)
@@ -169,27 +170,41 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 		}
 	}
 
-	if !p.dataUploadDone {
-		var err error
-		p.log.Debug("DataUpload not finished yet")
-		if p.pvTriggered {
-			if p.dataUploadDone, err = common.WaitForDataUpload(ctx, p.client, p.log, backup, p.dataUploadTimeout, p.DataUploadCheckPace); err != nil {
-				return nil, nil, err
+	if (backup.Spec.DefaultVolumesToFsBackup != nil && !*backup.Spec.DefaultVolumesToFsBackup) || backup.Spec.DefaultVolumesToFsBackup == nil {
+		if !p.finished {
+			var err error
+			p.log.Debug("DataUpload not finished yet")
+			if p.pvTriggered {
+				if p.finished, err = common.WaitForDataUpload(ctx, p.client, p.log, backup, p.dataUploadTimeout, p.DataUploadCheckPace); err != nil {
+					return nil, nil, err
+				}
 			}
 		}
 	} else {
-		// If the config is set to migration: true, the NodePools and HostedClusters will not be unpaused
-		if !p.Migration {
-			p.log.Debug("DataUpload done, unpausing HC and NPs")
-			// Unpausing NodePools
-			if err := common.ManagePauseNodepools(ctx, p.client, p.log, "false", backup.Spec.IncludedNamespaces); err != nil {
-				return nil, nil, fmt.Errorf("error unpausing NodePools: %v", err)
+		p.log.Debug("checking PodVolumeBackup")
+		if p.pvTriggered {
+			result, err := common.WaitForPodVolumeBackup(ctx, p.client, p.log, backup, p.dataUploadTimeout, p.DataUploadCheckPace, p.ha)
+			if err != nil {
+				return nil, nil, err
 			}
 
-			// Unpausing HostedClusters
-			if err := common.ManagePauseHostedCluster(ctx, p.client, p.log, "false", backup.Spec.IncludedNamespaces); err != nil {
-				return nil, nil, fmt.Errorf("error unpausing HostedClusters: %v", err)
+			if result {
+				p.finished = result
+
 			}
+		}
+	}
+
+	if p.finished && !p.Migration {
+		p.log.Debug("Volume backup is done, unpausing HC and NPs")
+		// Unpausing NodePools
+		if err := common.ManagePauseNodepools(ctx, p.client, p.log, "false", backup.Spec.IncludedNamespaces); err != nil {
+			return nil, nil, fmt.Errorf("error unpausing NodePools: %v", err)
+		}
+
+		// Unpausing HostedClusters
+		if err := common.ManagePauseHostedCluster(ctx, p.client, p.log, "false", backup.Spec.IncludedNamespaces); err != nil {
+			return nil, nil, fmt.Errorf("error unpausing HostedClusters: %v", err)
 		}
 	}
 

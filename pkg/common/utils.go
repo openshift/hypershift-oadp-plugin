@@ -150,6 +150,86 @@ func WaitForPausedPropagated(ctx context.Context, client crclient.Client, log lo
 	return err
 }
 
+// WaitForPodVolumeBackup waits for the backup to be completed and uploaded to the destination backend.
+func WaitForPodVolumeBackup(ctx context.Context, client crclient.Client, log logrus.FieldLogger, backup *veleroapiv1.Backup, dataUploadTimeout time.Duration, dataUploadCheckPace time.Duration, ha bool) (bool, error) {
+	var (
+		shouldWait bool
+		etcdPvbs   []*veleroapiv1.PodVolumeBackup
+	)
+
+	if dataUploadTimeout == 0 {
+		dataUploadTimeout = defaultDataUploadTimeout
+	}
+
+	if dataUploadCheckPace == 0 {
+		dataUploadCheckPace = defaultDataUploadCheckPace
+	}
+
+	podVolumeBackupList := &veleroapiv1.PodVolumeBackupList{}
+	if err := client.List(ctx, podVolumeBackupList, crclient.InNamespace("openshift-adp")); err != nil {
+		log.Error(err, "failed to get PodVolumeBackupList")
+		return false, err
+	}
+
+	for _, pvb := range podVolumeBackupList.Items {
+		if strings.Contains(pvb.Spec.Pod.Name, "etcd-") {
+			etcdPvbs = append(etcdPvbs, &pvb)
+			shouldWait = true
+		}
+	}
+
+	var etcds int
+	if ha {
+		etcds = 3
+	} else {
+		etcds = 1
+	}
+
+	if shouldWait {
+		succeed := false
+		waitCtx, cancel := context.WithTimeout(ctx, dataUploadTimeout*time.Minute)
+		defer cancel()
+		err := wait.PollUntilContextCancel(waitCtx, dataUploadCheckPace*time.Second, true, func(ctx context.Context) (bool, error) {
+			completed := 0
+			for _, pvb := range etcdPvbs {
+				if err := client.Get(ctx, crclient.ObjectKeyFromObject(pvb), pvb); err != nil {
+					return false, fmt.Errorf("failed to get PodVolumeBackup Name: %s. Err: %v", pvb.Spec.Pod.Name, err)
+				}
+				switch pvb.Status.Phase {
+				case veleroapiv1.PodVolumeBackupPhaseCompleted:
+					log.Infof("PodVolumeBackup is done. Name: %s Status: %s Volume: %s", pvb.Name, pvb.Status.Phase, pvb.Spec.Volume)
+					if pvb.Spec.Volume == "data" {
+						succeed = true
+						completed++
+					}
+				case veleroapiv1.PodVolumeBackupPhaseFailed:
+					return true, fmt.Errorf("PodVolumeBackup failed. Name: %s Status: %s Pod: %v", pvb.Name, pvb.Status.Phase, &pvb.Spec.Pod.Name)
+				case veleroapiv1.PodVolumeBackupPhaseInProgress, veleroapiv1.PodVolumeBackupPhaseNew:
+					return false, nil
+				}
+			}
+
+			if etcds != completed {
+				log.Info("etcd backup in progress...", "etcds", etcds, "completed", completed)
+				return false, nil
+			}
+			return true, nil
+		})
+
+		if err != nil {
+			log.Errorf("giving up waiting podVolumeBackup", "error", err)
+			return false, err
+		}
+
+		if succeed {
+			log.Info("etcd backup done!!")
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
 func ManagePauseHostedCluster(ctx context.Context, client crclient.Client, log logrus.FieldLogger, paused string, namespaces []string) error {
 	log.Debug("listing HostedClusters")
 	hostedClusters := &hyperv1.HostedClusterList{
@@ -278,4 +358,22 @@ func RemoveAnnotation(metadata metav1.Object, key string) {
 	}
 	delete(annotations, key)
 	metadata.SetAnnotations(annotations)
+}
+
+func GetHCP(ctx context.Context, nsList []string, client crclient.Client, log logrus.FieldLogger) (*hyperv1.HostedControlPlane, error) {
+	for _, ns := range nsList {
+		hcpList := &hyperv1.HostedControlPlaneList{}
+		if err := client.List(ctx, hcpList, crclient.InNamespace(ns)); err != nil {
+			return nil, fmt.Errorf("error getting HostedControlPlane: %v", err)
+		}
+
+		if len(hcpList.Items) <= 0 {
+			log.Info("HostedControlPlane not found, retrying in the rest of the namespaces", "namespace", ns)
+			continue
+		}
+		log.Info("found hostedcontrolplane %s/%s", hcpList.Items[0].Namespace, hcpList.Items[0].Name)
+
+		return &hcpList.Items[0], nil
+	}
+	return nil, fmt.Errorf("no HostedControlPlane found")
 }
