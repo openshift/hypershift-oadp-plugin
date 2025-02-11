@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/sirupsen/logrus"
 	veleroapiv1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	veleroapiv2alpha1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -25,6 +27,14 @@ import (
 	"k8s.io/utils/ptr"
 	cr "sigs.k8s.io/controller-runtime"
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
+)
+
+var (
+	appBlackList = []string{
+		"openshift-apiserver",
+	}
+
+	k8sSAFilePath = DefaultK8sSAFilePath
 )
 
 func getMetadataAndAnnotations(item runtime.Unstructured) (metav1.Object, map[string]string, error) {
@@ -54,6 +64,7 @@ func GetClient() (crclient.Client, error) {
 	return client, nil
 }
 
+// GetConfig retrieves the Kubernetes REST configuration using the client-go library.
 func GetConfig() (*rest.Config, error) {
 	cfg, err := cr.GetConfig()
 	if err != nil {
@@ -110,6 +121,9 @@ func WaitForDataUpload(ctx context.Context, client crclient.Client, log logrus.F
 	return true, err
 }
 
+// WaitForPausedPropagated waits for the HostedControlPlane (HCP) associated with the given HostedCluster (HC)
+// to be paused. It polls the status of the HCP at regular intervals until the HCP is found to be paused or the
+// specified timeout is reached.
 func WaitForPausedPropagated(ctx context.Context, client crclient.Client, log logrus.FieldLogger, hc *hyperv1.HostedCluster, timeout time.Duration) error {
 	if timeout == 0 {
 		timeout = defaultWaitForPausedTimeout
@@ -143,7 +157,7 @@ func WaitForPausedPropagated(ctx context.Context, client crclient.Client, log lo
 	})
 
 	if err != nil {
-		log.Errorf("giving up, HCP was not updated in the expecteed timeout: %v", err)
+		log.Errorf("giving up, HCP was not updated in the expected timeout: %v", err)
 		return err
 	}
 
@@ -230,6 +244,7 @@ func WaitForPodVolumeBackup(ctx context.Context, client crclient.Client, log log
 	return false, nil
 }
 
+// ManagePauseHostedCluster manages the pause state of HostedClusters in the specified namespaces.
 func ManagePauseHostedCluster(ctx context.Context, client crclient.Client, log logrus.FieldLogger, paused string, namespaces []string) error {
 	log.Debug("listing HostedClusters")
 	hostedClusters := &hyperv1.HostedClusterList{
@@ -266,6 +281,7 @@ func ManagePauseHostedCluster(ctx context.Context, client crclient.Client, log l
 	return nil
 }
 
+// ManagePauseNodepools updates the PausedUntil field of NodePools in the specified namespaces.
 func ManagePauseNodepools(ctx context.Context, client crclient.Client, log logrus.FieldLogger, paused string, namespaces []string) error {
 	log.Debug("listing NodePools, checking namespaces to inspect")
 	nodepools := &hyperv1.NodePoolList{}
@@ -323,8 +339,12 @@ func ValidateCronSchedule(schedule string) error {
 	return nil
 }
 
+// GetCurrentNamespace reads the namespace from the Kubernetes service account
+// token file and returns it as a string. The file is expected to be located at
+// "/var/run/secrets/kubernetes.io/serviceaccount/namespace". If there is an error
+// reading the file, it returns an empty string and the error.
 func GetCurrentNamespace() (string, error) {
-	namespaceFilePath := filepath.Join("/var/run/secrets/kubernetes.io/serviceaccount", "namespace")
+	namespaceFilePath := filepath.Join(k8sSAFilePath, "namespace")
 	namespace, err := os.ReadFile(namespaceFilePath)
 	if err != nil {
 		return "", err
@@ -332,6 +352,8 @@ func GetCurrentNamespace() (string, error) {
 	return string(namespace), nil
 }
 
+// MatchSuffixKind checks if the given kind string ends with any of the provided suffixes.
+// It returns true if a match is found, otherwise it returns false.
 func MatchSuffixKind(kind string, suffixes ...string) bool {
 	for _, suffix := range suffixes {
 		if strings.HasSuffix(kind, suffix) {
@@ -342,6 +364,8 @@ func MatchSuffixKind(kind string, suffixes ...string) bool {
 
 }
 
+// AddAnnotation adds an annotation to the given metadata object.
+// If the annotations map is nil, it initializes it before adding the annotation.
 func AddAnnotation(metadata metav1.Object, key, value string) {
 	annotations := metadata.GetAnnotations()
 	if annotations == nil {
@@ -351,6 +375,8 @@ func AddAnnotation(metadata metav1.Object, key, value string) {
 	metadata.SetAnnotations(annotations)
 }
 
+// RemoveAnnotation removes the annotation with the specified key from the given metadata object.
+// If the annotations map is nil, the function returns without making any changes.
 func RemoveAnnotation(metadata metav1.Object, key string) {
 	annotations := metadata.GetAnnotations()
 	if annotations == nil {
@@ -360,6 +386,32 @@ func RemoveAnnotation(metadata metav1.Object, key string) {
 	metadata.SetAnnotations(annotations)
 }
 
+// AddLabel adds a label with the specified key and value to the given metadata object.
+// If the metadata object does not have any labels, a new map is created to store the label.
+func AddLabel(metadata metav1.Object, key, value string) {
+	labels := metadata.GetLabels()
+	if labels == nil {
+		labels = make(map[string]string)
+	}
+	labels[key] = value
+	metadata.SetLabels(labels)
+}
+
+// RemoveLabel removes a label from the metadata of a Kubernetes object.
+// If the label does not exist, the function does nothing.
+func RemoveLabel(metadata metav1.Object, key string) {
+	labels := metadata.GetLabels()
+	if labels == nil {
+		return
+	}
+	delete(labels, key)
+	metadata.SetLabels(labels)
+}
+
+// GetHCP retrieves the first HostedControlPlane object from the provided list of namespaces.
+// It iterates through the namespaces and attempts to list HostedControlPlane objects in each namespace.
+// If a HostedControlPlane is found, it returns the first one encountered.
+// If no HostedControlPlane is found in any of the namespaces, it returns an error.
 func GetHCP(ctx context.Context, nsList []string, client crclient.Client, log logrus.FieldLogger) (*hyperv1.HostedControlPlane, error) {
 	for _, ns := range nsList {
 		hcpList := &hyperv1.HostedControlPlaneList{}
@@ -376,4 +428,54 @@ func GetHCP(ctx context.Context, nsList []string, client crclient.Client, log lo
 		return &hcpList.Items[0], nil
 	}
 	return nil, fmt.Errorf("no HostedControlPlane found")
+}
+
+// checkPodsAndRestart restarts pods that are stuck in waiting after a restore of the cluster.
+// This situation only happens when the FSBackup method is used.
+func CheckPodsAndRestart(ctx context.Context, log logrus.FieldLogger, client crclient.Client, ns string) error {
+	log.Info("The recovery process is in progress...")
+	// This is necessary to let the pods to be ready.
+	// If the BlackListed pods get stuck in a waiting state, that pod needs to be restarted.
+	time.Sleep(time.Minute * 2)
+
+	waitCtx, cancel := context.WithTimeout(ctx, defaultWaitForTimeout)
+	defer cancel()
+
+	err := wait.PollUntilContextCancel(waitCtx, 10*time.Second, true, func(ctx context.Context) (bool, error) {
+		wait := 0
+		podList := &corev1.PodList{}
+		if err := client.List(ctx, podList, crclient.InNamespace(ns)); err != nil {
+			log.Error(err, "failed to get HostedControlPlane pods")
+			return false, err
+		}
+		log.Infof("waiting for HostedControlPlane pods to be running")
+
+		for _, pod := range podList.Items {
+			// Security measure to avoid restarting the wrong pods.
+			if slices.Contains(appBlackList, pod.Labels["app"]) {
+				for _, status := range pod.Status.InitContainerStatuses {
+					if status.State.Waiting != nil {
+						if err := client.Delete(ctx, &pod); err != nil {
+							log.Error("error restarting the pod", "name", pod.Name, "error", err)
+						}
+						wait++
+						log.Info("pod restarted", "name", pod.Name)
+					}
+				}
+			}
+		}
+
+		if wait <= 0 {
+			return true, nil
+		}
+
+		return false, nil
+	})
+
+	if err != nil {
+		log.Errorf("timeout waiting for HostedControlPlane pods: %v", err)
+		return err
+	}
+
+	return nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	common "github.com/openshift/hypershift-oadp-plugin/pkg/common"
@@ -25,6 +26,7 @@ import (
 // BackupPlugin is a backup item action plugin for Hypershift common objects.
 type BackupPlugin struct {
 	log logrus.FieldLogger
+	ctx context.Context
 
 	client       crclient.Client
 	config       map[string]string
@@ -50,6 +52,7 @@ func NewBackupPlugin(log logrus.FieldLogger) (*BackupPlugin, error) {
 		return nil, fmt.Errorf("error recovering the k8s client: %s", err.Error())
 	}
 	log.Debugf("client recovered")
+	ctx := context.Background()
 
 	pluginConfig := corev1.ConfigMap{}
 	ns, err := common.GetCurrentNamespace()
@@ -57,7 +60,7 @@ func NewBackupPlugin(log logrus.FieldLogger) (*BackupPlugin, error) {
 		return nil, fmt.Errorf("error getting current namespace: %s", err.Error())
 	}
 
-	err = client.Get(context.TODO(), types.NamespacedName{Name: common.PluginConfigMapName, Namespace: ns}, &pluginConfig)
+	err = client.Get(ctx, types.NamespacedName{Name: common.PluginConfigMapName, Namespace: ns}, &pluginConfig)
 	if err != nil {
 		if !apierrors.IsNotFound(err) {
 			return nil, fmt.Errorf("error getting plugin configuration: %s", err.Error())
@@ -70,6 +73,7 @@ func NewBackupPlugin(log logrus.FieldLogger) (*BackupPlugin, error) {
 		client:   client,
 		config:   pluginConfig.Data,
 		finished: false,
+		ctx:      ctx,
 		validator: &validation.BackupPluginValidator{
 			Log: log,
 		},
@@ -111,7 +115,7 @@ func (p *BackupPlugin) AppliesTo() (velero.ResourceSelector, error) {
 // Execute allows the ItemAction to perform arbitrary logic with the item being backed up,
 func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backup) (runtime.Unstructured, []velero.ResourceIdentifier, error) {
 	p.log.Debug("Entering Hypershift backup plugin")
-	ctx := context.Context(context.Background())
+	ctx := context.Context(p.ctx)
 
 	if p.hcp == nil {
 		var err error
@@ -182,6 +186,17 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 		}
 	} else {
 		p.log.Debug("checking PodVolumeBackup")
+		if kind == "Pod" {
+			metadata, err := meta.Accessor(item)
+			if err != nil {
+				return nil, nil, fmt.Errorf("error getting metadata accessor: %v", err)
+			}
+
+			if strings.Contains(metadata.GetName(), "etcd-") {
+				common.AddLabel(metadata, common.FSBackupLabelName, "true")
+			}
+		}
+
 		if p.pvTriggered {
 			result, err := common.WaitForPodVolumeBackup(ctx, p.client, p.log, backup, p.dataUploadTimeout, p.DataUploadCheckPace, p.ha)
 			if err != nil {

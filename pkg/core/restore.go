@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 
 	hive "github.com/openshift/hive/apis/hive/v1"
 	common "github.com/openshift/hypershift-oadp-plugin/pkg/common"
@@ -23,10 +24,12 @@ import (
 // RestorePlugin is a plugin to restore hypershift resources.
 type RestorePlugin struct {
 	log logrus.FieldLogger
+	ctx context.Context
 
 	client    crclient.Client
 	config    map[string]string
 	validator validation.RestoreValidator
+	fsBackup  bool
 
 	*plugtypes.RestoreOptions
 }
@@ -59,7 +62,9 @@ func NewRestorePlugin(log logrus.FieldLogger) (*RestorePlugin, error) {
 		return nil, fmt.Errorf("error getting current namespace: %s", err.Error())
 	}
 
-	err = client.Get(context.TODO(), types.NamespacedName{Name: common.PluginConfigMapName, Namespace: ns}, &pluginConfig)
+	ctx := context.Background()
+
+	err = client.Get(ctx, types.NamespacedName{Name: common.PluginConfigMapName, Namespace: ns}, &pluginConfig)
 	if err != nil {
 		if !apierrors.IsNotFound(err) {
 			return nil, fmt.Errorf("error getting plugin configuration: %s", err.Error())
@@ -68,9 +73,11 @@ func NewRestorePlugin(log logrus.FieldLogger) (*RestorePlugin, error) {
 	}
 
 	rp := &RestorePlugin{
-		log:    log,
-		client: client,
-		config: pluginConfig.Data,
+		log:      log,
+		ctx:      ctx,
+		client:   client,
+		fsBackup: false,
+		config:   pluginConfig.Data,
 		validator: &validation.RestorePluginValidator{
 			Log: log,
 		},
@@ -103,7 +110,7 @@ func (p *RestorePlugin) AppliesTo() (velero.ResourceSelector, error) {
 
 func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*velero.RestoreItemActionExecuteOutput, error) {
 	p.log.Debugf("Entering Hypershift restore plugin")
-	ctx := context.Context(context.Background())
+	ctx := context.Context(p.ctx)
 
 	kind := input.Item.GetObjectKind().GroupVersionKind().Kind
 	switch {
@@ -122,6 +129,33 @@ func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*v
 		}
 		if err := p.validator.ValidatePlatformConfig(hcp, p.config); err != nil {
 			return nil, fmt.Errorf("error checking platform configuration: %v", err)
+		}
+
+	case kind == "Pod":
+		metadata, err := meta.Accessor(input.Item)
+		if err != nil {
+			return nil, fmt.Errorf("error getting metadata accessor: %v", err)
+		}
+
+		if strings.Contains(metadata.GetName(), "etcd-") {
+			labels := metadata.GetLabels()
+			if _, exist := labels[common.FSBackupLabelName]; exist {
+				p.fsBackup = true
+				common.RemoveLabel(metadata, common.FSBackupLabelName)
+			}
+		}
+
+	// Last item
+	case kind == "Cluster":
+		if p.fsBackup {
+			metadata, err := meta.Accessor(input.Item)
+			if err != nil {
+				return nil, fmt.Errorf("error getting metadata accessor: %v", err)
+			}
+			ns := metadata.GetNamespace()
+			if err := common.CheckPodsAndRestart(p.ctx, p.log, p.client, ns); err != nil {
+				p.log.Errorf("error checking CrashLoopBackoff pods: %v", err)
+			}
 		}
 
 	case common.MainKinds[kind]:

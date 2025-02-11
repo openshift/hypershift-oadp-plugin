@@ -1,15 +1,14 @@
 apiVersion: velero.io/v1
 kind: Backup
 metadata:
-  name: hcp-minio-backup
+  name: hcp-minio-backup-no-csi
   namespace: openshift-adp
   labels:
     velero.io/storage-location: default
 spec:
   includedNamespaces:
   - clusters
-  - clusters-hosted-0
-  - infraenv-0
+  - clusters-hosted-ipv6
   includedResources:
   - sa
   - role
