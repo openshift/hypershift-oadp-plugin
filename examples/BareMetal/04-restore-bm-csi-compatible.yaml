@@ -1,0 +1,24 @@
+apiVersion: velero.io/v1
+kind: Restore
+metadata:
+  name: hcp-minio-restore-csi
+  namespace: openshift-adp
+spec:
+  includedNamespaces:
+  - clusters
+  - clusters-hosted-ipv6
+  backupName: hcp-minio-backup-csi
+  cleanupBeforeRestore: CleanupRestored
+  veleroManagedClustersBackupName: hcp-minio-backup-csi
+  veleroCredentialsBackupName: hcp-minio-backup-csi
+  veleroResourcesBackupName: hcp-minio-backup-csi
+  restorePVs: true
+  preserveNodePorts: true
+  existingResourcePolicy: update
+  excludedResources:
+  - nodes
+  - events
+  - events.events.k8s.io
+  - backups.velero.io
+  - restores.velero.io
+  - resticrepositories.velero.io

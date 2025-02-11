@@ -1,0 +1,12 @@
+services:
+  minio-ipv6:
+    image: quay.io/minio/minio
+    container_name: minio-ipv6
+    network_mode: "host"
+    environment:
+      - MINIO_ROOT_USER=ROOTNAME
+      - MINIO_ROOT_PASSWORD=CHANGEME123
+    volumes:
+      - /opt/minio/data:/data
+    command: server /data --address :9002 --console-address :9001
+    restart: always
