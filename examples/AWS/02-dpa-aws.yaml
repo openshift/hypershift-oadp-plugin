@@ -39,5 +39,5 @@ spec:
         - csi
       customPlugins:
         - name: hypershift-oadp-plugin
-          image: quay.io/jparrill/hypershift-oadp-plugin:latest
+          image: quay.io/hypershift/hypershift-oadp-plugin:latest
       resourceTimeout: 2h

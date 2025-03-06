@@ -12,8 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM golang:1.22-bookworm AS build
-ENV GOPROXY=https://proxy.golang.org
+FROM registry.ci.openshift.org/openshift/release:rhel-9-release-golang-1.22-openshift-4.18 AS build
 WORKDIR /go/src/github.com/openshift/hypershift-oadp-plugin
 COPY . .
 RUN CGO_ENABLED=0 go build -o /go/bin/hypershift-oadp-plugin .

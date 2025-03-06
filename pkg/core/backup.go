@@ -120,8 +120,6 @@ func (p *BackupPlugin) AppliesTo() (velero.ResourceSelector, error) {
 			"persistentvolumes",
 			"persistentvolumeclaims",
 			"pods",
-			"pvc",
-			"pv",
 		},
 	}, nil
 }

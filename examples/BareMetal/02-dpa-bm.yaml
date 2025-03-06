@@ -27,6 +27,10 @@ spec:
         - openshift
         - aws
         - kubevirt
+        - csi
+      customPlugins:
+        - name: hypershift-oadp-plugin
+          image: quay.io/hypershift/hypershift-oadp-plugin:latest
   snapshotLocations:
     - velero:
         config:
