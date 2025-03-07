@@ -1,0 +1,24 @@
+apiVersion: velero.io/v1
+kind: Restore
+metadata:
+  name: hcp-aws-restore
+  namespace: openshift-adp
+spec:
+  includedNamespaces:
+  - clusters
+  - clusters-example-hosted
+  backupName: hcp-aws-backup
+  cleanupBeforeRestore: CleanupRestored
+  veleroManagedClustersBackupName: hcp-aws-backup
+  veleroCredentialsBackupName: hcp-aws-backup
+  veleroResourcesBackupName: hcp-aws-backup
+  restorePVs: true
+  preserveNodePorts: true
+  existingResourcePolicy: update
+  excludedResources:
+  - nodes
+  - events
+  - events.events.k8s.io
+  - backups.velero.io
+  - restores.velero.io
+  - resticrepositories.velero.io

@@ -1,0 +1,39 @@
+# Configuration options for the dependabot.yml file
+# https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+version: 2
+updates:
+  # Main Go module
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "friday"
+      time: "01:00"
+      timezone: "Etc/UTC"
+    commit-message:
+      prefix: "NO-JIRA"
+    labels:
+      - "area/ci-tooling"
+      - "ok-to-test"
+    groups:
+      azure-github-dependencies:
+        patterns:
+          - "github.com/Azure*"
+      ibm-github-dependencies:
+        patterns:
+          - "github.com/IBM*"
+      github-dependencies:
+        patterns:
+          - "github*"
+      golang-dependencies:
+        patterns:
+          - "golang*"
+      k8s-dependencies:
+        patterns:
+          - "k8s.*"
+      sigs-k8s-dependencies:
+        patterns:
+          - "sigs.k8s*"
+      misc-dependencies:
+        patterns:
+          - "*"
