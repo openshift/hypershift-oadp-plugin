@@ -19,18 +19,20 @@ IMG ?= hypershift-oadp-plugin:latest
 
 ARCH ?= amd64
 DOCKER_BUILD_ARGS ?= --platform=linux/$(ARCH)
+GO=GO111MODULE=on GOWORK=off GOFLAGS=-mod=vendor go
+
 
 .PHONY: local
 local: build-dirs
-	CGO_ENABLED=0 GOARCH=$(ARCH) go build -v -o _output/bin/$(BIN) .
+	$(GO) build -v -o _output/bin/$(BIN) .
 
-.PHONY: test
+.PHONY: tests
 test:
-	CGO_ENABLED=0 go test -v -timeout 60s ./...
+	$(GO) test -v -timeout 60s ./...
 
 .PHONY: cover
 cover:
-	CGO_ENABLED=0 go test --cover -timeout 60s ./...
+	$(GO) test --cover -timeout 60s ./...
 
 
 .PHONY: ci
