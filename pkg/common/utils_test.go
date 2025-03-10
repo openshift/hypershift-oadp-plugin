@@ -1,6 +1,8 @@
 package common
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -331,6 +333,420 @@ func TestWaitForPausedPropagated(t *testing.T) {
 				g.Expect(err).NotTo(HaveOccurred())
 			}
 
+		})
+	}
+}
+
+func TestMatchSuffixKind(t *testing.T) {
+	tests := []struct {
+		name     string
+		kind     string
+		suffixes []string
+		expected bool
+	}{
+		{
+			name:     "Match AWS machine suffix",
+			kind:     "awsmachines",
+			suffixes: []string{"machines", "clusters"},
+			expected: true,
+		},
+		{
+			name:     "Match Azure cluster suffix",
+			kind:     "azureclusters",
+			suffixes: []string{"machines", "clusters"},
+			expected: true,
+		},
+		{
+			name:     "No match for random string",
+			kind:     "randomstring",
+			suffixes: []string{"machines", "clusters"},
+			expected: false,
+		},
+		{
+			name:     "Match ROSA cluster suffix",
+			kind:     "rosaclusters",
+			suffixes: []string{"clusters"},
+			expected: true,
+		},
+		{
+			name:     "No match for partial suffix",
+			kind:     "aws",
+			suffixes: []string{"machines", "clusters"},
+			expected: false,
+		},
+		{
+			name:     "Match with multiple suffixes",
+			kind:     "testmachines",
+			suffixes: []string{"machines", "clusters", "nodes"},
+			expected: true,
+		},
+		{
+			name:     "No match with empty suffixes",
+			kind:     "testmachines",
+			suffixes: []string{},
+			expected: false,
+		},
+		{
+			name:     "Match same kind as suffix",
+			kind:     "clusters",
+			suffixes: []string{"clusters"},
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+			result := MatchSuffixKind(tt.kind, tt.suffixes...)
+			g.Expect(result).To(Equal(tt.expected))
+		})
+	}
+}
+
+func TestAddAnnotation(t *testing.T) {
+	tests := []struct {
+		name       string
+		metadata   metav1.Object
+		key        string
+		value      string
+		expectAnno map[string]string
+	}{
+		{
+			name: "add annotation to empty annotations",
+			metadata: &metav1.ObjectMeta{
+				Name: "test",
+			},
+			key:   "test-key",
+			value: "test-value",
+			expectAnno: map[string]string{
+				"test-key": "test-value",
+			},
+		},
+		{
+			name: "add annotation to existing annotations",
+			metadata: &metav1.ObjectMeta{
+				Name: "test",
+				Annotations: map[string]string{
+					"existing-key": "existing-value",
+				},
+			},
+			key:   "test-key",
+			value: "test-value",
+			expectAnno: map[string]string{
+				"existing-key": "existing-value",
+				"test-key":     "test-value",
+			},
+		},
+		{
+			name: "overwrite existing annotation",
+			metadata: &metav1.ObjectMeta{
+				Name: "test",
+				Annotations: map[string]string{
+					"test-key": "old-value",
+				},
+			},
+			key:   "test-key",
+			value: "new-value",
+			expectAnno: map[string]string{
+				"test-key": "new-value",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+			AddAnnotation(tt.metadata, tt.key, tt.value)
+			g.Expect(tt.metadata.GetAnnotations()).To(Equal(tt.expectAnno))
+		})
+	}
+}
+
+func TestRemoveAnnotation(t *testing.T) {
+	tests := []struct {
+		name       string
+		metadata   metav1.Object
+		key        string
+		expectAnno map[string]string
+	}{
+		{
+			name: "remove existing annotation",
+			metadata: &metav1.ObjectMeta{
+				Name: "test",
+				Annotations: map[string]string{
+					"test-key": "test-value",
+				},
+			},
+			key:        "test-key",
+			expectAnno: map[string]string{},
+		},
+		{
+			name: "remove non-existing annotation",
+			metadata: &metav1.ObjectMeta{
+				Name: "test",
+				Annotations: map[string]string{
+					"existing-key": "existing-value",
+				},
+			},
+			key: "non-existing-key",
+			expectAnno: map[string]string{
+				"existing-key": "existing-value",
+			},
+		},
+		{
+			name: "remove annotation from empty annotations",
+			metadata: &metav1.ObjectMeta{
+				Name: "test",
+			},
+			key:        "test-key",
+			expectAnno: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+			RemoveAnnotation(tt.metadata, tt.key)
+			g.Expect(tt.metadata.GetAnnotations()).To(Equal(tt.expectAnno))
+		})
+	}
+}
+
+func TestGetHCP(t *testing.T) {
+	tests := []struct {
+		name      string
+		nsList    []string
+		hcpList   *hyperv1.HostedControlPlaneList
+		expectErr bool
+	}{
+		{
+			name:   "HCP found in first namespace",
+			nsList: []string{"namespace1", "namespace2"},
+			hcpList: &hyperv1.HostedControlPlaneList{
+				Items: []hyperv1.HostedControlPlane{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "hcp1",
+							Namespace: "namespace1",
+						},
+					},
+				},
+			},
+			expectErr: false,
+		},
+		{
+			name:   "HCP found in second namespace",
+			nsList: []string{"namespace1", "namespace2"},
+			hcpList: &hyperv1.HostedControlPlaneList{
+				Items: []hyperv1.HostedControlPlane{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "hcp2",
+							Namespace: "namespace2",
+						},
+					},
+				},
+			},
+			expectErr: false,
+		},
+		{
+			name:      "No HCP found",
+			nsList:    []string{"namespace1", "namespace2"},
+			hcpList:   &hyperv1.HostedControlPlaneList{},
+			expectErr: true,
+		},
+		{
+			name:   "Error listing HCPs",
+			nsList: []string{"namespace1"},
+			hcpList: &hyperv1.HostedControlPlaneList{
+				Items: []hyperv1.HostedControlPlane{},
+			},
+			expectErr: true,
+		},
+	}
+
+	scheme := runtime.NewScheme()
+	_ = hyperv1.AddToScheme(scheme)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+			client := fake.NewClientBuilder().WithScheme(scheme).WithLists(tt.hcpList).Build()
+			log := logrus.New()
+
+			hcp, err := GetHCP(context.TODO(), tt.nsList, client, log)
+			if tt.expectErr {
+				g.Expect(err).To(HaveOccurred())
+				g.Expect(hcp).To(BeNil())
+			} else {
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(hcp).NotTo(BeNil())
+				g.Expect(hcp.Namespace).To(BeElementOf(tt.nsList))
+			}
+		})
+	}
+}
+
+func TestAddLabel(t *testing.T) {
+	tests := []struct {
+		name      string
+		metadata  metav1.Object
+		key       string
+		value     string
+		expectLbl map[string]string
+	}{
+		{
+			name: "add label to empty labels",
+			metadata: &metav1.ObjectMeta{
+				Name: "test",
+			},
+			key:   "test-key",
+			value: "test-value",
+			expectLbl: map[string]string{
+				"test-key": "test-value",
+			},
+		},
+		{
+			name: "add label to existing labels",
+			metadata: &metav1.ObjectMeta{
+				Name: "test",
+				Labels: map[string]string{
+					"existing-key": "existing-value",
+				},
+			},
+			key:   "test-key",
+			value: "test-value",
+			expectLbl: map[string]string{
+				"existing-key": "existing-value",
+				"test-key":     "test-value",
+			},
+		},
+		{
+			name: "overwrite existing label",
+			metadata: &metav1.ObjectMeta{
+				Name: "test",
+				Labels: map[string]string{
+					"test-key": "old-value",
+				},
+			},
+			key:   "test-key",
+			value: "new-value",
+			expectLbl: map[string]string{
+				"test-key": "new-value",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+			AddLabel(tt.metadata, tt.key, tt.value)
+			g.Expect(tt.metadata.GetLabels()).To(Equal(tt.expectLbl))
+		})
+	}
+}
+
+func TestRemoveLabel(t *testing.T) {
+	tests := []struct {
+		name      string
+		metadata  metav1.Object
+		key       string
+		expectLbl map[string]string
+	}{
+		{
+			name: "remove existing label",
+			metadata: &metav1.ObjectMeta{
+				Name: "test",
+				Labels: map[string]string{
+					"test-key": "test-value",
+				},
+			},
+			key:       "test-key",
+			expectLbl: map[string]string{},
+		},
+		{
+			name: "remove non-existing label",
+			metadata: &metav1.ObjectMeta{
+				Name: "test",
+				Labels: map[string]string{
+					"existing-key": "existing-value",
+				},
+			},
+			key: "non-existing-key",
+			expectLbl: map[string]string{
+				"existing-key": "existing-value",
+			},
+		},
+		{
+			name: "remove label from empty labels",
+			metadata: &metav1.ObjectMeta{
+				Name: "test",
+			},
+			key:       "test-key",
+			expectLbl: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+			RemoveLabel(tt.metadata, tt.key)
+			g.Expect(tt.metadata.GetLabels()).To(Equal(tt.expectLbl))
+		})
+	}
+}
+
+func TestGetCurrentNamespace(t *testing.T) {
+	tests := []struct {
+		name          string
+		fileContent   string
+		expectError   bool
+		expectedValue string
+	}{
+		{
+			name:          "valid namespace file",
+			fileContent:   "test-namespace",
+			expectError:   false,
+			expectedValue: "test-namespace",
+		},
+		{
+			name:          "empty namespace file",
+			fileContent:   "",
+			expectError:   true,
+			expectedValue: "",
+		},
+		{
+			name:        "namespace file does not exist",
+			fileContent: "",
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+
+			// Create a temporary directory to simulate the service account file path
+			tempDir := t.TempDir()
+			k8sSAFilePath = tempDir
+
+			// Create the namespace file if fileContent is provided
+			if tt.fileContent != "" {
+				namespaceFilePath := filepath.Join(tempDir, "namespace")
+				err := os.WriteFile(namespaceFilePath, []byte(tt.fileContent), 0644)
+				g.Expect(err).NotTo(HaveOccurred())
+			}
+
+			// Call the function
+			namespace, err := GetCurrentNamespace()
+
+			// Validate the results
+			if tt.expectError {
+				g.Expect(err).To(HaveOccurred())
+			} else {
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(namespace).To(Equal(tt.expectedValue))
+			}
 		})
 	}
 }

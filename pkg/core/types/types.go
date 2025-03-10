@@ -4,6 +4,20 @@ import (
 	"time"
 )
 
+var (
+	BackupCommonResources = []string{
+		"hostedclusters", "hostedcontrolplanes", "nodepool",
+		"secrets", "configmaps", "persistentvolumes", "persistentvolumeclaims", "pods", "statefulsets", "deployments",
+		"clusters", "machines", "machinedeployments", "machinesets",
+	}
+	BackupAWSResources        = []string{"awsmachinepools", "awsmachines", "awsmachinetemplates", "awsmanagedmachinepools", "awsmanagedmachinepooltemplates"}
+	BackupAzureResources      = []string{"azuremachines", "azuremachinetemplates", "azuremanagedmachinepools", "azuremanagedmachinepooltemplates"}
+	BackupIBMPowerVSResources = []string{"ibmpowervsmachines", "ibmpowervsmachinetemplates", "ibmpowervsclusters", "ibmpowervsclustertemplates"}
+	BackupOpenStackResources  = []string{"openstackmachines", "openstackmachinetemplates", "openstackclusters", "openstackclustertemplates"}
+	BackupKubevirtResources   = []string{"kubevirtmachines", "kubevirtmachinetemplates", "kubevirtmachinepools", "kubevirtclusters"}
+	BackupAgentResources      = []string{"agents", "agentmachines", "agentmachinetemplates", "agentmachinepools", "agentclusters"}
+)
+
 type BackupOptions struct {
 	// Migration is a flag to indicate if the backup is for migration purposes.
 	Migration bool

@@ -1,0 +1,47 @@
+apiVersion: velero.io/v1
+kind: Backup
+metadata:
+  name: hcp-minio-backup-csi
+  namespace: openshift-adp
+  labels:
+    velero.io/storage-location: default
+spec:
+  includedNamespaces:
+  - clusters
+  - clusters-hosted-ipv6
+  includedResources:
+  - sa
+  - role
+  - rolebinding
+  - pod
+  - pvc
+  - pv
+  - bmh
+  - configmap
+  - infraenv
+  - priorityclasses
+  - pdb
+  - agents
+  - hostedcluster
+  - nodepool
+  - secrets
+  - services
+  - deployments
+  - statefulsets
+  - hostedcontrolplane
+  - cluster
+  - agentcluster
+  - agentmachinetemplate
+  - agentmachine
+  - machinedeployment
+  - machineset
+  - machine
+  - route
+  - clusterdeployment
+  excludedResources: []
+  storageLocation: default
+  ttl: 720h0m0s
+  snapshotMoveData: true
+  datamover: "velero"
+  defaultVolumesToFsBackup: false
+  snapshotVolumes: true

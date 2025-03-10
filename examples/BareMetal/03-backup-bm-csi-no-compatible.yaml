@@ -1,15 +1,14 @@
 apiVersion: velero.io/v1
 kind: Backup
 metadata:
-  name: hosted-backup
-  namespace: open-cluster-management-backup
+  name: hcp-minio-backup-no-csi
+  namespace: openshift-adp
   labels:
     velero.io/storage-location: default
 spec:
   includedNamespaces:
   - clusters
-  - clusters-hosted-0
-  - infraenv-0
+  - clusters-hosted-ipv6
   includedResources:
   - sa
   - role
@@ -40,9 +39,6 @@ spec:
   - route
   - clusterdeployment
   excludedResources: []
-  storageLocation: oadp-minio-1
+  defaultVolumesToFsBackup: true
+  storageLocation: default
   ttl: 720h0m0s
-  snapshotMoveData: true
-  datamover: "velero"
-  defaultVolumesToFsBackup: false
-  snapshotVolumes: true
