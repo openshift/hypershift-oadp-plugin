@@ -30,3 +30,6 @@ _output/
 
 # Editors
 .vscode/
+
+# SNYK CLI cache data
+.dccache
