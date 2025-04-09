@@ -1,0 +1,45 @@
+apiVersion: velero.io/v1
+kind: Backup
+metadata:
+  name: hcp-osp-backup
+  namespace: openshift-adp
+  labels:
+    velero.io/storage-location: default
+spec:
+  includedNamespaces:
+  - clusters
+  - clusters-example-hosted
+  includedResources:
+  - sa
+  - role
+  - rolebinding
+  - pod
+  - pvc
+  - pv
+  - configmap
+  - priorityclasses
+  - pdb
+  - hostedcluster
+  - nodepool
+  - secrets
+  - services
+  - deployments
+  - statefulsets
+  - hostedcontrolplane
+  - cluster
+  - openstackclusters
+  - openstackmachinetemplates
+  - openstackmachine
+  - machinedeployment
+  - openstackfloatingippools
+  - machineset
+  - machine
+  - route
+  - clusterdeployment
+  excludedResources: []
+  storageLocation: default
+  ttl: 720h0m0s
+  snapshotMoveData: true
+  datamover: "velero"
+  defaultVolumesToFsBackup: false
+  snapshotVolumes: true
