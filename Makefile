@@ -14,8 +14,7 @@
 
 PKG := github.com/openshift/hypershift-oadp-plugin
 BIN := hypershift-oadp-plugin
-REGISTRY ?= quay.io/hypershift
-IMG ?= hypershift-oadp-plugin:latest
+IMG ?= quay.io/hypershift/hypershift-oadp-plugin:latest
 
 ARCH ?= amd64
 DOCKER_BUILD_ARGS ?= --platform=linux/$(ARCH)
@@ -40,11 +39,11 @@ ci: verify-modules local test
 
 .PHONY: docker-build
 docker-build:
-	docker build -t ${REGISTRY}/${IMG} . $(DOCKER_BUILD_ARGS)
+	docker build -t ${IMG} . $(DOCKER_BUILD_ARGS)
 
 .PHONY: docker-push
 docker-push:
-	@docker push ${REGISTRY}/${IMG}
+	@docker push ${IMG}
 
 .PHONY: modules
 modules:

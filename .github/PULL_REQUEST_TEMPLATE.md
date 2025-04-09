@@ -9,12 +9,13 @@
 Delete this text before submitting the PR.
 -->
 
-**What this PR does / why we need it**:
+## What this PR does / why we need it
 
-**Which issue(s) this PR fixes** *(optional, use `fixes #<issue_number>(, fixes #<issue_number>, ...)` format, where issue_number might be a GitHub issue, or a Jira story*:
+## Which issue(s) this PR fixes
 Fixes #
 
-**Checklist**
+## Checklist
+
 - [ ] Subject and description added to both, commit and PR.
 - [ ] Relevant issues have been referenced.
 - [ ] This change includes docs.
