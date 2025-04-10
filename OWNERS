@@ -6,6 +6,7 @@ approvers:
 - bryan-cox
 - jparrill
 - celebdor
+- kaovilai
 options: {}
 reviewers:
 - enxebre
@@ -16,4 +17,5 @@ reviewers:
 - muraee
 - celebdor
 - devguyio
+- kaovilai
 component: hypershift-oadp-plugin
