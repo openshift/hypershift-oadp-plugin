@@ -479,3 +479,67 @@ func CheckPodsAndRestart(ctx context.Context, log logrus.FieldLogger, client crc
 
 	return nil
 }
+
+// ForceRestartETCDPodsIfNeeded restarts the ETCD pods in the HCP namespace if they are not running after a timeout.
+// This only happens in certain circumstances when the ETCD STS has NodeAffinity labels. The Velero PodPlugin removes
+// the NodeAffinity labels from the pods, so the pods are scheduled to the wrong node and get stuck.
+// After a restart of the pods, the NodeAffinity labels are added again and the pods are scheduled to the correct node.
+func ForceRestartETCDPodsIfNeeded(ctx context.Context, log logrus.FieldLogger, c crclient.Client, ns string, timeout time.Duration) error {
+	var (
+		etcdPods = &corev1.PodList{}
+		success  bool
+	)
+
+	if timeout == 0 {
+		timeout = 2 * time.Minute
+	}
+
+	log = log.WithFields(logrus.Fields{
+		"namespace": ns,
+	})
+
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	err := wait.PollUntilContextCancel(waitCtx, 5*time.Second, true, func(ctx context.Context) (bool, error) {
+		if err := c.List(ctx, etcdPods, crclient.InNamespace(ns), crclient.MatchingLabels{"app": "etcd"}); err != nil {
+			return false, fmt.Errorf("error getting ETCD pods: %v", err)
+		}
+
+		if len(etcdPods.Items) <= 0 {
+			return false, fmt.Errorf("no ETCD pods found")
+		}
+
+		for _, pod := range etcdPods.Items {
+			log.Infof("checking ETCD pod %s", pod.Name)
+			if pod.Status.Phase != corev1.PodRunning {
+				return false, nil
+			}
+			log.Infof("ETCD pod %s is running", pod.Name)
+		}
+
+		log.Info("all ETCD pods are running")
+		success = true
+		return true, nil
+	})
+
+	// If the ETCD pods are running, we don't need to restart them.
+	if success && err == nil {
+		log.Info("ETCD pods are running, skipping restart")
+		return nil
+	}
+
+	// If we got a specific error (like no pods found), return it
+	if err != nil && !wait.Interrupted(err) {
+		return err
+	}
+
+	log.Info("deleting ETCD pods to allow STS to regenerate them with the affinity labels")
+	for _, pod := range etcdPods.Items {
+		if err := c.Delete(ctx, &pod); err != nil {
+			log.Error("error deleting ETCD pod", "name", pod.Name, "error", err)
+		}
+	}
+
+	return nil
+}
