@@ -156,6 +156,10 @@ func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*v
 			if err := common.CheckPodsAndRestart(p.ctx, p.log, p.client, ns); err != nil {
 				p.log.Errorf("error checking CrashLoopBackoff pods: %v", err)
 			}
+
+			if err := common.ForceRestartETCDPodsIfNeeded(p.ctx, p.log, p.client, ns, 0); err != nil {
+				p.log.Errorf("error restarting ETCD pods: %v", err)
+			}
 		}
 
 	case common.MainKinds[kind]:
