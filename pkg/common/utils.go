@@ -95,7 +95,6 @@ func WaitForDataUpload(ctx context.Context, client crclient.Client, log logrus.F
 		log.Info("waiting for dataUpload to be completed...")
 		if err := client.List(ctx, dataUploadSlice, crclient.InNamespace("openshift-adp")); err != nil {
 			log.Error(err, "failed to get dataUploadList")
-
 			return false, err
 		}
 
@@ -128,6 +127,7 @@ func WaitForPausedPropagated(ctx context.Context, client crclient.Client, log lo
 	if timeout == 0 {
 		timeout = defaultWaitForPausedTimeout
 	}
+	hcpNamespace := GetHCPNamespace(hc.Name, hc.Namespace)
 
 	log = log.WithFields(logrus.Fields{
 		"namespace": hc.Namespace,
@@ -139,11 +139,11 @@ func WaitForPausedPropagated(ctx context.Context, client crclient.Client, log lo
 
 	err := wait.PollUntilContextCancel(waitCtx, 5*time.Second, true, func(ctx context.Context) (bool, error) {
 		hcp := &hyperv1.HostedControlPlane{}
-		if err := client.Get(ctx, types.NamespacedName{Name: hc.Name, Namespace: hc.Namespace}, hcp); err != nil {
+		if err := client.Get(ctx, types.NamespacedName{Name: hc.Name, Namespace: hcpNamespace}, hcp); err != nil {
 			if apierrors.IsNotFound(err) {
 				return true, nil
 			}
-			log.Error(err, "failed to get HostedControlPlane")
+			log.Info(err, "failed to get HostedControlPlane")
 			return false, err
 		}
 		log.Infof("waiting for HCP to be paused")
@@ -207,7 +207,8 @@ func WaitForPodVolumeBackup(ctx context.Context, client crclient.Client, log log
 			completed := 0
 			for _, pvb := range etcdPvbs {
 				if err := client.Get(ctx, crclient.ObjectKeyFromObject(pvb), pvb); err != nil {
-					return false, fmt.Errorf("failed to get PodVolumeBackup Name: %s. Err: %v", pvb.Spec.Pod.Name, err)
+					log.Info(err, "failed to get PodVolumeBackup", "name", pvb.Spec.Pod.Name)
+					return false, nil
 				}
 				switch pvb.Status.Phase {
 				case veleroapiv1.PodVolumeBackupPhaseCompleted:
@@ -446,7 +447,7 @@ func CheckPodsAndRestart(ctx context.Context, log logrus.FieldLogger, client crc
 		podList := &corev1.PodList{}
 		if err := client.List(ctx, podList, crclient.InNamespace(ns)); err != nil {
 			log.Error(err, "failed to get HostedControlPlane pods")
-			return false, err
+			return false, nil
 		}
 		log.Infof("waiting for HostedControlPlane pods to be running")
 
@@ -478,4 +479,77 @@ func CheckPodsAndRestart(ctx context.Context, log logrus.FieldLogger, client crc
 	}
 
 	return nil
+}
+
+// ForceRestartETCDPodsIfNeeded restarts the ETCD pods in the HCP namespace if they are not running after a timeout.
+// This only happens in certain circumstances when the ETCD STS has NodeAffinity labels. The Velero PodPlugin removes
+// the NodeAffinity labels from the pods, so the pods are scheduled to the wrong node and get stuck.
+// After a restart of the pods, the NodeAffinity labels are added again and the pods are scheduled to the correct node.
+func ForceRestartETCDPodsIfNeeded(ctx context.Context, log logrus.FieldLogger, c crclient.Client, ns string, timeout time.Duration) error {
+	log.Debugf("Checking if ETCD pods need to be restarted")
+	success := false
+
+	if timeout == 0 {
+		timeout = 2 * time.Minute
+	}
+
+	log = log.WithFields(logrus.Fields{
+		"namespace": ns,
+	})
+
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	err := wait.PollUntilContextCancel(waitCtx, 5*time.Second, true, func(ctx context.Context) (bool, error) {
+		etcdPods := &corev1.PodList{}
+		if err := c.List(ctx, etcdPods, crclient.InNamespace(ns), crclient.MatchingLabels{"app": "etcd"}); err != nil {
+			log.Info(err, "error getting ETCD pods")
+			return false, nil
+		}
+
+		if len(etcdPods.Items) <= 0 {
+			log.Info("no ETCD pods found, retrying...")
+			return false, nil
+		}
+
+		for _, pod := range etcdPods.Items {
+			log.Infof("checking ETCD pod %s", pod.Name)
+			if pod.Status.Phase != corev1.PodRunning {
+				return false, nil
+			}
+			log.Infof("ETCD pod %s is running", pod.Name)
+		}
+
+		log.Info("all ETCD pods are running")
+		success = true
+		return true, nil
+	})
+
+	// If the ETCD pods are running, we don't need to restart them.
+	if success && err == nil {
+		log.Info("ETCD pods are running, skipping restart")
+		return nil
+	}
+
+	if err != nil && !wait.Interrupted(err) {
+		return err
+	}
+
+	log.Info("deleting ETCD pods to allow STS to regenerate them with the affinity labels")
+	etcdPods := &corev1.PodList{}
+	if err := c.List(ctx, etcdPods, crclient.InNamespace(ns), crclient.MatchingLabels{"app": "etcd"}); err != nil {
+		log.Info(err, "error getting ETCD pods")
+		return fmt.Errorf("error getting ETCD pods for restart: %v", err)
+	}
+	for _, pod := range etcdPods.Items {
+		if err := c.Delete(ctx, &pod); err != nil {
+			log.Error("error deleting ETCD pod", "name", pod.Name, "error", err)
+		}
+	}
+
+	return nil
+}
+
+func GetHCPNamespace(name, namespace string) string {
+	return fmt.Sprintf("%s-%s", namespace, name)
 }

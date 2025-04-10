@@ -16,12 +16,12 @@ type BackupValidator interface {
 }
 
 type BackupPluginValidator struct {
-	Log logrus.FieldLogger
+	Log *logrus.Logger
 }
 
 func (p *BackupPluginValidator) ValidatePluginConfig(config map[string]string) (*plugtypes.BackupOptions, error) {
 	// Validate the plugin configuration
-	p.Log.Debug("validating plugin configuration")
+	p.Log.Infof("validating plugin configuration")
 	if len(config) == 0 {
 		p.Log.Debug("no configuration provided")
 		return &plugtypes.BackupOptions{}, nil
@@ -32,23 +32,31 @@ func (p *BackupPluginValidator) ValidatePluginConfig(config map[string]string) (
 		p.Log.Debugf("configuration key: %s, value: %s", key, value)
 		switch key {
 		case "migration":
+			p.Log.Debugf("reading/parsing migration %s", value)
 			bo.Migration = value == "true"
 		case "readoptNodes":
+			p.Log.Debugf("reading/parsing readoptNodes %s", value)
 			bo.ReadoptNodes = value == "true"
 		case "managedServices":
+			p.Log.Debugf("reading/parsing managedServices %s", value)
 			bo.ManagedServices = value == "true"
 		case "dataUploadTimeout":
+			p.Log.Debugf("reading/parsing dataUploadTimeout %s", value)
 			minutes, err := strconv.ParseInt(value, 10, 64)
 			if err != nil {
 				return nil, fmt.Errorf("error parsing dataUploadTimeout: %s", err.Error())
 			}
 			bo.DataUploadTimeout = time.Duration(minutes)
 		case "dataUploadCheckPace":
+			p.Log.Debugf("reading/parsing dataUploadCheckPace %s", value)
 			seconds, err := strconv.ParseInt(value, 10, 64)
 			if err != nil {
 				return nil, fmt.Errorf("error parsing dataUploadCheckPace: %s", err.Error())
 			}
 			bo.DataUploadCheckPace = time.Duration(seconds)
+		case "pluginVerbosityLevel":
+			p.Log.Debugf("reading/parsing pluginVerbosityLevel %s", value)
+			bo.PluginVerbosityLevel = value
 		default:
 			p.Log.Warnf("unknown configuration key: %s with value %s", key, value)
 		}

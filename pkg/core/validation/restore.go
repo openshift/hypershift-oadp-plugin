@@ -34,11 +34,17 @@ func (p *RestorePluginValidator) ValidatePluginConfig(config map[string]string) 
 		p.Log.Debugf("%s configuration key: %s, value: %s", p.LogHeader, key, value)
 		switch key {
 		case "migration":
+			p.Log.Debugf("reading/parsing migration %s", value)
 			bo.Migration = value == "true"
 		case "readoptNodes":
+			p.Log.Debugf("reading/parsing readoptNodes %s", value)
 			bo.ReadoptNodes = value == "true"
 		case "managedServices":
+			p.Log.Debugf("reading/parsing managedServices %s", value)
 			bo.ManagedServices = value == "true"
+		case "pluginVerbosityLevel":
+			p.Log.Debugf("reading/parsing pluginVerbosityLevel %s", value)
+			bo.PluginVerbosityLevel = value
 		default:
 			p.Log.Warnf("unknown configuration key: %s with value %s", key, value)
 		}
