@@ -2,21 +2,16 @@ package common
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
-	"slices"
 	"strings"
 	"time"
 
 	hyperv1 "github.com/openshift/hypershift/api/hypershift/v1beta1"
-	cronv3 "github.com/robfig/cron/v3"
 	"github.com/sirupsen/logrus"
 	veleroapiv1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	veleroapiv2alpha1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
-	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -311,35 +306,6 @@ func ManagePauseNodepools(ctx context.Context, client crclient.Client, log logru
 	return nil
 }
 
-// ValidateCronSchedule validates if a string is a valid cron schedule and rejects disallowed characters.
-func ValidateCronSchedule(schedule string) error {
-	_, err := cronv3.ParseStandard(schedule)
-	if err != nil {
-		return fmt.Errorf("invalid format according to cron standard: %w", err)
-	}
-
-	// Reject specific disallowed characters
-	if strings.ContainsAny(schedule, "?LV") {
-		return errors.New("the schedule contains disallowed characters: ?, L, or V")
-	}
-
-	// Reject specific patterns using regular expressions
-	disallowedPatterns := []string{
-		`\bL\b`,
-		`\bV\b`,
-		`\?`,
-	}
-
-	for _, pattern := range disallowedPatterns {
-		matched, _ := regexp.MatchString(pattern, schedule)
-		if matched {
-			return fmt.Errorf("the schedule contains a disallowed pattern: %s", pattern)
-		}
-	}
-
-	return nil
-}
-
 // GetCurrentNamespace reads the namespace from the Kubernetes service account
 // token file and returns it as a string. The file is expected to be located at
 // "/var/run/secrets/kubernetes.io/serviceaccount/namespace". If there is an error
@@ -429,125 +395,6 @@ func GetHCP(ctx context.Context, nsList []string, client crclient.Client, log lo
 		return &hcpList.Items[0], nil
 	}
 	return nil, fmt.Errorf("no HostedControlPlane found")
-}
-
-// checkPodsAndRestart restarts pods that are stuck in waiting after a restore of the cluster.
-// This situation only happens when the FSBackup method is used.
-func CheckPodsAndRestart(ctx context.Context, log logrus.FieldLogger, client crclient.Client, ns string) error {
-	log.Info("The recovery process is in progress...")
-	// This is necessary to let the pods to be ready.
-	// If the BlackListed pods get stuck in a waiting state, that pod needs to be restarted.
-	time.Sleep(time.Minute * 2)
-
-	waitCtx, cancel := context.WithTimeout(ctx, defaultWaitForTimeout)
-	defer cancel()
-
-	err := wait.PollUntilContextCancel(waitCtx, 10*time.Second, true, func(ctx context.Context) (bool, error) {
-		wait := 0
-		podList := &corev1.PodList{}
-		if err := client.List(ctx, podList, crclient.InNamespace(ns)); err != nil {
-			log.Error(err, "failed to get HostedControlPlane pods")
-			return false, nil
-		}
-		log.Infof("waiting for HostedControlPlane pods to be running")
-
-		for _, pod := range podList.Items {
-			// Security measure to avoid restarting the wrong pods.
-			if slices.Contains(appBlackList, pod.Labels["app"]) {
-				for _, status := range pod.Status.InitContainerStatuses {
-					if status.State.Waiting != nil {
-						if err := client.Delete(ctx, &pod); err != nil {
-							log.Error("error restarting the pod", "name", pod.Name, "error", err)
-						}
-						wait++
-						log.Info("pod restarted", "name", pod.Name)
-					}
-				}
-			}
-		}
-
-		if wait <= 0 {
-			return true, nil
-		}
-
-		return false, nil
-	})
-
-	if err != nil {
-		log.Errorf("timeout waiting for HostedControlPlane pods: %v", err)
-		return err
-	}
-
-	return nil
-}
-
-// ForceRestartETCDPodsIfNeeded restarts the ETCD pods in the HCP namespace if they are not running after a timeout.
-// This only happens in certain circumstances when the ETCD STS has NodeAffinity labels. The Velero PodPlugin removes
-// the NodeAffinity labels from the pods, so the pods are scheduled to the wrong node and get stuck.
-// After a restart of the pods, the NodeAffinity labels are added again and the pods are scheduled to the correct node.
-func ForceRestartETCDPodsIfNeeded(ctx context.Context, log logrus.FieldLogger, c crclient.Client, ns string, timeout time.Duration) error {
-	log.Debugf("Checking if ETCD pods need to be restarted")
-	success := false
-
-	if timeout == 0 {
-		timeout = 2 * time.Minute
-	}
-
-	log = log.WithFields(logrus.Fields{
-		"namespace": ns,
-	})
-
-	waitCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	err := wait.PollUntilContextCancel(waitCtx, 5*time.Second, true, func(ctx context.Context) (bool, error) {
-		etcdPods := &corev1.PodList{}
-		if err := c.List(ctx, etcdPods, crclient.InNamespace(ns), crclient.MatchingLabels{"app": "etcd"}); err != nil {
-			log.Info(err, "error getting ETCD pods")
-			return false, nil
-		}
-
-		if len(etcdPods.Items) <= 0 {
-			log.Info("no ETCD pods found, retrying...")
-			return false, nil
-		}
-
-		for _, pod := range etcdPods.Items {
-			log.Infof("checking ETCD pod %s", pod.Name)
-			if pod.Status.Phase != corev1.PodRunning {
-				return false, nil
-			}
-			log.Infof("ETCD pod %s is running", pod.Name)
-		}
-
-		log.Info("all ETCD pods are running")
-		success = true
-		return true, nil
-	})
-
-	// If the ETCD pods are running, we don't need to restart them.
-	if success && err == nil {
-		log.Info("ETCD pods are running, skipping restart")
-		return nil
-	}
-
-	if err != nil && !wait.Interrupted(err) {
-		return err
-	}
-
-	log.Info("deleting ETCD pods to allow STS to regenerate them with the affinity labels")
-	etcdPods := &corev1.PodList{}
-	if err := c.List(ctx, etcdPods, crclient.InNamespace(ns), crclient.MatchingLabels{"app": "etcd"}); err != nil {
-		log.Info(err, "error getting ETCD pods")
-		return fmt.Errorf("error getting ETCD pods for restart: %v", err)
-	}
-	for _, pod := range etcdPods.Items {
-		if err := c.Delete(ctx, &pod); err != nil {
-			log.Error("error deleting ETCD pod", "name", pod.Name, "error", err)
-		}
-	}
-
-	return nil
 }
 
 func GetHCPNamespace(name, namespace string) string {

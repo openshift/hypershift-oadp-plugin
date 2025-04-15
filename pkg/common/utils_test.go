@@ -2,7 +2,6 @@ package common
 
 import (
 	"context"
-	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -14,7 +13,6 @@ import (
 
 	hyperv1 "github.com/openshift/hypershift/api/hypershift/v1beta1"
 	"github.com/sirupsen/logrus"
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -72,34 +70,6 @@ func TestGetMetadataAndAnnotations(t *testing.T) {
 				g.Expect(metadata).NotTo(BeNil())
 				g.Expect(annotations).To(Equal(tt.expectAnnotations))
 			}
-		})
-	}
-}
-
-func TestValidateCronSchedule(t *testing.T) {
-	tests := []struct {
-		name      string
-		schedule  string
-		expectErr bool
-	}{
-		{"valid cron schedule", "0 0 * * *", false},
-		{"valid cron schedule, every 5 min", "*/5 * * * *", false},
-		{"Yearly cron schedule", "@yearly", false},
-		{"Annually cron schedule", "@annually", false},
-		{"Monthly cron schedule", "@monthly", false},
-		{"Weekly cron schedule", "@weekly", false},
-		{"daily cron schedule", "@daily", false},
-		{"at midnight cron schedule", "@midnight", false},
-		{"hourly cron schedule", "@hourly", false},
-		{"invalid cron schedule with typo", "0 12 * * ?", true},
-		{"invalid cron schedule", "invalid schedule", true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			g := NewWithT(t)
-			err := ValidateCronSchedule(tt.schedule)
-			g.Expect(err != nil).To(Equal(tt.expectErr))
 		})
 	}
 }
@@ -765,172 +735,4 @@ type fakeClient struct {
 func (f *fakeClient) Delete(ctx context.Context, obj client.Object, opts ...client.DeleteOption) error {
 	f.deletedPods[obj.GetName()] = true
 	return nil
-}
-
-func TestForceRestartETCDPodsIfNeeded(t *testing.T) {
-	testCases := []struct {
-		name           string
-		etcdPods       []corev1.Pod
-		timeout        time.Duration
-		expectedError  error
-		expectedDelete bool
-	}{
-		{
-			name: "ETCD pods are running - no restart needed",
-			etcdPods: []corev1.Pod{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "etcd-0",
-						Namespace: "test-ns",
-						Labels:    map[string]string{"app": "etcd"},
-					},
-					Status: corev1.PodStatus{
-						Phase: corev1.PodRunning,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "etcd-1",
-						Namespace: "test-ns",
-						Labels:    map[string]string{"app": "etcd"},
-					},
-					Status: corev1.PodStatus{
-						Phase: corev1.PodRunning,
-					},
-				},
-			},
-			timeout:        1 * time.Minute,
-			expectedError:  nil,
-			expectedDelete: false,
-		},
-		{
-			name: "ETCD pods are not running - restart needed",
-			etcdPods: []corev1.Pod{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "etcd-0",
-						Namespace: "test-ns",
-						Labels:    map[string]string{"app": "etcd"},
-					},
-					Status: corev1.PodStatus{
-						Phase: corev1.PodPending,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "etcd-1",
-						Namespace: "test-ns",
-						Labels:    map[string]string{"app": "etcd"},
-					},
-					Status: corev1.PodStatus{
-						Phase: corev1.PodPending,
-					},
-				},
-			},
-			timeout:        1 * time.Minute,
-			expectedError:  nil,
-			expectedDelete: true,
-		},
-		{
-			name:           "No ETCD pods found",
-			etcdPods:       []corev1.Pod{},
-			timeout:        1 * time.Minute,
-			expectedError:  nil,
-			expectedDelete: false,
-		},
-		{
-			name: "Mixed ETCD pod states - restart needed",
-			etcdPods: []corev1.Pod{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "etcd-0",
-						Namespace: "test-ns",
-						Labels:    map[string]string{"app": "etcd"},
-					},
-					Status: corev1.PodStatus{
-						Phase: corev1.PodRunning,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "etcd-1",
-						Namespace: "test-ns",
-						Labels:    map[string]string{"app": "etcd"},
-					},
-					Status: corev1.PodStatus{
-						Phase: corev1.PodPending,
-					},
-				},
-			},
-			timeout:        1 * time.Minute,
-			expectedError:  nil,
-			expectedDelete: true,
-		},
-		{
-			name: "Default timeout used when zero",
-			etcdPods: []corev1.Pod{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "etcd-0",
-						Namespace: "test-ns",
-						Labels:    map[string]string{"app": "etcd"},
-					},
-					Status: corev1.PodStatus{
-						Phase: corev1.PodPending,
-					},
-				},
-			},
-			timeout:        0,
-			expectedError:  nil,
-			expectedDelete: true,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			g := NewWithT(t)
-
-			// Create a fake client with the test pods
-			var objects []client.Object
-			for i := range tc.etcdPods {
-				objects = append(objects, &tc.etcdPods[i])
-			}
-
-			// Create a base client that can list pods
-			baseClient := fake.NewClientBuilder().WithObjects(objects...).Build()
-			fakeClient := &fakeClient{
-				Client:      baseClient,
-				deletedPods: make(map[string]bool),
-			}
-
-			// Create a logger
-			log := logrus.New()
-			log.SetOutput(io.Discard)
-
-			// Create a context with a longer timeout
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-
-			// Call the function
-			err := ForceRestartETCDPodsIfNeeded(ctx, log, fakeClient, "test-ns", tc.timeout)
-
-			// Check error
-			if tc.expectedError != nil {
-				g.Expect(err).To(HaveOccurred())
-				g.Expect(err.Error()).To(Equal(tc.expectedError.Error()))
-				return
-			}
-			g.Expect(err).NotTo(HaveOccurred())
-
-			// Check if pods were deleted
-			if tc.expectedDelete {
-				g.Expect(len(fakeClient.deletedPods)).To(Equal(len(tc.etcdPods)))
-				for _, pod := range tc.etcdPods {
-					g.Expect(fakeClient.deletedPods[pod.Name]).To(BeTrue())
-				}
-			} else {
-				g.Expect(len(fakeClient.deletedPods)).To(Equal(0))
-			}
-		})
-	}
 }
