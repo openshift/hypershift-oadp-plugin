@@ -33,9 +33,12 @@ test:
 cover:
 	$(GO) test --cover -timeout 60s ./...
 
+.PHONY: deps
+deps:
+	$(GO) mod tidy && $(GO) mod vendor
 
-.PHONY: ci
-ci: verify-modules local test
+.PHONY: verify
+verify: verify-modules local test
 
 .PHONY: docker-build
 docker-build:
@@ -45,13 +48,9 @@ docker-build:
 docker-push:
 	@docker push ${IMG}
 
-.PHONY: modules
-modules:
-	go mod tidy -compat=1.22
-
 # verify-modules ensures Go module files are up to date
 .PHONY: verify-modules
-verify-modules: modules
+verify-modules: deps
 	@if !(git diff --quiet HEAD -- go.sum go.mod); then \
 		echo "go module files are out of date, please commit the changes to go.mod and go.sum"; exit 1; \
 	fi

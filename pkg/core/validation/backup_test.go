@@ -3,11 +3,13 @@ package validation
 import (
 	"testing"
 
+	. "github.com/onsi/gomega"
 	"github.com/sirupsen/logrus"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestValidatePluginConfig(t *testing.T) {
+	g := NewWithT(t)
+
 	tests := []struct {
 		name        string
 		config      map[string]string
@@ -53,9 +55,9 @@ func TestValidatePluginConfig(t *testing.T) {
 
 			_, err := p.ValidatePluginConfig(tt.config)
 			if tt.expectError {
-				assert.Error(t, err)
+				g.Expect(err).To(HaveOccurred())
 			} else {
-				assert.NoError(t, err)
+				g.Expect(err).ToNot(HaveOccurred())
 			}
 		})
 	}
