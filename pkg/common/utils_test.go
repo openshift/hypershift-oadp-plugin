@@ -1,12 +1,11 @@
 package common
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
-
-	"context"
 
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -17,6 +16,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
@@ -72,33 +73,7 @@ func TestGetMetadataAndAnnotations(t *testing.T) {
 		})
 	}
 }
-func TestValidateCronSchedule(t *testing.T) {
-	tests := []struct {
-		name      string
-		schedule  string
-		expectErr bool
-	}{
-		{"valid cron schedule", "0 0 * * *", false},
-		{"valid cron schedule, every 5 min", "*/5 * * * *", false},
-		{"Yearly cron schedule", "@yearly", false},
-		{"Annually cron schedule", "@annually", false},
-		{"Monthly cron schedule", "@monthly", false},
-		{"Weekly cron schedule", "@weekly", false},
-		{"daily cron schedule", "@daily", false},
-		{"at midnight cron schedule", "@midnight", false},
-		{"hourly cron schedule", "@hourly", false},
-		{"invalid cron schedule with typo", "0 12 * * ?", true},
-		{"invalid cron schedule", "invalid schedule", true},
-	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			g := NewWithT(t)
-			err := ValidateCronSchedule(tt.schedule)
-			g.Expect(err != nil).To(Equal(tt.expectErr))
-		})
-	}
-}
 func TestManagePauseHostedCluster(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -178,6 +153,7 @@ func TestManagePauseHostedCluster(t *testing.T) {
 		})
 	}
 }
+
 func TestManagePauseNodepools(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -261,6 +237,7 @@ func TestManagePauseNodepools(t *testing.T) {
 		})
 	}
 }
+
 func TestWaitForPausedPropagated(t *testing.T) {
 	waitForPausedTimeout := 1 * time.Second
 
@@ -284,7 +261,7 @@ func TestWaitForPausedPropagated(t *testing.T) {
 			hcp: &hyperv1.HostedControlPlane{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-hc",
-					Namespace: "test-namespace",
+					Namespace: "test-namespace-test-hc",
 				},
 				Spec: hyperv1.HostedControlPlaneSpec{
 					PausedUntil: ptr.To("true"),
@@ -303,7 +280,7 @@ func TestWaitForPausedPropagated(t *testing.T) {
 			hcp: &hyperv1.HostedControlPlane{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-hc",
-					Namespace: "test-namespace",
+					Namespace: "test-namespace-test-hc",
 				},
 				Spec: hyperv1.HostedControlPlaneSpec{
 					PausedUntil: nil,
@@ -332,7 +309,6 @@ func TestWaitForPausedPropagated(t *testing.T) {
 			} else {
 				g.Expect(err).NotTo(HaveOccurred())
 			}
-
 		})
 	}
 }
@@ -749,4 +725,14 @@ func TestGetCurrentNamespace(t *testing.T) {
 			}
 		})
 	}
+}
+
+type fakeClient struct {
+	crclient.Client
+	deletedPods map[string]bool
+}
+
+func (f *fakeClient) Delete(ctx context.Context, obj client.Object, opts ...client.DeleteOption) error {
+	f.deletedPods[obj.GetName()] = true
+	return nil
 }

@@ -2,21 +2,16 @@ package common
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
-	"slices"
 	"strings"
 	"time"
 
 	hyperv1 "github.com/openshift/hypershift/api/hypershift/v1beta1"
-	cronv3 "github.com/robfig/cron/v3"
 	"github.com/sirupsen/logrus"
 	veleroapiv1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	veleroapiv2alpha1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
-	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -95,7 +90,6 @@ func WaitForDataUpload(ctx context.Context, client crclient.Client, log logrus.F
 		log.Info("waiting for dataUpload to be completed...")
 		if err := client.List(ctx, dataUploadSlice, crclient.InNamespace("openshift-adp")); err != nil {
 			log.Error(err, "failed to get dataUploadList")
-
 			return false, err
 		}
 
@@ -128,6 +122,7 @@ func WaitForPausedPropagated(ctx context.Context, client crclient.Client, log lo
 	if timeout == 0 {
 		timeout = defaultWaitForPausedTimeout
 	}
+	hcpNamespace := GetHCPNamespace(hc.Name, hc.Namespace)
 
 	log = log.WithFields(logrus.Fields{
 		"namespace": hc.Namespace,
@@ -139,11 +134,11 @@ func WaitForPausedPropagated(ctx context.Context, client crclient.Client, log lo
 
 	err := wait.PollUntilContextCancel(waitCtx, 5*time.Second, true, func(ctx context.Context) (bool, error) {
 		hcp := &hyperv1.HostedControlPlane{}
-		if err := client.Get(ctx, types.NamespacedName{Name: hc.Name, Namespace: hc.Namespace}, hcp); err != nil {
+		if err := client.Get(ctx, types.NamespacedName{Name: hc.Name, Namespace: hcpNamespace}, hcp); err != nil {
 			if apierrors.IsNotFound(err) {
 				return true, nil
 			}
-			log.Error(err, "failed to get HostedControlPlane")
+			log.Info(err, "failed to get HostedControlPlane")
 			return false, err
 		}
 		log.Infof("waiting for HCP to be paused")
@@ -207,7 +202,8 @@ func WaitForPodVolumeBackup(ctx context.Context, client crclient.Client, log log
 			completed := 0
 			for _, pvb := range etcdPvbs {
 				if err := client.Get(ctx, crclient.ObjectKeyFromObject(pvb), pvb); err != nil {
-					return false, fmt.Errorf("failed to get PodVolumeBackup Name: %s. Err: %v", pvb.Spec.Pod.Name, err)
+					log.Info(err, "failed to get PodVolumeBackup", "name", pvb.Spec.Pod.Name)
+					return false, nil
 				}
 				switch pvb.Status.Phase {
 				case veleroapiv1.PodVolumeBackupPhaseCompleted:
@@ -310,35 +306,6 @@ func ManagePauseNodepools(ctx context.Context, client crclient.Client, log logru
 	return nil
 }
 
-// ValidateCronSchedule validates if a string is a valid cron schedule and rejects disallowed characters.
-func ValidateCronSchedule(schedule string) error {
-	_, err := cronv3.ParseStandard(schedule)
-	if err != nil {
-		return fmt.Errorf("invalid format according to cron standard: %w", err)
-	}
-
-	// Reject specific disallowed characters
-	if strings.ContainsAny(schedule, "?LV") {
-		return errors.New("the schedule contains disallowed characters: ?, L, or V")
-	}
-
-	// Reject specific patterns using regular expressions
-	disallowedPatterns := []string{
-		`\bL\b`,
-		`\bV\b`,
-		`\?`,
-	}
-
-	for _, pattern := range disallowedPatterns {
-		matched, _ := regexp.MatchString(pattern, schedule)
-		if matched {
-			return fmt.Errorf("the schedule contains a disallowed pattern: %s", pattern)
-		}
-	}
-
-	return nil
-}
-
 // GetCurrentNamespace reads the namespace from the Kubernetes service account
 // token file and returns it as a string. The file is expected to be located at
 // "/var/run/secrets/kubernetes.io/serviceaccount/namespace". If there is an error
@@ -430,52 +397,6 @@ func GetHCP(ctx context.Context, nsList []string, client crclient.Client, log lo
 	return nil, fmt.Errorf("no HostedControlPlane found")
 }
 
-// checkPodsAndRestart restarts pods that are stuck in waiting after a restore of the cluster.
-// This situation only happens when the FSBackup method is used.
-func CheckPodsAndRestart(ctx context.Context, log logrus.FieldLogger, client crclient.Client, ns string) error {
-	log.Info("The recovery process is in progress...")
-	// This is necessary to let the pods to be ready.
-	// If the BlackListed pods get stuck in a waiting state, that pod needs to be restarted.
-	time.Sleep(time.Minute * 2)
-
-	waitCtx, cancel := context.WithTimeout(ctx, defaultWaitForTimeout)
-	defer cancel()
-
-	err := wait.PollUntilContextCancel(waitCtx, 10*time.Second, true, func(ctx context.Context) (bool, error) {
-		wait := 0
-		podList := &corev1.PodList{}
-		if err := client.List(ctx, podList, crclient.InNamespace(ns)); err != nil {
-			log.Error(err, "failed to get HostedControlPlane pods")
-			return false, err
-		}
-		log.Infof("waiting for HostedControlPlane pods to be running")
-
-		for _, pod := range podList.Items {
-			// Security measure to avoid restarting the wrong pods.
-			if slices.Contains(appBlackList, pod.Labels["app"]) {
-				for _, status := range pod.Status.InitContainerStatuses {
-					if status.State.Waiting != nil {
-						if err := client.Delete(ctx, &pod); err != nil {
-							log.Error("error restarting the pod", "name", pod.Name, "error", err)
-						}
-						wait++
-						log.Info("pod restarted", "name", pod.Name)
-					}
-				}
-			}
-		}
-
-		if wait <= 0 {
-			return true, nil
-		}
-
-		return false, nil
-	})
-
-	if err != nil {
-		log.Errorf("timeout waiting for HostedControlPlane pods: %v", err)
-		return err
-	}
-
-	return nil
+func GetHCPNamespace(name, namespace string) string {
+	return fmt.Sprintf("%s-%s", namespace, name)
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"slices"
-	"strings"
 
 	hive "github.com/openshift/hive/apis/hive/v1"
 	common "github.com/openshift/hypershift-oadp-plugin/pkg/common"
@@ -46,8 +45,12 @@ type RestoreOptions struct {
 }
 
 // NewRestorePlugin instantiates RestorePlugin.
-func NewRestorePlugin(log logrus.FieldLogger) (*RestorePlugin, error) {
-	var err error
+func NewRestorePlugin() (*RestorePlugin, error) {
+	var (
+		err error
+		log = logrus.New()
+	)
+	log.SetLevel(logrus.DebugLevel)
 
 	log.Info("initializing hypershift OADP restore plugin")
 	client, err := common.GetClient()
@@ -86,6 +89,18 @@ func NewRestorePlugin(log logrus.FieldLogger) (*RestorePlugin, error) {
 	if rp.RestoreOptions, err = rp.validator.ValidatePluginConfig(rp.config); err != nil {
 		return nil, fmt.Errorf("error validating plugin configuration: %s", err.Error())
 	}
+
+	// Set the log level to pluginVerbosityLevel if set, keep debug level if not set
+	if rp.RestoreOptions.PluginVerbosityLevel != "" {
+		parsedLevel, err := logrus.ParseLevel(rp.RestoreOptions.PluginVerbosityLevel)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing pluginVerbosityLevel: %s", err.Error())
+		}
+		log.Infof("pluginVerbosityLevel set to %s", parsedLevel)
+		log.SetLevel(parsedLevel)
+	}
+
+	rp.log = log.WithField("type", "core-restore")
 
 	return rp, nil
 }
@@ -132,31 +147,10 @@ func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*v
 		}
 
 	case kind == "Pod":
-		metadata, err := meta.Accessor(input.Item)
-		if err != nil {
-			return nil, fmt.Errorf("error getting metadata accessor: %v", err)
-		}
-
-		if strings.Contains(metadata.GetName(), "etcd-") {
-			labels := metadata.GetLabels()
-			if _, exist := labels[common.FSBackupLabelName]; exist {
-				p.fsBackup = true
-				common.RemoveLabel(metadata, common.FSBackupLabelName)
-			}
-		}
-
-	// Last item
-	case kind == "Cluster":
-		if p.fsBackup {
-			metadata, err := meta.Accessor(input.Item)
-			if err != nil {
-				return nil, fmt.Errorf("error getting metadata accessor: %v", err)
-			}
-			ns := metadata.GetNamespace()
-			if err := common.CheckPodsAndRestart(p.ctx, p.log, p.client, ns); err != nil {
-				p.log.Errorf("error checking CrashLoopBackoff pods: %v", err)
-			}
-		}
+		p.log.Debugf("Pod found, skipping restore")
+		return &velero.RestoreItemActionExecuteOutput{
+			SkipRestore: true,
+		}, nil
 
 	case common.MainKinds[kind]:
 		// Unpausing NodePools
