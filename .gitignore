@@ -26,6 +26,7 @@ go.work.sum
 .envrc
 
 # build output
+dist/
 _output/
 
 # Editors

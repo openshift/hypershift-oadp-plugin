@@ -15,15 +15,34 @@
 PKG := github.com/openshift/hypershift-oadp-plugin
 BIN := hypershift-oadp-plugin
 IMG ?= quay.io/hypershift/hypershift-oadp-plugin:latest
+VERSION ?= $(shell git describe --tags --always)
 
-ARCH ?= amd64
+# Supported architectures and platforms
+ARCHS ?= amd64 arm64
 DOCKER_BUILD_ARGS ?= --platform=linux/$(ARCH)
 GO=GO111MODULE=on GOWORK=off GOFLAGS=-mod=vendor go
 
+.PHONY: install-goreleaser
+install-goreleaser:
+ 	## Latest version of goreleaser v1. V2 requires go 1.24+
+	@echo "Installing goreleaser..."
+	@GOFLAGS= go install github.com/goreleaser/goreleaser@v1.26.2
+	@echo "Goreleaser installed successfully!"
 
 .PHONY: local
-local: build-dirs
-	$(GO) build -v -o _output/bin/$(BIN) .
+local: verify install-goreleaser build-dirs
+	goreleaser build --snapshot --clean
+	@mkdir -p dist/$(BIN)_$(VERSION)
+	@mv dist/$(BIN)_*/* dist/$(BIN)_$(VERSION)/
+	@rm -rf dist/$(BIN)_darwin_* dist/$(BIN)_linux_*
+
+.PHONY: release
+release: verify install-goreleaser
+	goreleaser release --clean
+
+.PHONY: release-local
+release-local: verify install-goreleaser build-dirs
+	GORELEASER_CURRENT_TAG=$(VERSION) goreleaser build --clean
 
 .PHONY: tests
 test:
@@ -38,15 +57,15 @@ deps:
 	$(GO) mod tidy && $(GO) mod vendor
 
 .PHONY: verify
-verify: verify-modules local test
+verify: verify-modules test
 
 .PHONY: docker-build
 docker-build:
-	docker build -t ${IMG} . $(DOCKER_BUILD_ARGS)
+	docker build -t ${IMG} .
 
 .PHONY: docker-push
 docker-push:
-	@docker push ${IMG}
+	docker push ${IMG}
 
 # verify-modules ensures Go module files are up to date
 .PHONY: verify-modules
@@ -57,10 +76,10 @@ verify-modules: deps
 
 .PHONY: build-dirs
 build-dirs:
-	@mkdir -p _output/bin/$(ARCH)
+	@mkdir -p dist
 
 # clean removes build artifacts from the local environment.
 .PHONY: clean
 clean:
 	@echo "cleaning"
-	rm -rf _output
+	rm -rf _output dist
