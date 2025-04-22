@@ -1,0 +1,54 @@
+project_name: hypershift-oadp-plugin
+
+before:
+  hooks:
+    - go mod tidy
+    - go mod vendor
+
+builds:
+  - env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    binary: hypershift-oadp-plugin-{{ .Os }}-{{ .Arch }}
+    main: ./main.go
+    ldflags:
+      - -s -w -extldflags "-static"
+      - -X github.com/openshift/hypershift-oadp-plugin/pkg/version.Version={{.Version}}
+      - -X github.com/openshift/hypershift-oadp-plugin/pkg/version.Commit={{.Commit}}
+      - -X github.com/openshift/hypershift-oadp-plugin/pkg/version.Date={{.Date}}
+
+archives:
+  - name_template: "{{ .ProjectName }}_{{ .Version }}"
+    files:
+      - LICENSE
+      - README.md
+      - none*
+
+checksum:
+  name_template: 'checksums.txt'
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^ci:'
+
+release:
+  draft: true
+  mode: replace
+  header: |
+    ## HyperShift OADP Plugin {{ .Version }}
+
+    This is a release of the HyperShift OADP Plugin.
+  footer: |
+    ## Thanks!
+
+    Thanks to all contributors who helped with this release!
