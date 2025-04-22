@@ -8,7 +8,6 @@ require (
 	github.com/onsi/gomega v1.35.1
 	github.com/openshift/hive/apis v0.0.0-20241220022629-3f49f26197ff
 	github.com/openshift/hypershift/api v0.0.0-20250108163049-830af0531d12
-	github.com/robfig/cron/v3 v3.0.1
 	github.com/sirupsen/logrus v1.9.3
 	github.com/vmware-tanzu/velero v1.14.0
 	k8s.io/api v0.32.3
