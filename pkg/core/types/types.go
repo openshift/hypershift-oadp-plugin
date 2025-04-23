@@ -14,7 +14,7 @@ var (
 	BackupAzureResources      = []string{"azuremachines", "azuremachinetemplates", "azuremanagedmachinepools", "azuremanagedmachinepooltemplates"}
 	BackupIBMPowerVSResources = []string{"ibmpowervsmachines", "ibmpowervsmachinetemplates", "ibmpowervsclusters", "ibmpowervsclustertemplates"}
 	BackupOpenStackResources  = []string{"openstackmachines", "openstackmachinetemplates", "openstackclusters", "openstackclustertemplates"}
-	BackupKubevirtResources   = []string{"kubevirtmachines", "kubevirtmachinetemplates", "kubevirtmachinepools", "kubevirtclusters"}
+	BackupKubevirtResources   = []string{"kubevirtcluster", "kubevirtmachinetemplate", "datavolume"}
 	BackupAgentResources      = []string{"agents", "agentmachines", "agentmachinetemplates", "agentmachinepools", "agentclusters"}
 )
 
