@@ -187,6 +187,17 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 				return nil, nil, fmt.Errorf("error performing migration tasks for agent platform: %v", err)
 			}
 		}
+
+	case kind == "DataVolume" || kind == "PersistentVolumeClaim":
+		metadata, err := meta.Accessor(item)
+		if err != nil {
+			return nil, nil, fmt.Errorf("error getting metadata accessor: %v", err)
+		}
+		labels := metadata.GetLabels()
+		if _, exists := labels[common.KubevirtRHCOSLabel]; exists {
+			return nil, nil, nil
+		}
+
 	}
 
 	if (backup.Spec.DefaultVolumesToFsBackup != nil && !*backup.Spec.DefaultVolumesToFsBackup) || backup.Spec.DefaultVolumesToFsBackup == nil {
