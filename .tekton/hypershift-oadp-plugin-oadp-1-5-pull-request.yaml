@@ -610,7 +610,8 @@ spec:
       optional: true
     - name: netrc
       optional: true
-  taskRunTemplate: {}
+  taskRunTemplate:
+    serviceAccountName: build-pipeline-hypershift-oadp-plugin-oadp-1-5
   workspaces:
   - name: git-auth
     secret:
