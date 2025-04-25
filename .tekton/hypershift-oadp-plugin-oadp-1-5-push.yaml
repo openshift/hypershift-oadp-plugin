@@ -546,6 +546,9 @@ spec:
       params:
       - name: IMAGE
         value: $(tasks.build-image-index.results.IMAGE_URL)
+      - name: ADDITIONAL_TAGS
+        value:
+        - oadp-1.5
       runAfter:
       - build-image-index
       taskRef:
