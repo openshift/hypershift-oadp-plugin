@@ -21,6 +21,7 @@ const (
 	defaultWaitForTimeout       time.Duration = 5 * time.Minute
 
 	DefaultK8sSAFilePath string = "/var/run/secrets/kubernetes.io/serviceaccount"
+	KubevirtRHCOSLabel   string = "hypershift.openshift.io/is-kubevirt-rhcos"
 )
 
 var (
