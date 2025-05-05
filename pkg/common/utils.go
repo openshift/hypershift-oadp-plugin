@@ -88,7 +88,7 @@ func WaitForDataUpload(ctx context.Context, client crclient.Client, log logrus.F
 	err := wait.PollUntilContextCancel(waitCtx, dataUploadCheckPace*time.Second, true, func(ctx context.Context) (bool, error) {
 		dataUploadSlice := &veleroapiv2alpha1.DataUploadList{}
 		log.Info("waiting for dataUpload to be completed...")
-		if err := client.List(ctx, dataUploadSlice, crclient.InNamespace("openshift-adp")); err != nil {
+		if err := client.List(ctx, dataUploadSlice, crclient.InNamespace(backup.Namespace)); err != nil {
 			log.Error(err, "failed to get dataUploadList")
 			return false, err
 		}
@@ -175,7 +175,7 @@ func WaitForPodVolumeBackup(ctx context.Context, client crclient.Client, log log
 	}
 
 	podVolumeBackupList := &veleroapiv1.PodVolumeBackupList{}
-	if err := client.List(ctx, podVolumeBackupList, crclient.InNamespace("openshift-adp")); err != nil {
+	if err := client.List(ctx, podVolumeBackupList, crclient.InNamespace(backup.Namespace)); err != nil {
 		log.Error(err, "failed to get PodVolumeBackupList")
 		return false, err
 	}
