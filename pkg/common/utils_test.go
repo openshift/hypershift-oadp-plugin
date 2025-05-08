@@ -736,3 +736,50 @@ func (f *fakeClient) Delete(ctx context.Context, obj client.Object, opts ...clie
 	f.deletedPods[obj.GetName()] = true
 	return nil
 }
+
+func TestShouldEndPluginExecution(t *testing.T) {
+	tests := []struct {
+		name           string
+		objects        []client.Object
+		expectedResult bool
+	}{
+		{
+			name: "CRDs exist",
+			objects: []client.Object{
+				&hyperv1.HostedControlPlane{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-hcp",
+						Namespace: "test-namespace",
+					},
+				},
+				&hyperv1.HostedCluster{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-hc",
+						Namespace: "test-namespace",
+					},
+				},
+			},
+			expectedResult: false,
+		},
+		{
+			name:           "CRDs do not exist",
+			objects:        []client.Object{},
+			expectedResult: true,
+		},
+	}
+
+	scheme := runtime.NewScheme()
+	_ = hyperv1.AddToScheme(scheme)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+
+			client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tt.objects...).Build()
+			log := logrus.New()
+
+			result := ShouldEndPluginExecution([]string{"test-namespace"}, client, log)
+			g.Expect(result).To(Equal(tt.expectedResult))
+		})
+	}
+}
