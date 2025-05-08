@@ -132,10 +132,18 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 	p.log.Debug("Entering Hypershift backup plugin")
 	ctx := context.Context(p.ctx)
 
+	if returnEarly := common.ShouldEndPluginExecution(backup.Spec.IncludedNamespaces, p.client, p.log); returnEarly {
+		return item, nil, nil
+	}
+
 	if p.hcp == nil {
 		var err error
 		p.hcp, err = common.GetHCP(ctx, backup.Spec.IncludedNamespaces, p.client, p.log)
 		if err != nil {
+			if apierrors.IsNotFound(err) {
+				p.log.Infof("HCP not found, assuming not hypershift cluster to backup")
+				return item, nil, nil
+			}
 			return nil, nil, fmt.Errorf("error getting HCP namespace: %v", err)
 		}
 
