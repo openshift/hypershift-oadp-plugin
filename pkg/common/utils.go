@@ -400,3 +400,41 @@ func GetHCP(ctx context.Context, nsList []string, client crclient.Client, log lo
 func GetHCPNamespace(name, namespace string) string {
 	return fmt.Sprintf("%s-%s", namespace, name)
 }
+
+// ShouldEndPluginExecution checks if the plugin should end execution by verifying if the required
+// Hypershift resources (HostedControlPlane and HostedCluster) exist in the cluster.
+// Returns true if the plugin should end execution (i.e., if this is not a Hypershift cluster).
+func ShouldEndPluginExecution(namespaces []string, client crclient.Client, log logrus.FieldLogger) bool {
+	// Check if HostedControlPlane exists
+	hcpList := &hyperv1.HostedControlPlaneList{}
+	for _, ns := range namespaces {
+		if err := client.List(context.TODO(), hcpList, crclient.InNamespace(ns)); err != nil {
+			log.Debugf("Error checking for HostedControlPlanes: %v", err)
+			return true
+		}
+		if len(hcpList.Items) > 0 {
+			break
+		}
+	}
+
+	// Check if HostedCluster exists
+	hcList := &hyperv1.HostedClusterList{}
+	for _, ns := range namespaces {
+		if err := client.List(context.TODO(), hcList, crclient.InNamespace(ns)); err != nil {
+			log.Debugf("Error checking for HostedCluster: %v", err)
+			return true
+		}
+		if len(hcList.Items) > 0 {
+			break
+		}
+	}
+
+	// If the resources are found, we assume a HostedControlPlane needs to be backed up
+	if len(hcpList.Items) > 0 && len(hcList.Items) > 0 {
+		log.Debug("Found Hypershift resources")
+		return false
+	}
+
+	log.Debug("No Hypershift resources found")
+	return true
+}
