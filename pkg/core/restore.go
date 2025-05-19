@@ -127,6 +127,42 @@ func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*v
 	p.log.Debugf("Entering Hypershift restore plugin")
 	ctx := context.Context(p.ctx)
 
+	// logging may not be working :)
+	p.log.Info("WESHAY: get backup from restore")
+	p.log.Debug("WESHAY: get backup from restore")
+
+	// get the backup associated with the restore
+	backup := new(velerov1api.Backup)
+	err := p.client.Get(
+		context.TODO(),
+		types.NamespacedName{
+			Namespace: input.Restore.Namespace,
+			Name:      input.Restore.Spec.BackupName,
+		},
+		backup,
+	)
+
+	if err != nil {
+		p.log.Error("Fail to get backup for restore.")
+		return nil, fmt.Errorf("fail to get backup for restore: %s", err.Error())
+	}
+
+	p.log.Info("WESHAY:BEGIN: if return early")
+	p.log.Debug("WESHAY:BEGIN: if return early")
+
+	// if the backup is nil or the included namespaces are nil, return early
+	if backup == nil || backup.Spec.IncludedNamespaces == nil {
+		p.log.Error("Backup or IncludedNamespaces is nil")
+		return nil, fmt.Errorf("backup or included namespaces is nil")
+	}
+
+	// if the backup is not a hypershift backup, return early
+	if returnEarly := common.ShouldEndPluginExecution(backup.Spec.IncludedNamespaces, p.client, p.log); returnEarly {
+		return nil, nil
+	}
+	p.log.Info("WESHAY:END: if return early")
+	p.log.Debug("WESHAY:END: if return early")
+
 	kind := input.Item.GetObjectKind().GroupVersionKind().Kind
 	switch {
 	case common.MatchSuffixKind(kind, "clusters", "machines"):
