@@ -158,11 +158,14 @@ func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*v
 	}
 
 	// if the backup is not a hypershift backup, return early
-	if returnEarly := common.ShouldEndPluginExecution(backup.Spec.IncludedNamespaces, p.client, p.log); returnEarly {
-		return nil, nil
-	}
-	p.log.Info("WESHAY:END: if return early")
-	p.log.Debug("WESHAY:END: if return early")
+	// This currently causes the plugin to panic
+
+	// if returnEarly := common.ShouldEndPluginExecution(backup.Spec.IncludedNamespaces, p.client, p.log); returnEarly {
+	// 	return nil, nil
+	// }
+
+	// p.log.Info("WESHAY:END: if return early")
+	// p.log.Debug("WESHAY:END: if return early")
 
 	kind := input.Item.GetObjectKind().GroupVersionKind().Kind
 	switch {
