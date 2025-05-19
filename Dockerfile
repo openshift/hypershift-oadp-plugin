@@ -17,10 +17,8 @@ WORKDIR /go/src/github.com/openshift/hypershift-oadp-plugin
 COPY . .
 RUN CGO_ENABLED=0 go build -o /go/bin/hypershift-oadp-plugin .
 
-FROM busybox:1.33.1 AS busybox
-
-FROM scratch
+FROM registry.access.redhat.com/ubi9-minimal 
+RUN mkdir /plugins
 COPY --from=build /go/bin/hypershift-oadp-plugin /plugins/
-COPY --from=busybox /bin/cp /bin/cp
 USER 65532:65532
-ENTRYPOINT ["cp", "/plugins/hypershift-oadp-plugin", "/target/."]
+ENTRYPOINT ["/bin/bash", "-c", "cp /plugins/* /target/."]
