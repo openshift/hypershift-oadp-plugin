@@ -15,10 +15,10 @@ func main() {
 
 func newHCPBackupPlugin(logger logrus.FieldLogger) (interface{}, error) {
 	logger.Info("Initializing HCP Backup Plugin")
-	return core.NewBackupPlugin()
+	return core.NewBackupPlugin(logger)
 }
 
 func newHCPRestorePlugin(logger logrus.FieldLogger) (interface{}, error) {
 	logger.Info("Initializing HCP Restore Plugin")
-	return core.NewRestorePlugin()
+	return core.NewRestorePlugin(logger)
 }

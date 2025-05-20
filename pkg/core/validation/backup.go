@@ -16,7 +16,7 @@ type BackupValidator interface {
 }
 
 type BackupPluginValidator struct {
-	Log *logrus.Logger
+	Log logrus.FieldLogger
 }
 
 func (p *BackupPluginValidator) ValidatePluginConfig(config map[string]string) (*plugtypes.BackupOptions, error) {
@@ -56,7 +56,6 @@ func (p *BackupPluginValidator) ValidatePluginConfig(config map[string]string) (
 			bo.DataUploadCheckPace = time.Duration(seconds)
 		case "pluginVerbosityLevel":
 			p.Log.Debugf("reading/parsing pluginVerbosityLevel %s", value)
-			bo.PluginVerbosityLevel = value
 		default:
 			p.Log.Warnf("unknown configuration key: %s with value %s", key, value)
 		}

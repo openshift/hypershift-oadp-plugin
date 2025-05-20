@@ -45,12 +45,10 @@ type RestoreOptions struct {
 }
 
 // NewRestorePlugin instantiates RestorePlugin.
-func NewRestorePlugin() (*RestorePlugin, error) {
+func NewRestorePlugin(log logrus.FieldLogger) (*RestorePlugin, error) {
 	var (
 		err error
-		log = logrus.New()
 	)
-	log.SetLevel(logrus.DebugLevel)
 
 	log.Info("initializing hypershift OADP restore plugin")
 	client, err := common.GetClient()
@@ -76,7 +74,7 @@ func NewRestorePlugin() (*RestorePlugin, error) {
 	}
 
 	rp := &RestorePlugin{
-		log:      log,
+		log:      log.WithField("type", "core-restore"),
 		ctx:      ctx,
 		client:   client,
 		fsBackup: false,
@@ -89,18 +87,6 @@ func NewRestorePlugin() (*RestorePlugin, error) {
 	if rp.RestoreOptions, err = rp.validator.ValidatePluginConfig(rp.config); err != nil {
 		return nil, fmt.Errorf("error validating plugin configuration: %s", err.Error())
 	}
-
-	// Set the log level to pluginVerbosityLevel if set, keep debug level if not set
-	if rp.RestoreOptions.PluginVerbosityLevel != "" {
-		parsedLevel, err := logrus.ParseLevel(rp.RestoreOptions.PluginVerbosityLevel)
-		if err != nil {
-			return nil, fmt.Errorf("error parsing pluginVerbosityLevel: %s", err.Error())
-		}
-		log.Infof("pluginVerbosityLevel set to %s", parsedLevel)
-		log.SetLevel(parsedLevel)
-	}
-
-	rp.log = log.WithField("type", "core-restore")
 
 	return rp, nil
 }
