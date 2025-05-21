@@ -405,6 +405,11 @@ func GetHCPNamespace(name, namespace string) string {
 // Hypershift resources (HostedControlPlane and HostedCluster) exist in the cluster.
 // Returns true if the plugin should end execution (i.e., if this is not a Hypershift cluster).
 func ShouldEndPluginExecution(namespaces []string, client crclient.Client, log logrus.FieldLogger) bool {
+	if len(namespaces) == 0 {
+		log.Debug("No namespaces provided")
+		return true
+	}
+
 	// Check if HostedControlPlane exists
 	hcpList := &hyperv1.HostedControlPlaneList{}
 	for _, ns := range namespaces {
