@@ -11,6 +11,7 @@ import (
 	validation "github.com/openshift/hypershift-oadp-plugin/pkg/core/validation"
 	hyperv1 "github.com/openshift/hypershift/api/hypershift/v1beta1"
 	"github.com/sirupsen/logrus"
+	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -126,6 +127,34 @@ func (p *RestorePlugin) AppliesTo() (velero.ResourceSelector, error) {
 func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*velero.RestoreItemActionExecuteOutput, error) {
 	p.log.Debugf("Entering Hypershift restore plugin")
 	ctx := context.Context(p.ctx)
+
+	// get the backup associated with the restore
+	backup := new(velerov1api.Backup)
+	err := p.client.Get(
+		ctx,
+		types.NamespacedName{
+			Namespace: input.Restore.Namespace,
+			Name:      input.Restore.Spec.BackupName,
+		},
+		backup,
+	)
+
+	if err != nil {
+		p.log.Error("Fail to get backup for restore.")
+		return nil, fmt.Errorf("fail to get backup for restore: %s", err.Error())
+	}
+
+	// if the backup is nil or the included namespaces are nil, return early
+	if backup == nil || backup.Spec.IncludedNamespaces == nil {
+		p.log.Error("Backup or IncludedNamespaces is nil")
+		return nil, fmt.Errorf("backup or included namespaces is nil")
+	}
+
+	// if the backup is not a hypershift backup, return early
+	if returnEarly := common.ShouldEndPluginExecution(backup.Spec.IncludedNamespaces, p.client, p.log); returnEarly {
+		p.log.Info("Skipping hypershift plugin execution - not a hypershift backup")
+		return velero.NewRestoreItemActionExecuteOutput(input.Item), nil
+	}
 
 	kind := input.Item.GetObjectKind().GroupVersionKind().Kind
 	switch {
