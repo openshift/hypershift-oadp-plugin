@@ -164,7 +164,7 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 		p.log.Debugf("Adding Annotation: %s to %s", common.CAPIPausedAnnotationName, metadata.GetName())
 		common.AddAnnotation(metadata, common.CAPIPausedAnnotationName, "true")
 
-	case kind == "HostedControlPlane":
+	case kind == common.HostedControlPlaneKind:
 		hcp := &hyperv1.HostedControlPlane{}
 		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(item.UnstructuredContent(), hcp); err != nil {
 			return nil, nil, fmt.Errorf("error converting item to HostedControlPlane: %v", err)
@@ -189,14 +189,14 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 			p.pvTriggered = true
 		}()
 
-	case kind == "ClusterDeployment":
+	case kind == common.ClusterDeploymentKind:
 		if p.Migration && p.hcp.Spec.Platform.Type == hyperv1.AgentPlatform {
 			if err := agent.MigrationTasks(ctx, item, p.client, p.log, p.config, backup); err != nil {
 				return nil, nil, fmt.Errorf("error performing migration tasks for agent platform: %v", err)
 			}
 		}
 
-	case kind == "DataVolume" || kind == "PersistentVolumeClaim":
+	case kind == common.DataVolumeKind || kind == common.PersistentVolumeClaimKind:
 		metadata, err := meta.Accessor(item)
 		if err != nil {
 			return nil, nil, fmt.Errorf("error getting metadata accessor: %v", err)
