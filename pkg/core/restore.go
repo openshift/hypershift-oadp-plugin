@@ -145,9 +145,9 @@ func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*v
 	}
 
 	// if the backup is nil or the included namespaces are nil, return early
-	if backup == nil || backup.Spec.IncludedNamespaces == nil {
-		p.log.Error("Backup or IncludedNamespaces is nil")
-		return nil, fmt.Errorf("backup or included namespaces is nil")
+	if backup.Spec.IncludedNamespaces == nil {
+		p.log.Error("IncludedNamespaces from backup object is nil")
+		return nil, fmt.Errorf("included namespaces from backup object is nil")
 	}
 
 	// if the backup is not a hypershift backup, return early
@@ -166,7 +166,7 @@ func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*v
 		p.log.Debugf("Removing Annotation: %s to %s", common.CAPIPausedAnnotationName, metadata.GetName())
 		common.RemoveAnnotation(metadata, common.CAPIPausedAnnotationName)
 
-	case kind == "HostedControlPlane":
+	case kind == common.HostedControlPlaneKind:
 		hcp := &hyperv1.HostedControlPlane{}
 		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(input.Item.UnstructuredContent(), hcp); err != nil {
 			return nil, fmt.Errorf("error converting item to HostedControlPlane: %v", err)
@@ -192,7 +192,16 @@ func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*v
 			return nil, fmt.Errorf("error unpausing HostedClusters: %v", err)
 		}
 
-	case kind == "ClusterDeployment":
+		if kind == common.HostedClusterKind {
+			metadata, err := meta.Accessor(input.Item)
+			if err != nil {
+				return nil, fmt.Errorf("error getting metadata accessor: %v", err)
+			}
+			p.log.Debugf("Adding Annotation: %s to %s", common.HostedClusterRestoredFromBackupAnnotation, metadata.GetName())
+			common.AddAnnotation(metadata, common.HostedClusterRestoredFromBackupAnnotation, "")
+		}
+
+	case kind == common.ClusterDeploymentKind:
 		clusterdDeployment := &hive.ClusterDeployment{}
 		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(input.Item.UnstructuredContent(), clusterdDeployment); err != nil {
 			return nil, fmt.Errorf("error converting item to CusterdDeployment: %v", err)

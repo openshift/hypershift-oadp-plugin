@@ -22,14 +22,26 @@ const (
 
 	DefaultK8sSAFilePath string = "/var/run/secrets/kubernetes.io/serviceaccount"
 	KubevirtRHCOSLabel   string = "hypershift.openshift.io/is-kubevirt-rhcos"
+
+	// Integration with Hypershift, more info here: https://github.com/openshift/hypershift/pull/6195
+	HostedClusterRestoredFromBackupAnnotation string = "hypershift.openshift.io/restored-from-backup"
+
+	// hypershift/cluster-api kinds
+	HostedClusterKind         string = "HostedCluster"
+	HostedControlPlaneKind    string = "HostedControlPlane"
+	NodePoolKind              string = "NodePool"
+	PersistentVolumeKind      string = "PersistentVolume"
+	PersistentVolumeClaimKind string = "PersistentVolumeClaim"
+	ClusterDeploymentKind     string = "ClusterDeployment"
+	DataVolumeKind            string = "DataVolume"
 )
 
 var (
 	MainKinds = map[string]bool{
-		"HostedCluster":         true,
-		"NodePool":              true,
-		"PersistentVolume":      true,
-		"PersistentVolumeClaim": true,
+		HostedClusterKind:         true,
+		NodePoolKind:              true,
+		PersistentVolumeKind:      true,
+		PersistentVolumeClaimKind: true,
 	}
 )
 
