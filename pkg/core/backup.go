@@ -44,13 +44,10 @@ type BackupPlugin struct {
 }
 
 // NewBackupPlugin instantiates BackupPlugin.
-func NewBackupPlugin() (*BackupPlugin, error) {
+func NewBackupPlugin(log logrus.FieldLogger) (*BackupPlugin, error) {
 	var (
 		err error
-		log = logrus.New()
 	)
-	log.SetLevel(logrus.DebugLevel)
-
 	log.Infof("initializing hypershift OADP backup plugin")
 	client, err := common.GetClient()
 	if err != nil {
@@ -74,7 +71,7 @@ func NewBackupPlugin() (*BackupPlugin, error) {
 	}
 
 	bp := &BackupPlugin{
-		log:       log,
+		log:       log.WithField("type", "core-backup"),
 		client:    client,
 		config:    pluginConfig.Data,
 		finished:  false,
@@ -85,18 +82,6 @@ func NewBackupPlugin() (*BackupPlugin, error) {
 	if bp.BackupOptions, err = bp.validator.ValidatePluginConfig(bp.config); err != nil {
 		return nil, fmt.Errorf("error validating plugin configuration: %s", err.Error())
 	}
-
-	// Set the log level to pluginVerbosityLevel if set, keep debug level if not set
-	if bp.BackupOptions.PluginVerbosityLevel != "" {
-		parsedLevel, err := logrus.ParseLevel(bp.BackupOptions.PluginVerbosityLevel)
-		if err != nil {
-			return nil, fmt.Errorf("error parsing pluginVerbosityLevel: %s", err.Error())
-		}
-		log.Infof("pluginVerbosityLevel set to %s", parsedLevel)
-		log.SetLevel(parsedLevel)
-	}
-
-	bp.log = log.WithField("type", "core-backup")
 
 	return bp, nil
 }
