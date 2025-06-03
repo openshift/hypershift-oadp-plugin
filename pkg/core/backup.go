@@ -96,7 +96,7 @@ func NewBackupPlugin() (*BackupPlugin, error) {
 		log.SetLevel(parsedLevel)
 	}
 
-	bp.log = log.WithField("type", "core-backup")
+	bp.log = log.WithField("type", "hcp-backup")
 
 	return bp, nil
 }
@@ -161,8 +161,8 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 		if err != nil {
 			return nil, nil, fmt.Errorf("error getting metadata accessor: %v", err)
 		}
-		p.log.Debugf("Adding Annotation: %s to %s", common.CAPIPausedAnnotationName, metadata.GetName())
 		common.AddAnnotation(metadata, common.CAPIPausedAnnotationName, "true")
+		p.log.Infof("Added CAPI Paused Annotation: %s to %s", common.CAPIPausedAnnotationName, metadata.GetName())
 
 	case kind == common.HostedControlPlaneKind:
 		hcp := &hyperv1.HostedControlPlane{}
@@ -175,19 +175,28 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 		}
 
 	case common.MainKinds[kind]:
-		// Pausing HostedClusters
-		if err := common.ManagePauseHostedCluster(ctx, p.client, p.log, "true", backup.Spec.IncludedNamespaces); err != nil {
-			return nil, nil, fmt.Errorf("error pausing HostedClusters: %v", err)
+		// Updating HostedClusters
+		if err := common.UpdateHostedCluster(ctx, p.client, p.log, "true", backup.Spec.IncludedNamespaces); err != nil {
+			return nil, nil, fmt.Errorf("error updating HostedClusters: %v", err)
 		}
 
-		// Pausing NodePools
-		if err := common.ManagePauseNodepools(ctx, p.client, p.log, "true", backup.Spec.IncludedNamespaces); err != nil {
-			return nil, nil, fmt.Errorf("error pausing NodePools: %v", err)
+		// Updating NodePools
+		if err := common.UpdateNodepools(ctx, p.client, p.log, "true", backup.Spec.IncludedNamespaces); err != nil {
+			return nil, nil, fmt.Errorf("error updating NodePools: %v", err)
 		}
 
 		defer func() {
 			p.pvTriggered = true
 		}()
+
+		if kind == common.HostedClusterKind {
+			metadata, err := meta.Accessor(item)
+			if err != nil {
+				return nil, nil, fmt.Errorf("error getting metadata accessor: %v", err)
+			}
+			common.AddAnnotation(metadata, common.HostedClusterRestoredFromBackupAnnotation, "")
+			p.log.Infof("Added restore annotation to HostedCluster %s", metadata.GetName())
+		}
 
 	case kind == common.ClusterDeploymentKind:
 		if p.Migration && p.hcp.Spec.Platform.Type == hyperv1.AgentPlatform {
@@ -205,7 +214,6 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 		if _, exists := labels[common.KubevirtRHCOSLabel]; exists {
 			return nil, nil, nil
 		}
-
 	}
 
 	if (backup.Spec.DefaultVolumesToFsBackup != nil && !*backup.Spec.DefaultVolumesToFsBackup) || backup.Spec.DefaultVolumesToFsBackup == nil {
@@ -245,15 +253,15 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 	}
 
 	if p.finished && !p.Migration {
-		p.log.Debug("Volume backup is done, unpausing HC and NPs")
-		// Unpausing NodePools
-		if err := common.ManagePauseNodepools(ctx, p.client, p.log, "false", backup.Spec.IncludedNamespaces); err != nil {
-			return nil, nil, fmt.Errorf("error unpausing NodePools: %v", err)
+		p.log.Debug("Volume backup is done, updating HC and NPs")
+		// updating NodePools
+		if err := common.UpdateNodepools(ctx, p.client, p.log, "false", backup.Spec.IncludedNamespaces); err != nil {
+			return nil, nil, fmt.Errorf("error updating NodePools: %v", err)
 		}
 
-		// Unpausing HostedClusters
-		if err := common.ManagePauseHostedCluster(ctx, p.client, p.log, "false", backup.Spec.IncludedNamespaces); err != nil {
-			return nil, nil, fmt.Errorf("error unpausing HostedClusters: %v", err)
+		// updating HostedClusters
+		if err := common.UpdateHostedCluster(ctx, p.client, p.log, "false", backup.Spec.IncludedNamespaces); err != nil {
+			return nil, nil, fmt.Errorf("error updating HostedClusters: %v", err)
 		}
 	}
 
