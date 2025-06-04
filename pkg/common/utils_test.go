@@ -138,7 +138,7 @@ func TestManagePauseHostedCluster(t *testing.T) {
 			client := fake.NewClientBuilder().WithScheme(scheme).WithLists(tt.hcList).Build()
 			log := logrus.New()
 
-			err := ManagePauseHostedCluster(context.TODO(), client, log, tt.paused, tt.namespaces)
+			err := UpdateHostedCluster(context.TODO(), client, log, tt.paused, tt.namespaces)
 			if tt.expectErr {
 				g.Expect(err).To(HaveOccurred())
 			} else {
@@ -148,6 +148,7 @@ func TestManagePauseHostedCluster(t *testing.T) {
 					err := client.Get(context.TODO(), types.NamespacedName{Name: hc.Name, Namespace: hc.Namespace}, updatedHC)
 					g.Expect(err).NotTo(HaveOccurred())
 					g.Expect(updatedHC.Spec.PausedUntil).To(Equal(ptr.To(tt.paused)))
+					g.Expect(updatedHC.Annotations[HostedClusterRestoredFromBackupAnnotation]).To(BeEmpty())
 				}
 			}
 		})
@@ -222,7 +223,7 @@ func TestManagePauseNodepools(t *testing.T) {
 			client := fake.NewClientBuilder().WithScheme(scheme).WithLists(tt.npList).Build()
 			log := logrus.New()
 
-			err := ManagePauseNodepools(context.TODO(), client, log, tt.paused, tt.namespaces)
+			err := UpdateNodepools(context.TODO(), client, log, tt.paused, tt.namespaces)
 			if tt.expectErr {
 				g.Expect(err).To(HaveOccurred())
 			} else {
