@@ -6,6 +6,14 @@ import (
 	"github.com/vmware-tanzu/velero/pkg/plugin/framework"
 )
 
+func configureLogger(logger logrus.FieldLogger) logrus.FieldLogger {
+	return logger.WithFields(
+		logrus.Fields{
+			"type": "hcp-plugin",
+		},
+	)
+}
+
 func main() {
 	framework.NewServer().
 		RegisterBackupItemAction("hypershift-oadp-plugin/backup-item-action", newHCPBackupPlugin).
@@ -14,11 +22,9 @@ func main() {
 }
 
 func newHCPBackupPlugin(logger logrus.FieldLogger) (interface{}, error) {
-	logger.Info("Initializing HCP Backup Plugin")
-	return core.NewBackupPlugin()
+	return core.NewBackupPlugin(configureLogger(logger))
 }
 
 func newHCPRestorePlugin(logger logrus.FieldLogger) (interface{}, error) {
-	logger.Info("Initializing HCP Restore Plugin")
-	return core.NewRestorePlugin()
+	return core.NewRestorePlugin(configureLogger(logger))
 }
