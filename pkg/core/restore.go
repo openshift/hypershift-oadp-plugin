@@ -46,19 +46,21 @@ type RestoreOptions struct {
 }
 
 // NewRestorePlugin instantiates RestorePlugin.
-func NewRestorePlugin() (*RestorePlugin, error) {
+func NewRestorePlugin(logger logrus.FieldLogger) (*RestorePlugin, error) {
 	var (
 		err error
-		log = logrus.New()
 	)
-	log.SetLevel(logrus.DebugLevel)
 
-	log.Info("initializing hypershift OADP restore plugin")
+	logger = logger.WithFields(logrus.Fields{
+		"process": "restore",
+	})
+
+	logger.Info("Initializing HCP Restore Plugin")
 	client, err := common.GetClient()
 	if err != nil {
 		return nil, fmt.Errorf("error recovering the k8s client: %s", err.Error())
 	}
-	log.Debug("client recovered")
+	logger.Debug("client recovered")
 
 	pluginConfig := corev1.ConfigMap{}
 	ns, err := common.GetCurrentNamespace()
@@ -73,18 +75,23 @@ func NewRestorePlugin() (*RestorePlugin, error) {
 		if !apierrors.IsNotFound(err) {
 			return nil, fmt.Errorf("error getting plugin configuration: %s", err.Error())
 		}
-		log.Info("configuration for hypershift OADP plugin not found")
+		logger.Info("configuration for hypershift OADP plugin not found")
+	}
+
+	validator := &validation.RestorePluginValidator{}
+	if l, ok := logger.(*logrus.Logger); ok {
+		validator.Log = l
+	} else {
+		validator.Log = logrus.New()
 	}
 
 	rp := &RestorePlugin{
-		log:      log,
-		ctx:      ctx,
-		client:   client,
-		fsBackup: false,
-		config:   pluginConfig.Data,
-		validator: &validation.RestorePluginValidator{
-			Log: log,
-		},
+		log:       logger,
+		ctx:       ctx,
+		client:    client,
+		fsBackup:  false,
+		config:    pluginConfig.Data,
+		validator: validator,
 	}
 
 	if rp.RestoreOptions, err = rp.validator.ValidatePluginConfig(rp.config); err != nil {
@@ -97,11 +104,13 @@ func NewRestorePlugin() (*RestorePlugin, error) {
 		if err != nil {
 			return nil, fmt.Errorf("error parsing pluginVerbosityLevel: %s", err.Error())
 		}
-		log.Infof("pluginVerbosityLevel set to %s", parsedLevel)
-		log.SetLevel(parsedLevel)
+		logger.Infof("pluginVerbosityLevel set to %s", parsedLevel)
+		if l, ok := logger.(*logrus.Logger); ok {
+			l.SetLevel(parsedLevel)
+		}
 	}
 
-	rp.log = log.WithField("type", "hcp-restore")
+	rp.log = logger.WithField("type", "hcp-restore")
 
 	return rp, nil
 }

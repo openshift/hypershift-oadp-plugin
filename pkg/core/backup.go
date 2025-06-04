@@ -44,19 +44,22 @@ type BackupPlugin struct {
 }
 
 // NewBackupPlugin instantiates BackupPlugin.
-func NewBackupPlugin() (*BackupPlugin, error) {
+func NewBackupPlugin(logger logrus.FieldLogger) (*BackupPlugin, error) {
 	var (
 		err error
-		log = logrus.New()
 	)
-	log.SetLevel(logrus.DebugLevel)
 
-	log.Infof("initializing hypershift OADP backup plugin")
+	logger = logger.WithFields(logrus.Fields{
+		"process": "backup",
+	})
+
+	logger.Info("Initializing HCP Backup Plugin")
+
 	client, err := common.GetClient()
 	if err != nil {
 		return nil, fmt.Errorf("error recovering the k8s client: %s", err.Error())
 	}
-	log.Infof("client recovered")
+	logger.Infof("client recovered")
 	ctx := context.Background()
 
 	pluginConfig := corev1.ConfigMap{}
@@ -70,16 +73,23 @@ func NewBackupPlugin() (*BackupPlugin, error) {
 		if !apierrors.IsNotFound(err) {
 			return nil, fmt.Errorf("error getting plugin configuration: %s", err.Error())
 		}
-		log.Infof("configuration for hypershift OADP plugin not found")
+		logger.Infof("configuration for hypershift OADP plugin not found")
+	}
+
+	validator := &validation.BackupPluginValidator{}
+	if l, ok := logger.(*logrus.Logger); ok {
+		validator.Log = l
+	} else {
+		validator.Log = logrus.New()
 	}
 
 	bp := &BackupPlugin{
-		log:       log,
+		log:       logger,
 		client:    client,
 		config:    pluginConfig.Data,
 		finished:  false,
 		ctx:       ctx,
-		validator: &validation.BackupPluginValidator{Log: log},
+		validator: validator,
 	}
 
 	if bp.BackupOptions, err = bp.validator.ValidatePluginConfig(bp.config); err != nil {
@@ -92,11 +102,13 @@ func NewBackupPlugin() (*BackupPlugin, error) {
 		if err != nil {
 			return nil, fmt.Errorf("error parsing pluginVerbosityLevel: %s", err.Error())
 		}
-		log.Infof("pluginVerbosityLevel set to %s", parsedLevel)
-		log.SetLevel(parsedLevel)
+		logger.Infof("pluginVerbosityLevel set to %s", parsedLevel)
+		if l, ok := logger.(*logrus.Logger); ok {
+			l.SetLevel(parsedLevel)
+		}
 	}
 
-	bp.log = log.WithField("type", "hcp-backup")
+	bp.log.Infof("Backup plugin initialized with log level: %s", logrus.GetLevel())
 
 	return bp, nil
 }
