@@ -11,6 +11,7 @@ require (
 	github.com/sirupsen/logrus v1.9.3
 	github.com/vmware-tanzu/velero v1.14.0
 	k8s.io/api v0.32.3
+	k8s.io/apiextensions-apiserver v0.31.3
 	sigs.k8s.io/controller-runtime v0.19.3
 )
 
@@ -33,7 +34,6 @@ require (
 	golang.org/x/exp v0.0.0-20240213143201-ec583247a57a // indirect
 	gomodules.xyz/jsonpatch/v2 v2.4.0 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.12.0 // indirect
-	k8s.io/apiextensions-apiserver v0.31.0 // indirect
 )
 
 require (

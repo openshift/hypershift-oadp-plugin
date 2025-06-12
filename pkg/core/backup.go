@@ -144,7 +144,7 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 	p.log.Debug("Entering Hypershift backup plugin")
 	ctx := context.Context(p.ctx)
 
-	if returnEarly := common.ShouldEndPluginExecution(backup.Spec.IncludedNamespaces, p.client, p.log); returnEarly {
+	if returnEarly := common.ShouldEndPluginExecution(ctx, backup, p.client, p.log); returnEarly {
 		return item, nil, nil
 	}
 
