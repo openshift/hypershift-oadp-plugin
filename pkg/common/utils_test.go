@@ -8,11 +8,13 @@ import (
 	"time"
 
 	. "github.com/onsi/gomega"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/utils/ptr"
 
 	hyperv1 "github.com/openshift/hypershift/api/hypershift/v1beta1"
 	"github.com/sirupsen/logrus"
+	veleroapiv1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -740,46 +742,104 @@ func (f *fakeClient) Delete(ctx context.Context, obj client.Object, opts ...clie
 
 func TestShouldEndPluginExecution(t *testing.T) {
 	tests := []struct {
-		name           string
-		objects        []client.Object
-		expectedResult bool
+		name               string
+		objects            []client.Object
+		includedNamespaces []string
+		includedResources  []string
+		expectedResult     bool
 	}{
 		{
-			name: "CRDs exist",
+			name: "CRD exists",
 			objects: []client.Object{
-				&hyperv1.HostedControlPlane{
+				&apiextensionsv1.CustomResourceDefinition{
 					ObjectMeta: metav1.ObjectMeta{
-						Name:      "test-hcp",
-						Namespace: "test-namespace",
-					},
-				},
-				&hyperv1.HostedCluster{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "test-hc",
-						Namespace: "test-namespace",
+						Name: "hostedcontrolplanes.hypershift.openshift.io",
 					},
 				},
 			},
-			expectedResult: false,
+			includedNamespaces: []string{"test-namespace"},
+			includedResources:  []string{"hostedcontrolplanes", "hostedclusters"},
+			expectedResult:     false,
 		},
 		{
-			name:           "CRDs do not exist",
-			objects:        []client.Object{},
-			expectedResult: true,
+			name:               "CRD does not exist",
+			objects:            []client.Object{},
+			includedNamespaces: []string{"test-namespace"},
+			includedResources:  []string{"hostedcontrolplanes", "hostedclusters"},
+			expectedResult:     true,
+		},
+		{
+			name:               "No namespaces provided",
+			objects:            []client.Object{},
+			includedNamespaces: []string{},
+			includedResources:  []string{"hostedcontrolplanes", "hostedclusters"},
+			expectedResult:     true,
+		},
+		{
+			name:               "No resources provided",
+			objects:            []client.Object{},
+			includedNamespaces: []string{"test-namespace"},
+			includedResources:  []string{},
+			expectedResult:     true,
 		},
 	}
 
 	scheme := runtime.NewScheme()
 	_ = hyperv1.AddToScheme(scheme)
+	_ = apiextensionsv1.AddToScheme(scheme)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			g := NewWithT(t)
 
-			client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tt.objects...).Build()
+			c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tt.objects...).Build()
 			log := logrus.New()
 
-			result := ShouldEndPluginExecution([]string{"test-namespace"}, client, log)
+			result := ShouldEndPluginExecution(context.TODO(), &veleroapiv1.Backup{
+				Spec: veleroapiv1.BackupSpec{
+					IncludedNamespaces: tt.includedNamespaces,
+					IncludedResources:  tt.includedResources,
+				},
+			}, c, log)
+			g.Expect(result).To(Equal(tt.expectedResult))
+		})
+	}
+}
+
+func TestCRDExists(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = hyperv1.AddToScheme(scheme)
+	_ = apiextensionsv1.AddToScheme(scheme)
+
+	tests := []struct {
+		name           string
+		objects        []client.Object
+		expectedResult bool
+	}{
+		{
+			name: "CRD exists",
+			objects: []client.Object{
+				&apiextensionsv1.CustomResourceDefinition{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "hostedcontrolplanes.hypershift.openshift.io",
+					},
+				},
+			},
+			expectedResult: true,
+		},
+		{
+			name:           "CRD does not exist",
+			objects:        []client.Object{},
+			expectedResult: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+			c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tt.objects...).Build()
+			result, err := CRDExists(context.TODO(), "hostedcontrolplanes.hypershift.openshift.io", c)
+			g.Expect(err).NotTo(HaveOccurred())
 			g.Expect(result).To(Equal(tt.expectedResult))
 		})
 	}

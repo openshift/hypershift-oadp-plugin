@@ -5,12 +5,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
 	hyperv1 "github.com/openshift/hypershift/api/hypershift/v1beta1"
 	"github.com/sirupsen/logrus"
 	veleroapiv1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	veleroapiv2alpha1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -457,42 +461,40 @@ func GetHCPNamespace(name, namespace string) string {
 // ShouldEndPluginExecution checks if the plugin should end execution by verifying if the required
 // Hypershift resources (HostedControlPlane and HostedCluster) exist in the cluster.
 // Returns true if the plugin should end execution (i.e., if this is not a Hypershift cluster).
-func ShouldEndPluginExecution(namespaces []string, client crclient.Client, log logrus.FieldLogger) bool {
-	if len(namespaces) == 0 {
+func ShouldEndPluginExecution(ctx context.Context, backup *veleroapiv1.Backup, c crclient.Client, log logrus.FieldLogger) bool {
+	if len(backup.Spec.IncludedNamespaces) == 0 {
 		log.Debug("No namespaces provided")
 		return true
 	}
 
-	// Check if HostedControlPlane exists
-	hcpList := &hyperv1.HostedControlPlaneList{}
-	for _, ns := range namespaces {
-		if err := client.List(context.TODO(), hcpList, crclient.InNamespace(ns)); err != nil {
-			log.Debugf("Error checking for HostedControlPlanes: %v", err)
-			return true
-		}
-		if len(hcpList.Items) > 0 {
-			break
-		}
-	}
-
-	// Check if HostedCluster exists
-	hcList := &hyperv1.HostedClusterList{}
-	for _, ns := range namespaces {
-		if err := client.List(context.TODO(), hcList, crclient.InNamespace(ns)); err != nil {
-			log.Debugf("Error checking for HostedCluster: %v", err)
-			return true
-		}
-		if len(hcList.Items) > 0 {
-			break
-		}
-	}
-
-	// If the resources are found, we assume a HostedControlPlane needs to be backed up
-	if len(hcpList.Items) > 0 && len(hcList.Items) > 0 {
-		log.Debug("Found Hypershift resources")
+	if slices.Contains(backup.Spec.IncludedResources, "hostedcluster") || slices.Contains(backup.Spec.IncludedResources, "hostedcontrolplane") {
+		log.Debug("Hypershift resources found")
 		return false
 	}
 
-	log.Debug("No Hypershift resources found")
+	exists, err := CRDExists(ctx, "hostedcontrolplanes.hypershift.openshift.io", c)
+	if err != nil {
+		log.Debugf("Error checking for HostedControlPlane CRD: %v", err)
+		return true
+	}
+
+	if exists {
+		log.Debug("HostedControlPlane CRD found")
+		return false
+	}
+
+	log.Debug("No Hypershift CRDs resources found")
 	return true
+}
+
+func CRDExists(ctx context.Context, crdName string, c crclient.Client) (bool, error) {
+	crd := &apiextensionsv1.CustomResourceDefinition{}
+	err := c.Get(ctx, client.ObjectKey{Name: crdName}, crd)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
