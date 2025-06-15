@@ -48,8 +48,7 @@ controlplanecomponents.hypershift.openshift.io:
   CRDName: controlplanecomponents.hypershift.openshift.io
   Capability: ""
   Category: ""
-  FeatureGates:
-  - ControlPlaneV2
+  FeatureGates: []
   FilenameOperatorName: ""
   FilenameOperatorOrdering: ""
   FilenameRunLevel: ""
@@ -84,8 +83,7 @@ controlplanecomponents.hypershift.openshift.io:
   ShortNames:
   - cpc
   - cpcs
-  TopLevelFeatureGates:
-  - ControlPlaneV2
+  TopLevelFeatureGates: []
   Version: v1beta1
 
 hostedclusters.hypershift.openshift.io:
@@ -95,11 +93,13 @@ hostedclusters.hypershift.openshift.io:
   Capability: ""
   Category: ""
   FeatureGates:
-  - AROHCPManagedIdentities
   - AutoNodeKarpenter
+  - ClusterVersionOperatorConfiguration
   - DynamicResourceAllocation
   - ExternalOIDC
-  - HCPPodsLabels
+  - ExternalOIDCWithUIDAndExtraClaimMappings
+  - ImageStreamImportMode
+  - KMSEncryptionProvider
   - NetworkDiagnosticsConfig
   - OpenStack
   FilenameOperatorName: ""
@@ -149,10 +149,13 @@ hostedcontrolplanes.hypershift.openshift.io:
   Capability: ""
   Category: cluster-api
   FeatureGates:
-  - AROHCPManagedIdentities
   - AutoNodeKarpenter
+  - ClusterVersionOperatorConfiguration
   - DynamicResourceAllocation
   - ExternalOIDC
+  - ExternalOIDCWithUIDAndExtraClaimMappings
+  - ImageStreamImportMode
+  - KMSEncryptionProvider
   - NetworkDiagnosticsConfig
   - OpenStack
   FilenameOperatorName: ""
