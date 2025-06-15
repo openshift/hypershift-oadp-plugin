@@ -80,8 +80,8 @@ github.com/google/uuid
 # github.com/hashicorp/go-hclog v0.14.1
 ## explicit; go 1.13
 github.com/hashicorp/go-hclog
-# github.com/hashicorp/go-plugin v1.6.0
-## explicit; go 1.17
+# github.com/hashicorp/go-plugin v1.6.3
+## explicit; go 1.21
 github.com/hashicorp/go-plugin
 github.com/hashicorp/go-plugin/internal/cmdrunner
 github.com/hashicorp/go-plugin/internal/grpcmux
@@ -122,9 +122,6 @@ github.com/mattn/go-colorable
 # github.com/mattn/go-isatty v0.0.20
 ## explicit; go 1.15
 github.com/mattn/go-isatty
-# github.com/mitchellh/go-testing-interface v1.0.0
-## explicit
-github.com/mitchellh/go-testing-interface
 # github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd
 ## explicit
 github.com/modern-go/concurrent
