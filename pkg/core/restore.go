@@ -46,19 +46,21 @@ type RestoreOptions struct {
 }
 
 // NewRestorePlugin instantiates RestorePlugin.
-func NewRestorePlugin() (*RestorePlugin, error) {
+func NewRestorePlugin(logger logrus.FieldLogger) (*RestorePlugin, error) {
 	var (
 		err error
-		log = logrus.New()
 	)
-	log.SetLevel(logrus.DebugLevel)
 
-	log.Info("initializing hypershift OADP restore plugin")
+	logger = logger.WithFields(logrus.Fields{
+		"process": "restore",
+	})
+
+	logger.Info("Initializing HCP Restore Plugin")
 	client, err := common.GetClient()
 	if err != nil {
 		return nil, fmt.Errorf("error recovering the k8s client: %s", err.Error())
 	}
-	log.Debug("client recovered")
+	logger.Debug("client recovered")
 
 	pluginConfig := corev1.ConfigMap{}
 	ns, err := common.GetCurrentNamespace()
@@ -73,18 +75,23 @@ func NewRestorePlugin() (*RestorePlugin, error) {
 		if !apierrors.IsNotFound(err) {
 			return nil, fmt.Errorf("error getting plugin configuration: %s", err.Error())
 		}
-		log.Info("configuration for hypershift OADP plugin not found")
+		logger.Info("configuration for hypershift OADP plugin not found")
+	}
+
+	validator := &validation.RestorePluginValidator{}
+	if l, ok := logger.(*logrus.Logger); ok {
+		validator.Log = l
+	} else {
+		validator.Log = logrus.New()
 	}
 
 	rp := &RestorePlugin{
-		log:      log,
-		ctx:      ctx,
-		client:   client,
-		fsBackup: false,
-		config:   pluginConfig.Data,
-		validator: &validation.RestorePluginValidator{
-			Log: log,
-		},
+		log:       logger,
+		ctx:       ctx,
+		client:    client,
+		fsBackup:  false,
+		config:    pluginConfig.Data,
+		validator: validator,
 	}
 
 	if rp.RestoreOptions, err = rp.validator.ValidatePluginConfig(rp.config); err != nil {
@@ -97,11 +104,13 @@ func NewRestorePlugin() (*RestorePlugin, error) {
 		if err != nil {
 			return nil, fmt.Errorf("error parsing pluginVerbosityLevel: %s", err.Error())
 		}
-		log.Infof("pluginVerbosityLevel set to %s", parsedLevel)
-		log.SetLevel(parsedLevel)
+		logger.Infof("pluginVerbosityLevel set to %s", parsedLevel)
+		if l, ok := logger.(*logrus.Logger); ok {
+			l.SetLevel(parsedLevel)
+		}
 	}
 
-	rp.log = log.WithField("type", "core-restore")
+	rp.log = logger.WithField("type", "hcp-restore")
 
 	return rp, nil
 }
@@ -145,13 +154,13 @@ func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*v
 	}
 
 	// if the backup is nil or the included namespaces are nil, return early
-	if backup == nil || backup.Spec.IncludedNamespaces == nil {
-		p.log.Error("Backup or IncludedNamespaces is nil")
-		return nil, fmt.Errorf("backup or included namespaces is nil")
+	if backup.Spec.IncludedNamespaces == nil {
+		p.log.Error("IncludedNamespaces from backup object is nil")
+		return nil, fmt.Errorf("included namespaces from backup object is nil")
 	}
 
 	// if the backup is not a hypershift backup, return early
-	if returnEarly := common.ShouldEndPluginExecution(backup.Spec.IncludedNamespaces, p.client, p.log); returnEarly {
+	if returnEarly := common.ShouldEndPluginExecution(ctx, backup, p.client, p.log); returnEarly {
 		p.log.Info("Skipping hypershift plugin execution - not a hypershift backup")
 		return velero.NewRestoreItemActionExecuteOutput(input.Item), nil
 	}
@@ -163,10 +172,10 @@ func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*v
 		if err != nil {
 			return nil, fmt.Errorf("error getting metadata accessor: %v", err)
 		}
-		p.log.Debugf("Removing Annotation: %s to %s", common.CAPIPausedAnnotationName, metadata.GetName())
 		common.RemoveAnnotation(metadata, common.CAPIPausedAnnotationName)
+		p.log.Infof("Removed CAPI Paused Annotation: %s from %s", common.CAPIPausedAnnotationName, metadata.GetName())
 
-	case kind == "HostedControlPlane":
+	case kind == common.HostedControlPlaneKind:
 		hcp := &hyperv1.HostedControlPlane{}
 		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(input.Item.UnstructuredContent(), hcp); err != nil {
 			return nil, fmt.Errorf("error converting item to HostedControlPlane: %v", err)
@@ -177,25 +186,32 @@ func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*v
 
 	case kind == "Pod":
 		p.log.Debugf("Pod found, skipping restore")
-		return &velero.RestoreItemActionExecuteOutput{
-			SkipRestore: true,
-		}, nil
+		return velero.NewRestoreItemActionExecuteOutput(input.Item).WithoutRestore(), nil
 
 	case common.MainKinds[kind]:
-		// Unpausing NodePools
-		if err := common.ManagePauseNodepools(ctx, p.client, p.log, "false", input.Restore.Spec.IncludedNamespaces); err != nil {
-			return nil, fmt.Errorf("error unpausing NodePools: %v", err)
+		// updating NodePools
+		if err := common.UpdateNodepools(ctx, p.client, p.log, "false", input.Restore.Spec.IncludedNamespaces); err != nil {
+			return nil, fmt.Errorf("error updating NodePools: %v", err)
 		}
 
-		// Unpausing HostedClusters
-		if err := common.ManagePauseHostedCluster(ctx, p.client, p.log, "false", input.Restore.Spec.IncludedNamespaces); err != nil {
-			return nil, fmt.Errorf("error unpausing HostedClusters: %v", err)
+		// updating HostedClusters
+		if err := common.UpdateHostedCluster(ctx, p.client, p.log, "false", input.Restore.Spec.IncludedNamespaces); err != nil {
+			return nil, fmt.Errorf("error updating HostedClusters: %v", err)
 		}
 
-	case kind == "ClusterDeployment":
+		if kind == common.HostedClusterKind {
+			metadata, err := meta.Accessor(input.Item)
+			if err != nil {
+				return nil, fmt.Errorf("error getting metadata accessor: %v", err)
+			}
+			common.AddAnnotation(metadata, common.HostedClusterRestoredFromBackupAnnotation, "")
+			p.log.Infof("Added restore annotation to HostedCluster %s", metadata.GetName())
+		}
+
+	case kind == common.ClusterDeploymentKind:
 		clusterdDeployment := &hive.ClusterDeployment{}
 		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(input.Item.UnstructuredContent(), clusterdDeployment); err != nil {
-			return nil, fmt.Errorf("error converting item to CusterdDeployment: %v", err)
+			return nil, fmt.Errorf("error converting item to clusterdDeployment: %v", err)
 		}
 
 		clusterDeploymentCP := clusterdDeployment.DeepCopy()

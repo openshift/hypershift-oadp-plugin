@@ -44,19 +44,22 @@ type BackupPlugin struct {
 }
 
 // NewBackupPlugin instantiates BackupPlugin.
-func NewBackupPlugin() (*BackupPlugin, error) {
+func NewBackupPlugin(logger logrus.FieldLogger) (*BackupPlugin, error) {
 	var (
 		err error
-		log = logrus.New()
 	)
-	log.SetLevel(logrus.DebugLevel)
 
-	log.Infof("initializing hypershift OADP backup plugin")
+	logger = logger.WithFields(logrus.Fields{
+		"process": "backup",
+	})
+
+	logger.Info("Initializing HCP Backup Plugin")
+
 	client, err := common.GetClient()
 	if err != nil {
 		return nil, fmt.Errorf("error recovering the k8s client: %s", err.Error())
 	}
-	log.Infof("client recovered")
+	logger.Infof("client recovered")
 	ctx := context.Background()
 
 	pluginConfig := corev1.ConfigMap{}
@@ -70,16 +73,23 @@ func NewBackupPlugin() (*BackupPlugin, error) {
 		if !apierrors.IsNotFound(err) {
 			return nil, fmt.Errorf("error getting plugin configuration: %s", err.Error())
 		}
-		log.Infof("configuration for hypershift OADP plugin not found")
+		logger.Infof("configuration for hypershift OADP plugin not found")
+	}
+
+	validator := &validation.BackupPluginValidator{}
+	if l, ok := logger.(*logrus.Logger); ok {
+		validator.Log = l
+	} else {
+		validator.Log = logrus.New()
 	}
 
 	bp := &BackupPlugin{
-		log:       log,
+		log:       logger,
 		client:    client,
 		config:    pluginConfig.Data,
 		finished:  false,
 		ctx:       ctx,
-		validator: &validation.BackupPluginValidator{Log: log},
+		validator: validator,
 	}
 
 	if bp.BackupOptions, err = bp.validator.ValidatePluginConfig(bp.config); err != nil {
@@ -92,11 +102,13 @@ func NewBackupPlugin() (*BackupPlugin, error) {
 		if err != nil {
 			return nil, fmt.Errorf("error parsing pluginVerbosityLevel: %s", err.Error())
 		}
-		log.Infof("pluginVerbosityLevel set to %s", parsedLevel)
-		log.SetLevel(parsedLevel)
+		logger.Infof("pluginVerbosityLevel set to %s", parsedLevel)
+		if l, ok := logger.(*logrus.Logger); ok {
+			l.SetLevel(parsedLevel)
+		}
 	}
 
-	bp.log = log.WithField("type", "core-backup")
+	bp.log.Infof("Backup plugin initialized with log level: %s", logrus.GetLevel())
 
 	return bp, nil
 }
@@ -132,7 +144,7 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 	p.log.Debug("Entering Hypershift backup plugin")
 	ctx := context.Context(p.ctx)
 
-	if returnEarly := common.ShouldEndPluginExecution(backup.Spec.IncludedNamespaces, p.client, p.log); returnEarly {
+	if returnEarly := common.ShouldEndPluginExecution(ctx, backup, p.client, p.log); returnEarly {
 		return item, nil, nil
 	}
 
@@ -161,10 +173,10 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 		if err != nil {
 			return nil, nil, fmt.Errorf("error getting metadata accessor: %v", err)
 		}
-		p.log.Debugf("Adding Annotation: %s to %s", common.CAPIPausedAnnotationName, metadata.GetName())
 		common.AddAnnotation(metadata, common.CAPIPausedAnnotationName, "true")
+		p.log.Infof("Added CAPI Paused Annotation: %s to %s", common.CAPIPausedAnnotationName, metadata.GetName())
 
-	case kind == "HostedControlPlane":
+	case kind == common.HostedControlPlaneKind:
 		hcp := &hyperv1.HostedControlPlane{}
 		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(item.UnstructuredContent(), hcp); err != nil {
 			return nil, nil, fmt.Errorf("error converting item to HostedControlPlane: %v", err)
@@ -175,28 +187,37 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 		}
 
 	case common.MainKinds[kind]:
-		// Pausing HostedClusters
-		if err := common.ManagePauseHostedCluster(ctx, p.client, p.log, "true", backup.Spec.IncludedNamespaces); err != nil {
-			return nil, nil, fmt.Errorf("error pausing HostedClusters: %v", err)
+		// Updating HostedClusters
+		if err := common.UpdateHostedCluster(ctx, p.client, p.log, "true", backup.Spec.IncludedNamespaces); err != nil {
+			return nil, nil, fmt.Errorf("error updating HostedClusters: %v", err)
 		}
 
-		// Pausing NodePools
-		if err := common.ManagePauseNodepools(ctx, p.client, p.log, "true", backup.Spec.IncludedNamespaces); err != nil {
-			return nil, nil, fmt.Errorf("error pausing NodePools: %v", err)
+		// Updating NodePools
+		if err := common.UpdateNodepools(ctx, p.client, p.log, "true", backup.Spec.IncludedNamespaces); err != nil {
+			return nil, nil, fmt.Errorf("error updating NodePools: %v", err)
 		}
 
 		defer func() {
 			p.pvTriggered = true
 		}()
 
-	case kind == "ClusterDeployment":
+		if kind == common.HostedClusterKind {
+			metadata, err := meta.Accessor(item)
+			if err != nil {
+				return nil, nil, fmt.Errorf("error getting metadata accessor: %v", err)
+			}
+			common.AddAnnotation(metadata, common.HostedClusterRestoredFromBackupAnnotation, "")
+			p.log.Infof("Added restore annotation to HostedCluster %s", metadata.GetName())
+		}
+
+	case kind == common.ClusterDeploymentKind:
 		if p.Migration && p.hcp.Spec.Platform.Type == hyperv1.AgentPlatform {
 			if err := agent.MigrationTasks(ctx, item, p.client, p.log, p.config, backup); err != nil {
 				return nil, nil, fmt.Errorf("error performing migration tasks for agent platform: %v", err)
 			}
 		}
 
-	case kind == "DataVolume" || kind == "PersistentVolumeClaim":
+	case kind == common.DataVolumeKind || kind == common.PersistentVolumeClaimKind:
 		metadata, err := meta.Accessor(item)
 		if err != nil {
 			return nil, nil, fmt.Errorf("error getting metadata accessor: %v", err)
@@ -205,7 +226,6 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 		if _, exists := labels[common.KubevirtRHCOSLabel]; exists {
 			return nil, nil, nil
 		}
-
 	}
 
 	if (backup.Spec.DefaultVolumesToFsBackup != nil && !*backup.Spec.DefaultVolumesToFsBackup) || backup.Spec.DefaultVolumesToFsBackup == nil {
@@ -245,15 +265,15 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 	}
 
 	if p.finished && !p.Migration {
-		p.log.Debug("Volume backup is done, unpausing HC and NPs")
-		// Unpausing NodePools
-		if err := common.ManagePauseNodepools(ctx, p.client, p.log, "false", backup.Spec.IncludedNamespaces); err != nil {
-			return nil, nil, fmt.Errorf("error unpausing NodePools: %v", err)
+		p.log.Debug("Volume backup is done, updating HC and NPs")
+		// updating NodePools
+		if err := common.UpdateNodepools(ctx, p.client, p.log, "false", backup.Spec.IncludedNamespaces); err != nil {
+			return nil, nil, fmt.Errorf("error updating NodePools: %v", err)
 		}
 
-		// Unpausing HostedClusters
-		if err := common.ManagePauseHostedCluster(ctx, p.client, p.log, "false", backup.Spec.IncludedNamespaces); err != nil {
-			return nil, nil, fmt.Errorf("error unpausing HostedClusters: %v", err)
+		// updating HostedClusters
+		if err := common.UpdateHostedCluster(ctx, p.client, p.log, "false", backup.Spec.IncludedNamespaces); err != nil {
+			return nil, nil, fmt.Errorf("error updating HostedClusters: %v", err)
 		}
 	}
 

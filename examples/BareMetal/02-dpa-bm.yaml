@@ -41,4 +41,4 @@ spec:
         - csi
       customPlugins:
         - name: hypershift-oadp-plugin
-          image: quay.io/hypershift/hypershift-oadp-plugin:latest
+          image: quay.io/redhat-user-workloads/crt-redhat-acm-tenant/hypershift-oadp-plugin-main:latest

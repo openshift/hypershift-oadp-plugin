@@ -5,12 +5,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
 	hyperv1 "github.com/openshift/hypershift/api/hypershift/v1beta1"
 	"github.com/sirupsen/logrus"
 	veleroapiv1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	veleroapiv2alpha1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -240,8 +244,8 @@ func WaitForPodVolumeBackup(ctx context.Context, client crclient.Client, log log
 	return false, nil
 }
 
-// ManagePauseHostedCluster manages the pause state of HostedClusters in the specified namespaces.
-func ManagePauseHostedCluster(ctx context.Context, client crclient.Client, log logrus.FieldLogger, paused string, namespaces []string) error {
+// UpdateHostedCluster updates the HostedCluster's necessary fields in the specified namespaces.
+func UpdateHostedCluster(ctx context.Context, client crclient.Client, log logrus.FieldLogger, paused string, namespaces []string) error {
 	log.Debug("listing HostedClusters")
 	hostedClusters := &hyperv1.HostedClusterList{
 		Items: []hyperv1.HostedCluster{},
@@ -249,7 +253,7 @@ func ManagePauseHostedCluster(ctx context.Context, client crclient.Client, log l
 
 	for _, ns := range namespaces {
 		if err := client.List(ctx, hostedClusters, crclient.InNamespace(ns)); err != nil {
-			return err
+			return fmt.Errorf("failed to list HostedClusters in namespace %s: %w", ns, err)
 		}
 
 		if len(hostedClusters.Items) > 0 {
@@ -259,32 +263,59 @@ func ManagePauseHostedCluster(ctx context.Context, client crclient.Client, log l
 	}
 
 	for _, hc := range hostedClusters.Items {
-		if hc.Spec.PausedUntil == nil || *hc.Spec.PausedUntil != paused {
-			log.Infof("setting PauseUntil to %s in HostedCluster %s", paused, hc.Name)
-			hc.Spec.PausedUntil = ptr.To(paused)
-			if err := client.Update(ctx, &hc); err != nil {
-				return err
+		// Create a retry loop with exponential backoff
+		backoff := wait.Backoff{
+			Steps:    5,
+			Duration: 1 * time.Second,
+			Factor:   2.0,
+			Jitter:   0.1,
+		}
+
+		err := wait.ExponentialBackoff(backoff, func() (bool, error) {
+			// Get the latest version of the HostedCluster
+			currentHC := &hyperv1.HostedCluster{}
+			if err := client.Get(ctx, types.NamespacedName{Name: hc.Name, Namespace: hc.Namespace}, currentHC); err != nil {
+				return false, err
 			}
 
-			// Checking the hc Object to validate the propagation of the PausedUntil field
-			log.Debug("checking paused state propagation")
-			if err := WaitForPausedPropagated(ctx, client, log, &hc, defaultWaitForPausedTimeout); err != nil {
-				return err
+			// Update PausedUntil if needed
+			if currentHC.Spec.PausedUntil == nil || *currentHC.Spec.PausedUntil != paused {
+				log.Infof("setting PauseUntil to %s in HostedCluster %s", paused, currentHC.Name)
+				currentHC.Spec.PausedUntil = ptr.To(paused)
+				if err := client.Update(ctx, currentHC); err != nil {
+					if apierrors.IsConflict(err) {
+						log.Infof("Conflict detected pausing the HostedCluster %s, retrying...", currentHC.Name)
+						return false, nil
+					}
+					return false, err
+				}
+
+				// Checking the hc Object to validate the propagation of the PausedUntil field
+				log.Debug("checking paused state propagation")
+				if err := WaitForPausedPropagated(ctx, client, log, currentHC, defaultWaitForPausedTimeout); err != nil {
+					return false, err
+				}
 			}
+
+			return true, nil
+		})
+
+		if err != nil {
+			return fmt.Errorf("failed to update HostedCluster %s after retries: %w", hc.Name, err)
 		}
 	}
 
 	return nil
 }
 
-// ManagePauseNodepools updates the PausedUntil field of NodePools in the specified namespaces.
-func ManagePauseNodepools(ctx context.Context, client crclient.Client, log logrus.FieldLogger, paused string, namespaces []string) error {
+// UpdateNodepools updates the NodePool's necessary fields in the specified namespaces.
+func UpdateNodepools(ctx context.Context, client crclient.Client, log logrus.FieldLogger, paused string, namespaces []string) error {
 	log.Debug("listing NodePools, checking namespaces to inspect")
 	nodepools := &hyperv1.NodePoolList{}
 
 	for _, ns := range namespaces {
 		if err := client.List(ctx, nodepools, crclient.InNamespace(ns)); err != nil {
-			return err
+			return fmt.Errorf("failed to list NodePools in namespace %s: %w", ns, err)
 		}
 
 		if len(nodepools.Items) > 0 {
@@ -294,12 +325,38 @@ func ManagePauseNodepools(ctx context.Context, client crclient.Client, log logru
 	}
 
 	for _, np := range nodepools.Items {
-		if np.Spec.PausedUntil == nil || *np.Spec.PausedUntil != paused {
-			log.Infof("%s setting PauseUntil to %s in NodePool: %s", paused, np.Name)
-			np.Spec.PausedUntil = ptr.To(paused)
-			if err := client.Update(ctx, &np); err != nil {
-				return err
+		// Create a retry loop with exponential backoff
+		backoff := wait.Backoff{
+			Steps:    5,
+			Duration: 1 * time.Second,
+			Factor:   2.0,
+			Jitter:   0.1,
+		}
+
+		err := wait.ExponentialBackoff(backoff, func() (bool, error) {
+			// Get the latest version of the NodePool
+			currentNP := &hyperv1.NodePool{}
+			if err := client.Get(ctx, types.NamespacedName{Name: np.Name, Namespace: np.Namespace}, currentNP); err != nil {
+				return false, err
 			}
+
+			if currentNP.Spec.PausedUntil == nil || *currentNP.Spec.PausedUntil != paused {
+				log.Infof("%s setting PauseUntil to %s in NodePool: %s", paused, currentNP.Name)
+				currentNP.Spec.PausedUntil = ptr.To(paused)
+				if err := client.Update(ctx, currentNP); err != nil {
+					if apierrors.IsConflict(err) {
+						log.Infof("Conflict detected pausing the NodePool %s, retrying...", currentNP.Name)
+						return false, nil
+					}
+					return false, err
+				}
+			}
+
+			return true, nil
+		})
+
+		if err != nil {
+			return fmt.Errorf("failed to update NodePool %s after retries: %w", np.Name, err)
 		}
 	}
 
@@ -404,42 +461,40 @@ func GetHCPNamespace(name, namespace string) string {
 // ShouldEndPluginExecution checks if the plugin should end execution by verifying if the required
 // Hypershift resources (HostedControlPlane and HostedCluster) exist in the cluster.
 // Returns true if the plugin should end execution (i.e., if this is not a Hypershift cluster).
-func ShouldEndPluginExecution(namespaces []string, client crclient.Client, log logrus.FieldLogger) bool {
-	if len(namespaces) == 0 {
+func ShouldEndPluginExecution(ctx context.Context, backup *veleroapiv1.Backup, c crclient.Client, log logrus.FieldLogger) bool {
+	if len(backup.Spec.IncludedNamespaces) == 0 {
 		log.Debug("No namespaces provided")
 		return true
 	}
 
-	// Check if HostedControlPlane exists
-	hcpList := &hyperv1.HostedControlPlaneList{}
-	for _, ns := range namespaces {
-		if err := client.List(context.TODO(), hcpList, crclient.InNamespace(ns)); err != nil {
-			log.Debugf("Error checking for HostedControlPlanes: %v", err)
-			return true
-		}
-		if len(hcpList.Items) > 0 {
-			break
-		}
-	}
-
-	// Check if HostedCluster exists
-	hcList := &hyperv1.HostedClusterList{}
-	for _, ns := range namespaces {
-		if err := client.List(context.TODO(), hcList, crclient.InNamespace(ns)); err != nil {
-			log.Debugf("Error checking for HostedCluster: %v", err)
-			return true
-		}
-		if len(hcList.Items) > 0 {
-			break
-		}
-	}
-
-	// If the resources are found, we assume a HostedControlPlane needs to be backed up
-	if len(hcpList.Items) > 0 && len(hcList.Items) > 0 {
-		log.Debug("Found Hypershift resources")
+	if slices.Contains(backup.Spec.IncludedResources, "hostedcluster") || slices.Contains(backup.Spec.IncludedResources, "hostedcontrolplane") {
+		log.Debug("Hypershift resources found")
 		return false
 	}
 
-	log.Debug("No Hypershift resources found")
+	exists, err := CRDExists(ctx, "hostedcontrolplanes.hypershift.openshift.io", c)
+	if err != nil {
+		log.Debugf("Error checking for HostedControlPlane CRD: %v", err)
+		return true
+	}
+
+	if exists {
+		log.Debug("HostedControlPlane CRD found")
+		return false
+	}
+
+	log.Debug("No Hypershift CRDs resources found")
 	return true
+}
+
+func CRDExists(ctx context.Context, crdName string, c crclient.Client) (bool, error) {
+	crd := &apiextensionsv1.CustomResourceDefinition{}
+	err := c.Get(ctx, client.ObjectKey{Name: crdName}, crd)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
