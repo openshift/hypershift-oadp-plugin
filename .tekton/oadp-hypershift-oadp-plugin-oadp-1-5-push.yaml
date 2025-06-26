@@ -10,7 +10,7 @@ metadata:
     pipelinesascode.tekton.dev/on-cel-expression: event == "push" && target_branch == "oadp-1.5"
   creationTimestamp:
   labels:
-    appstudio.openshift.io/application: oadp-hypershift-velero-plugin
+    appstudio.openshift.io/application: oadp-1-5
     appstudio.openshift.io/component: oadp-hypershift-oadp-plugin-oadp-1-5
     pipelines.appstudio.openshift.io/type: build
   name: oadp-hypershift-oadp-plugin-oadp-1-5-on-push
