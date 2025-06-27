@@ -38,7 +38,8 @@ type BackupPlugin struct {
 
 	// uploadTimeout is the time in minutes to wait for the data upload to finish.
 	dataUploadTimeout time.Duration
-	finished          bool
+	pvBackupStarted   bool
+	pvBackupFinished  bool
 
 	*plugtypes.BackupOptions
 }
@@ -84,12 +85,13 @@ func NewBackupPlugin(logger logrus.FieldLogger) (*BackupPlugin, error) {
 	}
 
 	bp := &BackupPlugin{
-		log:       logger,
-		client:    client,
-		config:    pluginConfig.Data,
-		finished:  false,
-		ctx:       ctx,
-		validator: validator,
+		log:              logger,
+		client:           client,
+		config:           pluginConfig.Data,
+		pvBackupStarted:  false,
+		pvBackupFinished: false,
+		ctx:              ctx,
+		validator:        validator,
 	}
 
 	if bp.BackupOptions, err = bp.validator.ValidatePluginConfig(bp.config); err != nil {
@@ -197,10 +199,6 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 			return nil, nil, fmt.Errorf("error updating NodePools: %v", err)
 		}
 
-		defer func() {
-			p.pvTriggered = true
-		}()
-
 		if kind == common.HostedClusterKind {
 			metadata, err := meta.Accessor(item)
 			if err != nil {
@@ -208,6 +206,17 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 			}
 			common.AddAnnotation(metadata, common.HostedClusterRestoredFromBackupAnnotation, "")
 			p.log.Infof("Added restore annotation to HostedCluster %s", metadata.GetName())
+		}
+
+		if kind == "Pod" {
+			metadata, err := meta.Accessor(item)
+			if err != nil {
+				return nil, nil, fmt.Errorf("error getting metadata accessor: %v", err)
+			}
+
+			if strings.Contains(metadata.GetName(), "etcd-") {
+				common.AddLabel(metadata, common.FSBackupLabelName, "true")
+			}
 		}
 
 	case kind == common.ClusterDeploymentKind:
@@ -229,42 +238,56 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 	}
 
 	if (backup.Spec.DefaultVolumesToFsBackup != nil && !*backup.Spec.DefaultVolumesToFsBackup) || backup.Spec.DefaultVolumesToFsBackup == nil {
-		if !p.finished {
+		p.log.Debug("checking DataUpload")
+		switch {
+		case !p.pvBackupStarted:
 			var err error
-			p.log.Debug("DataUpload not finished yet")
-			if p.pvTriggered {
-				if p.finished, err = common.WaitForDataUpload(ctx, p.client, p.log, backup, p.dataUploadTimeout, p.DataUploadCheckPace); err != nil {
-					return nil, nil, err
-				}
-			}
-		}
-	} else {
-		p.log.Debug("checking PodVolumeBackup")
-		if kind == "Pod" {
-			metadata, err := meta.Accessor(item)
-			if err != nil {
-				return nil, nil, fmt.Errorf("error getting metadata accessor: %v", err)
-			}
 
-			if strings.Contains(metadata.GetName(), "etcd-") {
-				common.AddLabel(metadata, common.FSBackupLabelName, "true")
-			}
-		}
-
-		if p.pvTriggered {
-			result, err := common.WaitForPodVolumeBackup(ctx, p.client, p.log, backup, p.dataUploadTimeout, p.DataUploadCheckPace, p.ha)
+			p.log.Debug("Checking if DataUpload exists")
+			p.pvBackupStarted, p.pvBackupFinished, err = common.CheckDataUpload(ctx, p.client, p.log, backup, p.ha)
 			if err != nil {
 				return nil, nil, err
 			}
 
-			if result {
-				p.finished = result
+		// If the DataUpload is started, we need to wait for it to be completed, if not, continue with the backup
+		// This is a security measure to avoid deadlocks in the backup process, when the plugin waits for the DataUpload
+		// to be completed but the DataUpload is not started yet.
+		case p.pvBackupStarted && !p.pvBackupFinished:
+			var err error
 
+			p.log.Debug("DataUpload exists, waiting for it to be completed")
+			p.pvBackupFinished, err = common.WaitForDataUpload(ctx, p.client, p.log, backup, p.dataUploadTimeout, p.DataUploadCheckPace, p.ha)
+			if err != nil {
+				return nil, nil, err
+			}
+		}
+
+	} else {
+		p.log.Debug("checking PodVolumeBackup")
+		switch {
+		case !p.pvBackupStarted:
+			var err error
+
+			p.log.Debug("Checking if PodVolumeBackup exists")
+			p.pvBackupStarted, p.pvBackupFinished, err = common.CheckPodVolumeBackup(ctx, p.client, p.log, backup, p.ha)
+			if err != nil {
+				return nil, nil, err
+			}
+		// If the PodVolumeBackup is started, we need to wait for it to be completed, if not, continue with the backup
+		// This is a security measure to avoid deadlocks in the backup process, when the plugin waits for the PodVolumeBackup
+		// to be completed but the PodVolumeBackup is not started yet.
+		case p.pvBackupStarted && !p.pvBackupFinished:
+			var err error
+
+			p.log.Debug("PodVolumeBackup exists, waiting for it to be completed")
+			p.pvBackupFinished, err = common.WaitForPodVolumeBackup(ctx, p.client, p.log, backup, p.dataUploadTimeout, p.DataUploadCheckPace, p.ha)
+			if err != nil {
+				return nil, nil, err
 			}
 		}
 	}
 
-	if p.finished && !p.Migration {
+	if p.pvBackupFinished && !p.Migration {
 		p.log.Debug("Volume backup is done, updating HC and NPs")
 		// updating NodePools
 		if err := common.UpdateNodepools(ctx, p.client, p.log, "false", backup.Spec.IncludedNamespaces); err != nil {

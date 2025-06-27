@@ -74,49 +74,177 @@ func GetConfig() (*rest.Config, error) {
 	return cfg, nil
 }
 
+// CheckDataUpload checks if the dataUpload is started and finished.
+// The first return value is true if the dataUpload is started, false otherwise.
+// The second return value is true if the dataUpload is finished, false otherwise.
+// The third return value is an error if the dataUpload is failed, nil otherwise.
+func CheckDataUpload(ctx context.Context, client crclient.Client, log logrus.FieldLogger, backup *veleroapiv1.Backup, ha bool) (bool, bool, error) {
+	var (
+		started, finished bool = false, false
+		completed         int
+		nodes             int = 1
+	)
+
+	dataUploadSlice := &veleroapiv2alpha1.DataUploadList{}
+	if err := client.List(ctx, dataUploadSlice, crclient.InNamespace(backup.Namespace)); err != nil {
+		log.Error(err, "failed to get dataUploadList")
+		return started, finished, err
+	}
+
+	if ha {
+		nodes = 3
+	}
+
+	if len(dataUploadSlice.Items) != nodes {
+		log.Infof("Only %d dataUploads found for backup %s, expecting to have %d DataUpload objects. Waiting...", len(dataUploadSlice.Items), backup.Name, nodes)
+		return started, finished, nil
+	}
+
+	started = true
+
+	for _, dataUpload := range dataUploadSlice.Items {
+		if strings.Contains(dataUpload.ObjectMeta.GenerateName, backup.Name) {
+			log.Infof("dataUpload found. Waiting for completion... StatusPhase: %s Name: %s", dataUpload.Status.Phase, dataUpload.Name)
+			switch dataUpload.Status.Phase {
+			case veleroapiv2alpha1.DataUploadPhaseCompleted:
+				log.Infof("dataUpload is done. Name: %s Status: %s", dataUpload.Name, dataUpload.Status.Phase)
+				completed++
+			case veleroapiv2alpha1.DataUploadPhaseFailed:
+				return started, finished, fmt.Errorf("dataUpload failed. Name: %s Status: %s", dataUpload.Name, dataUpload.Status.Phase)
+			case veleroapiv2alpha1.DataUploadPhaseInProgress, veleroapiv2alpha1.DataUploadPhaseNew:
+				return started, finished, nil
+			}
+		}
+	}
+
+	if len(dataUploadSlice.Items) == completed {
+		log.Debugf("dataUpload is done. Name: %s", backup.Name)
+		finished = true
+	}
+
+	log.Debugf("dataUpload not finished yet for backup %s", backup.Name)
+	return started, finished, nil
+}
+
 // WaitForBackupCompleted waits for the backup to be completed and uploaded to the destination backend
 // it returns true if the backup was completed successfully, false otherwise.
-func WaitForDataUpload(ctx context.Context, client crclient.Client, log logrus.FieldLogger, backup *veleroapiv1.Backup, dataUploadTimeout time.Duration, dataUploadCheckPace time.Duration) (bool, error) {
+func WaitForDataUpload(ctx context.Context, client crclient.Client, log logrus.FieldLogger, backup *veleroapiv1.Backup, dataUploadTimeout time.Duration, dataUploadCheckPace time.Duration, ha bool) (bool, error) {
 	if dataUploadTimeout == 0 {
-		dataUploadTimeout = defaultDataUploadTimeout
+		dataUploadTimeout = defaultPVBackupTimeout
 	}
 
 	if dataUploadCheckPace == 0 {
-		dataUploadCheckPace = defaultDataUploadCheckPace
+		dataUploadCheckPace = defaultPVBackupCheckPace
 	}
 
-	waitCtx, cancel := context.WithTimeout(ctx, dataUploadTimeout*time.Minute)
+	waitCtx, cancel := context.WithTimeout(ctx, dataUploadTimeout)
 	defer cancel()
-	chosenOne := veleroapiv2alpha1.DataUpload{}
 
-	err := wait.PollUntilContextCancel(waitCtx, dataUploadCheckPace*time.Second, true, func(ctx context.Context) (bool, error) {
-		dataUploadSlice := &veleroapiv2alpha1.DataUploadList{}
+	err := wait.PollUntilContextCancel(waitCtx, dataUploadCheckPace, true, func(ctx context.Context) (bool, error) {
 		log.Info("waiting for dataUpload to be completed...")
-		if err := client.List(ctx, dataUploadSlice, crclient.InNamespace(backup.Namespace)); err != nil {
-			log.Error(err, "failed to get dataUploadList")
+		_, duFinished, err := CheckDataUpload(ctx, client, log, backup, ha)
+		if err != nil {
 			return false, err
 		}
 
-		for _, dataUpload := range dataUploadSlice.Items {
-			if strings.Contains(dataUpload.ObjectMeta.GenerateName, backup.Name) {
-				log.Infof("dataUpload found. Waiting for completion... StatusPhase: %s Name: %s", dataUpload.Status.Phase, dataUpload.Name)
-				chosenOne = dataUpload
-				if dataUpload.Status.Phase == veleroapiv2alpha1.DataUploadPhaseCompleted {
-					log.Infof("dataUpload is done. Name: %s Status: %s", dataUpload.Name, dataUpload.Status.Phase)
-					return true, nil
-				}
-			}
+		if duFinished {
+			return true, nil
 		}
 
 		return false, nil
 	})
 
 	if err != nil {
-		log.Errorf("giving up, dataUpload was not finished in the expected timeout. StatusPhase: %s Err: %v", chosenOne.Status.Phase, err)
+		log.Errorf("giving up, dataUpload was not finished in the expected timeout. Err: %v", err)
 		return false, err
 	}
 
 	return true, err
+}
+
+func CheckPodVolumeBackup(ctx context.Context, client crclient.Client, log logrus.FieldLogger, backup *veleroapiv1.Backup, ha bool) (bool, bool, error) {
+	var (
+		started, finished bool = false, false
+		completed         int
+		nodes             int = 1
+	)
+
+	podVolumeBackupList := &veleroapiv1.PodVolumeBackupList{}
+	if err := client.List(ctx, podVolumeBackupList, crclient.InNamespace(backup.Namespace)); err != nil {
+		log.Error(err, "failed to get PodVolumeBackupList")
+		return started, finished, err
+	}
+
+	if ha {
+		nodes = 3
+	}
+
+	if len(podVolumeBackupList.Items) != nodes {
+		log.Infof("Only %d PodVolumeBackups found for backup %s, expecting to have %d PodVolumeBackup objects. Waiting...", len(podVolumeBackupList.Items), backup.Name, nodes)
+		return started, finished, nil
+	}
+
+	started = true
+
+	for _, pvb := range podVolumeBackupList.Items {
+		if pvb.ObjectMeta.Labels[veleroapiv1.BackupNameLabel] == backup.Name {
+			log.Debugf("PodVolumeBackup found. Name: %s", pvb.Name)
+
+			switch pvb.Status.Phase {
+			case veleroapiv1.PodVolumeBackupPhaseCompleted:
+				log.Infof("PodVolumeBackup is done. Name: %s Status: %s Volume: %s", pvb.Name, pvb.Status.Phase, pvb.Spec.Volume)
+				if pvb.Spec.Volume == "data" {
+					completed++
+				}
+			case veleroapiv1.PodVolumeBackupPhaseFailed:
+				return started, finished, fmt.Errorf("PodVolumeBackup failed. Name: %s Status: %s Pod: %v", pvb.Name, pvb.Status.Phase, &pvb.Spec.Pod.Name)
+			case veleroapiv1.PodVolumeBackupPhaseInProgress, veleroapiv1.PodVolumeBackupPhaseNew:
+				return started, finished, nil
+			}
+		}
+	}
+
+	if len(podVolumeBackupList.Items) == completed {
+		log.Debugf("PodVolumeBackup is done. Name: %s", backup.Name)
+		finished = true
+	}
+
+	log.Debugf("PodVolumeBackup not finished yet for backup %s", backup.Name)
+	return started, finished, nil
+}
+
+// WaitForPodVolumeBackup waits for the backup to be completed and uploaded to the destination backend.
+func WaitForPodVolumeBackup(ctx context.Context, client crclient.Client, log logrus.FieldLogger, backup *veleroapiv1.Backup, podVolumeBackupTimeout time.Duration, podVolumeBackupCheckPace time.Duration, ha bool) (bool, error) {
+	if podVolumeBackupTimeout == 0 {
+		podVolumeBackupTimeout = defaultPVBackupTimeout
+	}
+
+	if podVolumeBackupCheckPace == 0 {
+		podVolumeBackupCheckPace = defaultPVBackupCheckPace
+	}
+
+	waitCtx, cancel := context.WithTimeout(ctx, podVolumeBackupTimeout)
+	defer cancel()
+
+	err := wait.PollUntilContextCancel(waitCtx, podVolumeBackupCheckPace, true, func(ctx context.Context) (bool, error) {
+		_, pvbFinished, err := CheckPodVolumeBackup(ctx, client, log, backup, ha)
+		if err != nil {
+			return false, err
+		}
+
+		if pvbFinished {
+			return true, nil
+		}
+
+		return false, nil
+	})
+
+	if err != nil {
+		log.Errorf("giving up waiting podVolumeBackup", "error", err)
+		return false, err
+	}
+
+	return true, nil
 }
 
 // WaitForPausedPropagated waits for the HostedControlPlane (HCP) associated with the given HostedCluster (HC)
@@ -161,87 +289,6 @@ func WaitForPausedPropagated(ctx context.Context, client crclient.Client, log lo
 	}
 
 	return err
-}
-
-// WaitForPodVolumeBackup waits for the backup to be completed and uploaded to the destination backend.
-func WaitForPodVolumeBackup(ctx context.Context, client crclient.Client, log logrus.FieldLogger, backup *veleroapiv1.Backup, dataUploadTimeout time.Duration, dataUploadCheckPace time.Duration, ha bool) (bool, error) {
-	var (
-		shouldWait bool
-		etcdPvbs   []*veleroapiv1.PodVolumeBackup
-	)
-
-	if dataUploadTimeout == 0 {
-		dataUploadTimeout = defaultDataUploadTimeout
-	}
-
-	if dataUploadCheckPace == 0 {
-		dataUploadCheckPace = defaultDataUploadCheckPace
-	}
-
-	podVolumeBackupList := &veleroapiv1.PodVolumeBackupList{}
-	if err := client.List(ctx, podVolumeBackupList, crclient.InNamespace(backup.Namespace)); err != nil {
-		log.Error(err, "failed to get PodVolumeBackupList")
-		return false, err
-	}
-
-	for _, pvb := range podVolumeBackupList.Items {
-		if strings.Contains(pvb.Spec.Pod.Name, "etcd-") {
-			etcdPvbs = append(etcdPvbs, &pvb)
-			shouldWait = true
-		}
-	}
-
-	var etcds int
-	if ha {
-		etcds = 3
-	} else {
-		etcds = 1
-	}
-
-	if shouldWait {
-		succeed := false
-		waitCtx, cancel := context.WithTimeout(ctx, dataUploadTimeout*time.Minute)
-		defer cancel()
-		err := wait.PollUntilContextCancel(waitCtx, dataUploadCheckPace*time.Second, true, func(ctx context.Context) (bool, error) {
-			completed := 0
-			for _, pvb := range etcdPvbs {
-				if err := client.Get(ctx, crclient.ObjectKeyFromObject(pvb), pvb); err != nil {
-					log.Info(err, "failed to get PodVolumeBackup", "name", pvb.Spec.Pod.Name)
-					return false, nil
-				}
-				switch pvb.Status.Phase {
-				case veleroapiv1.PodVolumeBackupPhaseCompleted:
-					log.Infof("PodVolumeBackup is done. Name: %s Status: %s Volume: %s", pvb.Name, pvb.Status.Phase, pvb.Spec.Volume)
-					if pvb.Spec.Volume == "data" {
-						succeed = true
-						completed++
-					}
-				case veleroapiv1.PodVolumeBackupPhaseFailed:
-					return true, fmt.Errorf("PodVolumeBackup failed. Name: %s Status: %s Pod: %v", pvb.Name, pvb.Status.Phase, &pvb.Spec.Pod.Name)
-				case veleroapiv1.PodVolumeBackupPhaseInProgress, veleroapiv1.PodVolumeBackupPhaseNew:
-					return false, nil
-				}
-			}
-
-			if etcds != completed {
-				log.Info("etcd backup in progress...", "etcds", etcds, "completed", completed)
-				return false, nil
-			}
-			return true, nil
-		})
-
-		if err != nil {
-			log.Errorf("giving up waiting podVolumeBackup", "error", err)
-			return false, err
-		}
-
-		if succeed {
-			log.Info("etcd backup done!!")
-			return true, nil
-		}
-	}
-
-	return false, nil
 }
 
 // UpdateHostedCluster updates the HostedCluster's necessary fields in the specified namespaces.
