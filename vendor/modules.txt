@@ -225,8 +225,8 @@ github.com/vmware-tanzu/velero/third_party/kubernetes/pkg/kubectl/cmd/util
 # github.com/x448/float16 v0.8.4
 ## explicit; go 1.11
 github.com/x448/float16
-# golang.org/x/exp v0.0.0-20240213143201-ec583247a57a
-## explicit; go 1.20
+# golang.org/x/exp v0.0.0-20250620022241-b7579e27df2b
+## explicit; go 1.23.0
 golang.org/x/exp/maps
 # golang.org/x/net v0.33.0
 ## explicit; go 1.18
