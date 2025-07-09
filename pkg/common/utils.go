@@ -9,9 +9,11 @@ import (
 	"strings"
 	"time"
 
+	snapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	hyperv1 "github.com/openshift/hypershift/api/hypershift/v1beta1"
 	"github.com/sirupsen/logrus"
 	veleroapiv1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -96,7 +98,7 @@ func CheckDataUpload(ctx context.Context, client crclient.Client, log logrus.Fie
 	}
 
 	if len(dataUploadSlice.Items) != nodes {
-		log.Infof("Only %d dataUploads found for backup %s, expecting to have %d DataUpload objects. Waiting...", len(dataUploadSlice.Items), backup.Name, nodes)
+		log.Debugf("Only %d dataUploads found for backup %s, expecting to have %d DataUpload objects. Waiting...", len(dataUploadSlice.Items), backup.Name, nodes)
 		return started, finished, nil
 	}
 
@@ -107,7 +109,7 @@ func CheckDataUpload(ctx context.Context, client crclient.Client, log logrus.Fie
 			log.Infof("dataUpload found. Waiting for completion... StatusPhase: %s Name: %s", dataUpload.Status.Phase, dataUpload.Name)
 			switch dataUpload.Status.Phase {
 			case veleroapiv2alpha1.DataUploadPhaseCompleted:
-				log.Infof("dataUpload is done. Name: %s Status: %s", dataUpload.Name, dataUpload.Status.Phase)
+				log.Infof("dataUpload details. Name: %s Status: %s", dataUpload.Name, dataUpload.Status.Phase)
 				completed++
 			case veleroapiv2alpha1.DataUploadPhaseFailed:
 				return started, finished, fmt.Errorf("dataUpload failed. Name: %s Status: %s", dataUpload.Name, dataUpload.Status.Phase)
@@ -162,7 +164,200 @@ func WaitForDataUpload(ctx context.Context, client crclient.Client, log logrus.F
 	return true, err
 }
 
-func CheckPodVolumeBackup(ctx context.Context, client crclient.Client, log logrus.FieldLogger, backup *veleroapiv1.Backup, ha bool) (bool, bool, error) {
+// CheckVolumeSnapshotContent checks if the volumeSnapshotContent is started and finished.
+// The first return value is true if the volumeSnapshotContent is started, false otherwise.
+// The second return value is true if the volumeSnapshotContent is finished, false otherwise.
+// The third return value is an error if the volumeSnapshotContent is failed, nil otherwise.
+func CheckVolumeSnapshotContent(ctx context.Context, c crclient.Client, log logrus.FieldLogger, backup *veleroapiv1.Backup, ha bool, hcp *hyperv1.HostedControlPlane, pvBackupStarted *bool, pvBackupFinished *bool) (bool, bool, error) {
+	var (
+		started   = *pvBackupStarted
+		finished  = false
+		completed = 0
+		nodes     = 1
+		relevant  = 0
+	)
+
+	if *pvBackupFinished {
+		return true, true, nil
+	}
+
+	volumeSnapshotContentSlice := &snapshotv1.VolumeSnapshotContentList{}
+	if err := c.List(ctx, volumeSnapshotContentSlice); err != nil {
+		return started, finished, fmt.Errorf("failed to get volumeSnapshotContentList: %w", err)
+	}
+
+	// Early return if the volumeSnapshotContent does not exist but it's started.
+	// That means that the volumeSnapshotContent was created and deleted before the plugin was able to check the resource
+	if started && len(volumeSnapshotContentSlice.Items) == 0 {
+		log.Infof("VolumeSnapshotContent does not exist for backup %s, skipping", backup.Name)
+		return started, true, nil
+	}
+
+	if ha {
+		nodes = 3
+	}
+
+	for _, vsc := range volumeSnapshotContentSlice.Items {
+		if vsc.Spec.VolumeSnapshotRef.Namespace == hcp.Namespace && vsc.Status.ReadyToUse != nil {
+			object := vsc.DeepCopy()
+			if err := c.Get(ctx, types.NamespacedName{Name: vsc.Name, Namespace: vsc.Namespace}, object); err != nil {
+				return started, finished, fmt.Errorf("failed to get volumeSnapshotContent: %w", err)
+			}
+
+			if !*object.Status.ReadyToUse {
+				relevant++
+				started = true
+				*pvBackupStarted = true
+				log.Debugf("volumeSnapshotContent found. Waiting for completion... ReadyToUse: %v Name: %s Total Relevant: %d/%d", *object.Status.ReadyToUse, vsc.Name, relevant, nodes)
+			}
+
+			if *object.Status.ReadyToUse {
+				completed++
+				log.Infof("volumeSnapshotContent details. Name: %s ReadyToUse: %v Total: %d/%d", vsc.Name, *object.Status.ReadyToUse, completed, nodes)
+			}
+		}
+	}
+
+	if completed == nodes {
+		log.Infof("volumeSnapshotContent is done. Name: %s", backup.Name)
+		return true, true, nil
+	}
+
+	log.Debugf("volumeSnapshotContent not finished yet for backup. Name: %s Started: %v Finished: %v Completed: %d/%d", backup.Name, started, finished, completed, nodes)
+	return started, finished, nil
+}
+
+// WaitForVolumeSnapshotContent waits for the volumeSnapshotContent to be completed.
+// It returns true if the volumeSnapshotContent was completed successfully, false otherwise.
+func WaitForVolumeSnapshotContent(ctx context.Context, c crclient.Client, log logrus.FieldLogger, backup *veleroapiv1.Backup, vscTimeout time.Duration, vscCheckPace time.Duration, ha bool, hcp *hyperv1.HostedControlPlane, pvBackupStarted *bool, pvBackupFinished *bool) (bool, error) {
+	if vscTimeout == 0 {
+		vscTimeout = defaultPVBackupTimeout
+	}
+
+	if vscCheckPace == 0 {
+		vscCheckPace = defaultPVBackupCheckPace
+	}
+
+	waitCtx, cancel := context.WithTimeout(ctx, vscTimeout)
+	defer cancel()
+
+	err := wait.PollUntilContextCancel(waitCtx, vscCheckPace, true, func(ctx context.Context) (bool, error) {
+		log.Info("waiting for volumeSnapshotContent to be completed...")
+		_, vscFinished, err := CheckVolumeSnapshotContent(ctx, c, log, backup, ha, hcp, pvBackupStarted, pvBackupFinished)
+		if err != nil {
+			return false, err
+		}
+
+		if vscFinished {
+			*pvBackupFinished = true
+			return true, nil
+		}
+
+		return false, nil
+	})
+
+	if err != nil {
+		return false, fmt.Errorf("giving up, volumeSnapshotContent was not finished in the expected timeout. Err: %w", err)
+	}
+
+	return true, err
+}
+
+// CheckVolumeSnapshot checks if the volumeSnapshot is started and finished.
+// The first return value is true if the volumeSnapshot is started, false otherwise.
+// The second return value is true if the volumeSnapshot is finished, false otherwise.
+// The third return value is an error if the volumeSnapshot is failed, nil otherwise.
+func CheckVolumeSnapshot(ctx context.Context, c crclient.Client, log logrus.FieldLogger, backup *veleroapiv1.Backup, ha bool, hcp *hyperv1.HostedControlPlane, pvBackupStarted *bool, pvBackupFinished *bool) (bool, bool, error) {
+	var (
+		started   = *pvBackupStarted
+		finished  = false
+		completed = 0
+		nodes     = 1
+		relevant  = 0
+	)
+
+	if *pvBackupFinished {
+		return started, true, nil
+	}
+
+	volumeSnapshotSlice := &snapshotv1.VolumeSnapshotList{}
+	if err := c.List(ctx, volumeSnapshotSlice, crclient.InNamespace(hcp.Namespace)); err != nil {
+		return started, finished, fmt.Errorf("failed to get volumeSnapshotList: %w", err)
+	}
+
+	// Early return if the volumeSnapshot does not exist but it's started.
+	// That means that the volumeSnapshot was created and deleted before the plugin was able to check the resource
+	if started && len(volumeSnapshotSlice.Items) == 0 {
+		return started, true, nil
+	}
+
+	if ha {
+		nodes = 3
+	}
+
+	for _, vs := range volumeSnapshotSlice.Items {
+		if vs.Labels[veleroapiv1.BackupNameLabel] == backup.Name && vs.Status.ReadyToUse != nil {
+			object := vs.DeepCopy()
+			if err := c.Get(ctx, types.NamespacedName{Name: vs.Name, Namespace: vs.Namespace}, object); err != nil {
+				return started, finished, fmt.Errorf("failed to get volumeSnapshot: %w", err)
+			}
+			relevant++
+			started = true
+			*pvBackupStarted = true
+			log.Debugf("volumeSnapshot found. Waiting for completion... ReadyToUse: %v Name: %s Total Relevant: %d/%d", *object.Status.ReadyToUse, vs.Name, relevant, nodes)
+
+			if *object.Status.ReadyToUse {
+				completed++
+				log.Infof("volumeSnapshot details. Name: %s ReadyToUse: %v Total: %d/%d", vs.Name, *object.Status.ReadyToUse, completed, nodes)
+			}
+		}
+	}
+
+	if completed == nodes {
+		log.Infof("volumeSnapshot is done. Name: %s", backup.Name)
+		return true, true, nil
+	}
+
+	log.Debugf("volumeSnapshot not finished yet for backup. Name: %s Started: %v Finished: %v Completed: %d/%d", backup.Name, started, finished, completed, nodes)
+	return started, finished, nil
+}
+
+// WaitForVolumeSnapshot waits for the volumeSnapshot to be completed.
+// It returns true if the volumeSnapshot was completed successfully, false otherwise.
+func WaitForVolumeSnapshot(ctx context.Context, c crclient.Client, log logrus.FieldLogger, backup *veleroapiv1.Backup, vsTimeout time.Duration, vsCheckPace time.Duration, ha bool, hcp *hyperv1.HostedControlPlane, pvBackupStarted *bool, pvBackupFinished *bool) (bool, error) {
+	if vsTimeout == 0 {
+		vsTimeout = defaultPVBackupTimeout
+	}
+
+	if vsCheckPace == 0 {
+		vsCheckPace = defaultPVBackupCheckPace
+	}
+
+	waitCtx, cancel := context.WithTimeout(ctx, vsTimeout)
+	defer cancel()
+
+	err := wait.PollUntilContextCancel(waitCtx, vsCheckPace, true, func(ctx context.Context) (bool, error) {
+		log.Info("waiting for volumeSnapshot to be completed...")
+		_, vsFinished, err := CheckVolumeSnapshot(ctx, c, log, backup, ha, hcp, pvBackupStarted, pvBackupFinished)
+		if err != nil {
+			return false, err
+		}
+
+		if vsFinished {
+			return true, nil
+		}
+
+		return false, nil
+	})
+
+	if err != nil {
+		return false, fmt.Errorf("giving up, VolumeSnapshot was not finished in the expected timeout. Err: %w", err)
+	}
+
+	return true, err
+}
+
+func CheckPodVolumeBackup(ctx context.Context, c crclient.Client, log logrus.FieldLogger, backup *veleroapiv1.Backup, ha bool) (bool, bool, error) {
 	var (
 		started, finished bool = false, false
 		completed         int
@@ -170,7 +365,7 @@ func CheckPodVolumeBackup(ctx context.Context, client crclient.Client, log logru
 	)
 
 	podVolumeBackupList := &veleroapiv1.PodVolumeBackupList{}
-	if err := client.List(ctx, podVolumeBackupList, crclient.InNamespace(backup.Namespace)); err != nil {
+	if err := c.List(ctx, podVolumeBackupList, crclient.InNamespace(backup.Namespace)); err != nil {
 		log.Error(err, "failed to get PodVolumeBackupList")
 		return started, finished, err
 	}
@@ -214,7 +409,7 @@ func CheckPodVolumeBackup(ctx context.Context, client crclient.Client, log logru
 }
 
 // WaitForPodVolumeBackup waits for the backup to be completed and uploaded to the destination backend.
-func WaitForPodVolumeBackup(ctx context.Context, client crclient.Client, log logrus.FieldLogger, backup *veleroapiv1.Backup, podVolumeBackupTimeout time.Duration, podVolumeBackupCheckPace time.Duration, ha bool) (bool, error) {
+func WaitForPodVolumeBackup(ctx context.Context, c crclient.Client, log logrus.FieldLogger, backup *veleroapiv1.Backup, podVolumeBackupTimeout time.Duration, podVolumeBackupCheckPace time.Duration, ha bool) (bool, error) {
 	if podVolumeBackupTimeout == 0 {
 		podVolumeBackupTimeout = defaultPVBackupTimeout
 	}
@@ -227,7 +422,7 @@ func WaitForPodVolumeBackup(ctx context.Context, client crclient.Client, log log
 	defer cancel()
 
 	err := wait.PollUntilContextCancel(waitCtx, podVolumeBackupCheckPace, true, func(ctx context.Context) (bool, error) {
-		_, pvbFinished, err := CheckPodVolumeBackup(ctx, client, log, backup, ha)
+		_, pvbFinished, err := CheckPodVolumeBackup(ctx, c, log, backup, ha)
 		if err != nil {
 			return false, err
 		}
@@ -250,7 +445,7 @@ func WaitForPodVolumeBackup(ctx context.Context, client crclient.Client, log log
 // WaitForPausedPropagated waits for the HostedControlPlane (HCP) associated with the given HostedCluster (HC)
 // to be paused. It polls the status of the HCP at regular intervals until the HCP is found to be paused or the
 // specified timeout is reached.
-func WaitForPausedPropagated(ctx context.Context, client crclient.Client, log logrus.FieldLogger, hc *hyperv1.HostedCluster, timeout time.Duration) error {
+func WaitForPausedPropagated(ctx context.Context, c crclient.Client, log logrus.FieldLogger, hc *hyperv1.HostedCluster, timeout time.Duration) error {
 	if timeout == 0 {
 		timeout = defaultWaitForPausedTimeout
 	}
@@ -266,7 +461,7 @@ func WaitForPausedPropagated(ctx context.Context, client crclient.Client, log lo
 
 	err := wait.PollUntilContextCancel(waitCtx, 5*time.Second, true, func(ctx context.Context) (bool, error) {
 		hcp := &hyperv1.HostedControlPlane{}
-		if err := client.Get(ctx, types.NamespacedName{Name: hc.Name, Namespace: hcpNamespace}, hcp); err != nil {
+		if err := c.Get(ctx, types.NamespacedName{Name: hc.Name, Namespace: hcpNamespace}, hcp); err != nil {
 			if apierrors.IsNotFound(err) {
 				return true, nil
 			}
@@ -292,14 +487,14 @@ func WaitForPausedPropagated(ctx context.Context, client crclient.Client, log lo
 }
 
 // UpdateHostedCluster updates the HostedCluster's necessary fields in the specified namespaces.
-func UpdateHostedCluster(ctx context.Context, client crclient.Client, log logrus.FieldLogger, paused string, namespaces []string) error {
+func UpdateHostedCluster(ctx context.Context, c crclient.Client, log logrus.FieldLogger, paused string, namespaces []string) error {
 	log.Debug("listing HostedClusters")
 	hostedClusters := &hyperv1.HostedClusterList{
 		Items: []hyperv1.HostedCluster{},
 	}
 
 	for _, ns := range namespaces {
-		if err := client.List(ctx, hostedClusters, crclient.InNamespace(ns)); err != nil {
+		if err := c.List(ctx, hostedClusters, crclient.InNamespace(ns)); err != nil {
 			return fmt.Errorf("failed to list HostedClusters in namespace %s: %w", ns, err)
 		}
 
@@ -321,7 +516,7 @@ func UpdateHostedCluster(ctx context.Context, client crclient.Client, log logrus
 		err := wait.ExponentialBackoff(backoff, func() (bool, error) {
 			// Get the latest version of the HostedCluster
 			currentHC := &hyperv1.HostedCluster{}
-			if err := client.Get(ctx, types.NamespacedName{Name: hc.Name, Namespace: hc.Namespace}, currentHC); err != nil {
+			if err := c.Get(ctx, types.NamespacedName{Name: hc.Name, Namespace: hc.Namespace}, currentHC); err != nil {
 				return false, err
 			}
 
@@ -329,7 +524,7 @@ func UpdateHostedCluster(ctx context.Context, client crclient.Client, log logrus
 			if currentHC.Spec.PausedUntil == nil || *currentHC.Spec.PausedUntil != paused {
 				log.Infof("setting PauseUntil to %s in HostedCluster %s", paused, currentHC.Name)
 				currentHC.Spec.PausedUntil = ptr.To(paused)
-				if err := client.Update(ctx, currentHC); err != nil {
+				if err := c.Update(ctx, currentHC); err != nil {
 					if apierrors.IsConflict(err) {
 						log.Infof("Conflict detected pausing the HostedCluster %s, retrying...", currentHC.Name)
 						return false, nil
@@ -339,7 +534,7 @@ func UpdateHostedCluster(ctx context.Context, client crclient.Client, log logrus
 
 				// Checking the hc Object to validate the propagation of the PausedUntil field
 				log.Debug("checking paused state propagation")
-				if err := WaitForPausedPropagated(ctx, client, log, currentHC, defaultWaitForPausedTimeout); err != nil {
+				if err := WaitForPausedPropagated(ctx, c, log, currentHC, defaultWaitForPausedTimeout); err != nil {
 					return false, err
 				}
 			}
@@ -356,12 +551,12 @@ func UpdateHostedCluster(ctx context.Context, client crclient.Client, log logrus
 }
 
 // UpdateNodepools updates the NodePool's necessary fields in the specified namespaces.
-func UpdateNodepools(ctx context.Context, client crclient.Client, log logrus.FieldLogger, paused string, namespaces []string) error {
+func UpdateNodepools(ctx context.Context, c crclient.Client, log logrus.FieldLogger, paused string, namespaces []string) error {
 	log.Debug("listing NodePools, checking namespaces to inspect")
 	nodepools := &hyperv1.NodePoolList{}
 
 	for _, ns := range namespaces {
-		if err := client.List(ctx, nodepools, crclient.InNamespace(ns)); err != nil {
+		if err := c.List(ctx, nodepools, crclient.InNamespace(ns)); err != nil {
 			return fmt.Errorf("failed to list NodePools in namespace %s: %w", ns, err)
 		}
 
@@ -383,14 +578,14 @@ func UpdateNodepools(ctx context.Context, client crclient.Client, log logrus.Fie
 		err := wait.ExponentialBackoff(backoff, func() (bool, error) {
 			// Get the latest version of the NodePool
 			currentNP := &hyperv1.NodePool{}
-			if err := client.Get(ctx, types.NamespacedName{Name: np.Name, Namespace: np.Namespace}, currentNP); err != nil {
+			if err := c.Get(ctx, types.NamespacedName{Name: np.Name, Namespace: np.Namespace}, currentNP); err != nil {
 				return false, err
 			}
 
 			if currentNP.Spec.PausedUntil == nil || *currentNP.Spec.PausedUntil != paused {
 				log.Infof("%s setting PauseUntil to %s in NodePool: %s", paused, currentNP.Name)
 				currentNP.Spec.PausedUntil = ptr.To(paused)
-				if err := client.Update(ctx, currentNP); err != nil {
+				if err := c.Update(ctx, currentNP); err != nil {
 					if apierrors.IsConflict(err) {
 						log.Infof("Conflict detected pausing the NodePool %s, retrying...", currentNP.Name)
 						return false, nil
@@ -483,18 +678,18 @@ func RemoveLabel(metadata metav1.Object, key string) {
 // It iterates through the namespaces and attempts to list HostedControlPlane objects in each namespace.
 // If a HostedControlPlane is found, it returns the first one encountered.
 // If no HostedControlPlane is found in any of the namespaces, it returns an error.
-func GetHCP(ctx context.Context, nsList []string, client crclient.Client, log logrus.FieldLogger) (*hyperv1.HostedControlPlane, error) {
+func GetHCP(ctx context.Context, nsList []string, c crclient.Client, log logrus.FieldLogger) (*hyperv1.HostedControlPlane, error) {
 	for _, ns := range nsList {
 		hcpList := &hyperv1.HostedControlPlaneList{}
-		if err := client.List(ctx, hcpList, crclient.InNamespace(ns)); err != nil {
+		if err := c.List(ctx, hcpList, crclient.InNamespace(ns)); err != nil {
 			return nil, fmt.Errorf("error getting HostedControlPlane: %v", err)
 		}
 
 		if len(hcpList.Items) <= 0 {
-			log.Info("HostedControlPlane not found, retrying in the rest of the namespaces", "namespace", ns)
+			log.Infof("HostedControlPlane not found, retrying in the rest of the namespaces: %s", ns)
 			continue
 		}
-		log.Info("found hostedcontrolplane %s/%s", hcpList.Items[0].Namespace, hcpList.Items[0].Name)
+		log.Infof("found hostedcontrolplane %s/%s", hcpList.Items[0].Namespace, hcpList.Items[0].Name)
 
 		return &hcpList.Items[0], nil
 	}
@@ -544,4 +739,108 @@ func CRDExists(ctx context.Context, crdName string, c crclient.Client) (bool, er
 		return false, err
 	}
 	return true, nil
+}
+
+func ReconcileVolumeSnapshotContent(ctx context.Context, hcp *hyperv1.HostedControlPlane, c crclient.Client, log logrus.FieldLogger, backup *veleroapiv1.Backup, ha bool, dataUploadTimeout time.Duration, dataUploadCheckPace time.Duration, pvBackupStarted *bool, pvBackupFinished *bool) (bool, error) {
+	var (
+		vscFinished = false
+	)
+
+	if *pvBackupFinished {
+		return true, nil
+	}
+
+	log.Debug("Reconciling VolumeSnapshotContent")
+	switch {
+	case !*pvBackupStarted:
+		var err error
+
+		log.Debug("Checking if VolumeSnapshotContent exists")
+		*pvBackupStarted, vscFinished, err = CheckVolumeSnapshotContent(ctx, c, log, backup, ha, hcp, pvBackupStarted, pvBackupFinished)
+		if err != nil {
+			return false, err
+		}
+
+	case *pvBackupStarted && !*pvBackupFinished || *pvBackupStarted && !vscFinished:
+		var err error
+
+		log.Debug("VolumeSnapshotContent exists, waiting for it to be completed")
+		vscFinished, err = WaitForVolumeSnapshotContent(ctx, c, log, backup, dataUploadTimeout, dataUploadCheckPace, ha, hcp, pvBackupStarted, pvBackupFinished)
+		if err != nil {
+			return false, err
+		}
+	}
+	return vscFinished, nil
+}
+
+func ReconcileVolumeSnapshots(ctx context.Context, hcp *hyperv1.HostedControlPlane, c crclient.Client, log logrus.FieldLogger, backup *veleroapiv1.Backup, ha bool, dataUploadTimeout time.Duration, dataUploadCheckPace time.Duration, pvBackupStarted *bool, pvBackupFinished *bool) (bool, error) {
+	var (
+		vsFinished = false
+	)
+
+	if *pvBackupFinished {
+		return true, nil
+	}
+
+	log.Debug("Reconciling VolumeSnapshots")
+	switch {
+	case !*pvBackupStarted:
+		var err error
+
+		log.Debug("Checking if VolumeSnapshot exists")
+		*pvBackupStarted, vsFinished, err = CheckVolumeSnapshot(ctx, c, log, backup, ha, hcp, pvBackupStarted, pvBackupFinished)
+		if err != nil {
+			return false, err
+		}
+
+	case *pvBackupStarted && !*pvBackupFinished || *pvBackupStarted && !vsFinished:
+		var err error
+
+		log.Debug("VolumeSnapshot exists, waiting for it to be completed")
+		vsFinished, err = WaitForVolumeSnapshot(ctx, c, log, backup, dataUploadTimeout, dataUploadCheckPace, ha, hcp, pvBackupStarted, pvBackupFinished)
+		if err != nil {
+			return false, err
+		}
+	}
+
+	return vsFinished, nil
+}
+
+func ReconcileDataUpload(ctx context.Context, c crclient.Client, log logrus.FieldLogger, backup *veleroapiv1.Backup, ha bool, dataUploadTimeout time.Duration, dataUploadCheckPace time.Duration, duStarted *bool, duFinished *bool) (bool, error) {
+	var (
+		finished = false
+	)
+
+	if *duFinished {
+		return true, nil
+	}
+
+	switch {
+	case !*duStarted:
+		var err error
+
+		log.Debug("Checking if DataUpload exists")
+		*duStarted, finished, err = CheckDataUpload(ctx, c, log, backup, ha)
+		if err != nil {
+			return false, err
+		}
+
+	// If the DataUpload is started, we need to wait for it to be completed, if not, continue with the backup
+	// This is a security measure to avoid deadlocks in the backup process, when the plugin waits for the DataUpload
+	// to be completed but the DataUpload is not started yet.
+	case *duStarted && !*duFinished:
+		var err error
+
+		log.Debug("DataUpload exists, waiting for it to be completed")
+		finished, err = WaitForDataUpload(ctx, c, log, backup, dataUploadTimeout, dataUploadCheckPace, ha)
+		if err != nil {
+			return false, err
+		}
+	}
+
+	if finished {
+		*duFinished = true
+	}
+
+	return finished, nil
 }

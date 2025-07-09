@@ -1,22 +1,42 @@
 package validation
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"time"
 
+	"github.com/openshift/hypershift-oadp-plugin/pkg/common"
 	plugtypes "github.com/openshift/hypershift-oadp-plugin/pkg/core/types"
 	hyperv1 "github.com/openshift/hypershift/api/hypershift/v1beta1"
 	"github.com/sirupsen/logrus"
+	velerov1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	crclient "sigs.k8s.io/controller-runtime/pkg/client"
+)
+
+var (
+	vscFinished = false
+	vsFinished  = false
+	duFinished  = false
 )
 
 type BackupValidator interface {
 	ValidatePluginConfig(config map[string]string) (*plugtypes.BackupOptions, error)
-	ValidatePlatformConfig(hcp *hyperv1.HostedControlPlane) error
+	ValidatePlatformConfig(hcp *hyperv1.HostedControlPlane, backup *velerov1.Backup) error
+	ValidateDataMover(ctx context.Context, hcp *hyperv1.HostedControlPlane, backup *velerov1.Backup) error
 }
 
 type BackupPluginValidator struct {
-	Log *logrus.Logger
+	Log                 logrus.FieldLogger
+	Client              crclient.Client
+	Backup              *velerov1.Backup
+	HA                  bool
+	DataUploadTimeout   time.Duration
+	DataUploadCheckPace time.Duration
+	PVBackupStarted     *bool
+	PVBackupFinished    *bool
+	DUStarted           *bool
+	DUFinished          *bool
 }
 
 func (p *BackupPluginValidator) ValidatePluginConfig(config map[string]string) (*plugtypes.BackupOptions, error) {
@@ -54,9 +74,6 @@ func (p *BackupPluginValidator) ValidatePluginConfig(config map[string]string) (
 				return nil, fmt.Errorf("error parsing dataUploadCheckPace: %s", err.Error())
 			}
 			bo.DataUploadCheckPace = time.Duration(seconds)
-		case "pluginVerbosityLevel":
-			p.Log.Debugf("reading/parsing pluginVerbosityLevel %s", value)
-			bo.PluginVerbosityLevel = value
 		default:
 			p.Log.Warnf("unknown configuration key: %s with value %s", key, value)
 		}
@@ -68,7 +85,11 @@ func (p *BackupPluginValidator) ValidatePluginConfig(config map[string]string) (
 
 }
 
-func (p *BackupPluginValidator) ValidatePlatformConfig(hcp *hyperv1.HostedControlPlane) error {
+func (p *BackupPluginValidator) ValidatePlatformConfig(hcp *hyperv1.HostedControlPlane, backup *velerov1.Backup) error {
+	if p.Backup == nil {
+		p.Backup = backup
+	}
+
 	switch hcp.Spec.Platform.Type {
 	case hyperv1.AWSPlatform:
 		return p.checkAWSPlatform(hcp)
@@ -85,7 +106,47 @@ func (p *BackupPluginValidator) ValidatePlatformConfig(hcp *hyperv1.HostedContro
 	default:
 		return fmt.Errorf("unsupported platform type %s", hcp.Spec.Platform.Type)
 	}
+}
 
+func (p *BackupPluginValidator) ValidateDataMover(ctx context.Context, hcp *hyperv1.HostedControlPlane, backup *velerov1.Backup) error {
+	if p.Backup == nil {
+		p.Backup = backup
+	}
+
+	switch hcp.Spec.Platform.Type {
+	case hyperv1.AWSPlatform:
+		if *p.PVBackupFinished && *p.DUFinished {
+			return nil
+		}
+		return p.reconcileStandardDataMover(ctx, hcp)
+	case hyperv1.AzurePlatform:
+		if *p.PVBackupFinished {
+			return nil
+		}
+		return p.reconcileAzureDataMover(ctx, hcp)
+	case hyperv1.IBMCloudPlatform:
+		if *p.PVBackupFinished && *p.DUFinished {
+			return nil
+		}
+		return p.reconcileStandardDataMover(ctx, hcp)
+	case hyperv1.KubevirtPlatform:
+		if *p.PVBackupFinished && *p.DUFinished {
+			return nil
+		}
+		return p.reconcileStandardDataMover(ctx, hcp)
+	case hyperv1.OpenStackPlatform:
+		if *p.PVBackupFinished && *p.DUFinished {
+			return nil
+		}
+		return p.reconcileStandardDataMover(ctx, hcp)
+	case hyperv1.AgentPlatform, hyperv1.NonePlatform:
+		if *p.PVBackupFinished && *p.DUFinished {
+			return nil
+		}
+		return p.reconcileStandardDataMover(ctx, hcp)
+	default:
+		return fmt.Errorf("unsupported platform type %s", hcp.Spec.Platform.Type)
+	}
 }
 
 func (p *BackupPluginValidator) checkAWSPlatform(hcp *hyperv1.HostedControlPlane) error {
@@ -123,5 +184,59 @@ func (p *BackupPluginValidator) checkOpenStackPlatform(hcp *hyperv1.HostedContro
 func (p *BackupPluginValidator) checkAgentPlatform(hcp *hyperv1.HostedControlPlane) error {
 	// Check if the Agent platform is configured properly
 	p.Log.Infof("Agent platform configuration is valid for HCP: %s", hcp.Name)
+	return nil
+}
+
+// This datamover reconciles the VSC, VS and DataUpload
+func (p *BackupPluginValidator) reconcileStandardDataMover(ctx context.Context, hcp *hyperv1.HostedControlPlane) error {
+	var (
+		err error
+	)
+
+	// Reconcile the standard dataMover
+	p.Log.Debugf("Reconciling standard data mover for HCP: %s", hcp.Name)
+	if vscFinished, err = common.ReconcileVolumeSnapshotContent(ctx, hcp, p.Client, p.Log, p.Backup, p.HA, p.DataUploadTimeout, p.DataUploadCheckPace, p.PVBackupStarted, p.PVBackupFinished); err != nil {
+		return fmt.Errorf("error reconciling volume snapshot content: %s", err.Error())
+	}
+
+	if !vscFinished {
+		return nil
+	}
+
+	if vsFinished, err = common.ReconcileVolumeSnapshots(ctx, hcp, p.Client, p.Log, p.Backup, p.HA, p.DataUploadTimeout, p.DataUploadCheckPace, p.PVBackupStarted, p.PVBackupFinished); err != nil {
+		return fmt.Errorf("error reconciling volume snapshots: %s", err.Error())
+	}
+
+	if !vsFinished {
+		return nil
+	}
+
+	if duFinished, err = common.ReconcileDataUpload(ctx, p.Client, p.Log, p.Backup, p.HA, p.DataUploadTimeout, p.DataUploadCheckPace, p.DUStarted, p.DUFinished); err != nil {
+		return fmt.Errorf("error reconciling data upload: %s", err.Error())
+	}
+
+	if !duFinished {
+		return nil
+	}
+
+	return nil
+}
+
+// This datamover reconciles the VSC and VS
+func (p *BackupPluginValidator) reconcileAzureDataMover(ctx context.Context, hcp *hyperv1.HostedControlPlane) error {
+	var (
+		err error
+	)
+
+	// Reconcile the Azure mover
+	p.Log.Debugf("Reconciling Azure data mover for HCP: %s", hcp.Name)
+	if vscFinished, err = common.ReconcileVolumeSnapshotContent(ctx, hcp, p.Client, p.Log, p.Backup, p.HA, p.DataUploadTimeout, p.DataUploadCheckPace, p.PVBackupStarted, p.PVBackupFinished); err != nil {
+		return fmt.Errorf("error reconciling volume snapshot content: %s", err.Error())
+	}
+
+	if vsFinished, err = common.ReconcileVolumeSnapshots(ctx, hcp, p.Client, p.Log, p.Backup, p.HA, p.DataUploadTimeout, p.DataUploadCheckPace, p.PVBackupStarted, p.PVBackupFinished); err != nil {
+		return fmt.Errorf("error reconciling volume snapshots: %s", err.Error())
+	}
+
 	return nil
 }

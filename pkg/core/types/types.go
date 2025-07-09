@@ -29,8 +29,6 @@ type BackupOptions struct {
 	DataUploadCheckPace time.Duration
 	// ManagedServices is a flag to indicate if the backup is done for ManagedServices like ROSA, ARO, etc.
 	ManagedServices bool
-	// PluginVerbosityLevel is the verbosity level of the plugin.
-	PluginVerbosityLevel string
 }
 
 type RestoreOptions struct {
@@ -40,6 +38,4 @@ type RestoreOptions struct {
 	ReadoptNodes bool
 	// ManagedServices is a flag to indicate if the backup is done for ManagedServices like ROSA, ARO, etc.
 	ManagedServices bool
-	// PluginVerbosityLevel is the verbosity level of the plugin.
-	PluginVerbosityLevel string
 }
