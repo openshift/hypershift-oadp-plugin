@@ -20,6 +20,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -40,6 +41,8 @@ type BackupPlugin struct {
 	dataUploadTimeout time.Duration
 	pvBackupStarted   bool
 	pvBackupFinished  bool
+	duStarted         bool
+	duFinished        bool
 
 	*plugtypes.BackupOptions
 }
@@ -77,37 +80,34 @@ func NewBackupPlugin(logger logrus.FieldLogger) (*BackupPlugin, error) {
 		logger.Infof("configuration for hypershift OADP plugin not found")
 	}
 
-	validator := &validation.BackupPluginValidator{}
-	if l, ok := logger.(*logrus.Logger); ok {
-		validator.Log = l
-	} else {
-		validator.Log = logrus.New()
+	validator := &validation.BackupPluginValidator{
+		Log:                 logger,
+		Client:              client,
+		HA:                  false,
+		DataUploadTimeout:   0,
+		DataUploadCheckPace: 0,
+		PVBackupStarted:     ptr.To(false),
+		PVBackupFinished:    ptr.To(false),
+		DUStarted:           ptr.To(false),
+		DUFinished:          ptr.To(false),
 	}
 
 	bp := &BackupPlugin{
-		log:              logger,
-		client:           client,
-		config:           pluginConfig.Data,
-		pvBackupStarted:  false,
-		pvBackupFinished: false,
-		ctx:              ctx,
-		validator:        validator,
+		log:       logger,
+		client:    client,
+		config:    pluginConfig.Data,
+		ctx:       ctx,
+		validator: validator,
 	}
 
 	if bp.BackupOptions, err = bp.validator.ValidatePluginConfig(bp.config); err != nil {
 		return nil, fmt.Errorf("error validating plugin configuration: %s", err.Error())
 	}
 
-	// Set the log level to pluginVerbosityLevel if set, keep debug level if not set
-	if bp.BackupOptions.PluginVerbosityLevel != "" {
-		parsedLevel, err := logrus.ParseLevel(bp.BackupOptions.PluginVerbosityLevel)
-		if err != nil {
-			return nil, fmt.Errorf("error parsing pluginVerbosityLevel: %s", err.Error())
-		}
-		logger.Infof("pluginVerbosityLevel set to %s", parsedLevel)
-		if l, ok := logger.(*logrus.Logger); ok {
-			l.SetLevel(parsedLevel)
-		}
+	// Configurar los timeouts en el validator
+	if validator, ok := bp.validator.(*validation.BackupPluginValidator); ok {
+		validator.DataUploadTimeout = bp.DataUploadTimeout
+		validator.DataUploadCheckPace = bp.DataUploadCheckPace
 	}
 
 	bp.log.Infof("Backup plugin initialized with log level: %s", logrus.GetLevel())
@@ -163,8 +163,14 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 
 		if p.hcp.Spec.ControllerAvailabilityPolicy == hyperv1.HighlyAvailable {
 			p.ha = true
+			if validator, ok := p.validator.(*validation.BackupPluginValidator); ok {
+				validator.HA = true
+			}
 		} else {
 			p.ha = false
+			if validator, ok := p.validator.(*validation.BackupPluginValidator); ok {
+				validator.HA = false
+			}
 		}
 	}
 
@@ -184,7 +190,7 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 			return nil, nil, fmt.Errorf("error converting item to HostedControlPlane: %v", err)
 		}
 
-		if err := p.validator.ValidatePlatformConfig(hcp); err != nil {
+		if err := p.validator.ValidatePlatformConfig(hcp, backup); err != nil {
 			return nil, nil, fmt.Errorf("error checking platform configuration: %v", err)
 		}
 
@@ -238,28 +244,9 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 	}
 
 	if (backup.Spec.DefaultVolumesToFsBackup != nil && !*backup.Spec.DefaultVolumesToFsBackup) || backup.Spec.DefaultVolumesToFsBackup == nil {
-		p.log.Debug("checking DataUpload")
-		switch {
-		case !p.pvBackupStarted:
-			var err error
-
-			p.log.Debug("Checking if DataUpload exists")
-			p.pvBackupStarted, p.pvBackupFinished, err = common.CheckDataUpload(ctx, p.client, p.log, backup, p.ha)
-			if err != nil {
-				return nil, nil, err
-			}
-
-		// If the DataUpload is started, we need to wait for it to be completed, if not, continue with the backup
-		// This is a security measure to avoid deadlocks in the backup process, when the plugin waits for the DataUpload
-		// to be completed but the DataUpload is not started yet.
-		case p.pvBackupStarted && !p.pvBackupFinished:
-			var err error
-
-			p.log.Debug("DataUpload exists, waiting for it to be completed")
-			p.pvBackupFinished, err = common.WaitForDataUpload(ctx, p.client, p.log, backup, p.dataUploadTimeout, p.DataUploadCheckPace, p.ha)
-			if err != nil {
-				return nil, nil, err
-			}
+		p.log.Debug("Validating DataMover")
+		if err := p.validator.ValidateDataMover(ctx, p.hcp, backup); err != nil {
+			return nil, nil, fmt.Errorf("error validating DataMover: %v", err)
 		}
 
 	} else {
@@ -287,7 +274,7 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 		}
 	}
 
-	if p.pvBackupFinished && !p.Migration {
+	if p.pvBackupFinished || p.duFinished && !p.Migration {
 		p.log.Debug("Volume backup is done, updating HC and NPs")
 		// updating NodePools
 		if err := common.UpdateNodepools(ctx, p.client, p.log, "false", backup.Spec.IncludedNamespaces); err != nil {
