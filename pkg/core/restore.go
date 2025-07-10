@@ -78,11 +78,10 @@ func NewRestorePlugin(logger logrus.FieldLogger) (*RestorePlugin, error) {
 		logger.Info("configuration for hypershift OADP plugin not found")
 	}
 
-	validator := &validation.RestorePluginValidator{}
-	if l, ok := logger.(*logrus.Logger); ok {
-		validator.Log = l
-	} else {
-		validator.Log = logrus.New()
+	validator := &validation.RestorePluginValidator{
+		Log:       logger,
+		Client:    client,
+		LogHeader: "restore",
 	}
 
 	rp := &RestorePlugin{
@@ -96,18 +95,6 @@ func NewRestorePlugin(logger logrus.FieldLogger) (*RestorePlugin, error) {
 
 	if rp.RestoreOptions, err = rp.validator.ValidatePluginConfig(rp.config); err != nil {
 		return nil, fmt.Errorf("error validating plugin configuration: %s", err.Error())
-	}
-
-	// Set the log level to pluginVerbosityLevel if set, keep debug level if not set
-	if rp.RestoreOptions.PluginVerbosityLevel != "" {
-		parsedLevel, err := logrus.ParseLevel(rp.RestoreOptions.PluginVerbosityLevel)
-		if err != nil {
-			return nil, fmt.Errorf("error parsing pluginVerbosityLevel: %s", err.Error())
-		}
-		logger.Infof("pluginVerbosityLevel set to %s", parsedLevel)
-		if l, ok := logger.(*logrus.Logger); ok {
-			l.SetLevel(parsedLevel)
-		}
 	}
 
 	rp.log = logger.WithField("type", "hcp-restore")

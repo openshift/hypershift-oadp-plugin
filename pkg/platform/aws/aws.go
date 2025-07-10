@@ -6,6 +6,5 @@ import (
 )
 
 func RestoreTasks(hcp *hyperv1.HostedControlPlane, client crclient.Client) error {
-	// TODO: Implement PrivateLink regeneration for AWS
 	return nil
 }

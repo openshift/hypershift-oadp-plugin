@@ -42,9 +42,6 @@ func (p *RestorePluginValidator) ValidatePluginConfig(config map[string]string) 
 		case "managedServices":
 			p.Log.Debugf("reading/parsing managedServices %s", value)
 			bo.ManagedServices = value == "true"
-		case "pluginVerbosityLevel":
-			p.Log.Debugf("reading/parsing pluginVerbosityLevel %s", value)
-			bo.PluginVerbosityLevel = value
 		default:
 			p.Log.Warnf("unknown configuration key: %s with value %s", key, value)
 		}
