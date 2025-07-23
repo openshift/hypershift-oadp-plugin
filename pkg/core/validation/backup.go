@@ -23,7 +23,7 @@ var (
 type BackupValidator interface {
 	ValidatePluginConfig(config map[string]string) (*plugtypes.BackupOptions, error)
 	ValidatePlatformConfig(hcp *hyperv1.HostedControlPlane, backup *velerov1.Backup) error
-	ValidateDataMover(ctx context.Context, hcp *hyperv1.HostedControlPlane, backup *velerov1.Backup) error
+	ValidateDataMover(ctx context.Context, hcp *hyperv1.HostedControlPlane, backup *velerov1.Backup, pvBackupFinished *bool, duFinished *bool) error
 }
 
 type BackupPluginValidator struct {
@@ -108,42 +108,83 @@ func (p *BackupPluginValidator) ValidatePlatformConfig(hcp *hyperv1.HostedContro
 	}
 }
 
-func (p *BackupPluginValidator) ValidateDataMover(ctx context.Context, hcp *hyperv1.HostedControlPlane, backup *velerov1.Backup) error {
-	if p.Backup == nil {
-		p.Backup = backup
+func (pv *BackupPluginValidator) ValidateDataMover(ctx context.Context, hcp *hyperv1.HostedControlPlane, backup *velerov1.Backup, pvBackupFinished *bool, duFinished *bool) error {
+	if pv.Backup == nil {
+		pv.Backup = backup
 	}
 
 	switch hcp.Spec.Platform.Type {
 	case hyperv1.AWSPlatform:
-		if *p.PVBackupFinished && *p.DUFinished {
+		if *pv.PVBackupFinished && *pv.DUFinished {
+			*pvBackupFinished = true
+			*duFinished = true
 			return nil
 		}
-		return p.reconcileStandardDataMover(ctx, hcp)
+
+		if err := pv.reconcileStandardDataMover(ctx, hcp); err != nil {
+			return fmt.Errorf("error reconciling standard data mover: %s", err.Error())
+		}
+
+		return nil
 	case hyperv1.AzurePlatform:
-		if *p.PVBackupFinished {
+		if *pv.PVBackupFinished {
+			*pvBackupFinished = true
 			return nil
 		}
-		return p.reconcileAzureDataMover(ctx, hcp)
+
+		if err := pv.reconcileAzureDataMover(ctx, hcp); err != nil {
+			return fmt.Errorf("error reconciling Azure data mover: %s", err.Error())
+		}
+
+		return nil
 	case hyperv1.IBMCloudPlatform:
-		if *p.PVBackupFinished && *p.DUFinished {
+		if *pv.PVBackupFinished && *pv.DUFinished {
+			*pvBackupFinished = true
+			*duFinished = true
 			return nil
 		}
-		return p.reconcileStandardDataMover(ctx, hcp)
+
+		if err := pv.reconcileStandardDataMover(ctx, hcp); err != nil {
+			return fmt.Errorf("error reconciling standard data mover: %s", err.Error())
+		}
+
+		return nil
 	case hyperv1.KubevirtPlatform:
-		if *p.PVBackupFinished && *p.DUFinished {
+		if *pv.PVBackupFinished && *pv.DUFinished {
+			*pvBackupFinished = true
+			*duFinished = true
 			return nil
 		}
-		return p.reconcileStandardDataMover(ctx, hcp)
+
+		if err := pv.reconcileStandardDataMover(ctx, hcp); err != nil {
+			return fmt.Errorf("error reconciling standard data mover: %s", err.Error())
+		}
+
+		return nil
 	case hyperv1.OpenStackPlatform:
-		if *p.PVBackupFinished && *p.DUFinished {
+		if *pv.PVBackupFinished && *pv.DUFinished {
+			*pvBackupFinished = true
+			*duFinished = true
 			return nil
 		}
-		return p.reconcileStandardDataMover(ctx, hcp)
+
+		if err := pv.reconcileStandardDataMover(ctx, hcp); err != nil {
+			return fmt.Errorf("error reconciling standard data mover: %s", err.Error())
+		}
+
+		return nil
 	case hyperv1.AgentPlatform, hyperv1.NonePlatform:
-		if *p.PVBackupFinished && *p.DUFinished {
+		if *pv.PVBackupFinished && *pv.DUFinished {
+			*pvBackupFinished = true
+			*duFinished = true
 			return nil
 		}
-		return p.reconcileStandardDataMover(ctx, hcp)
+
+		if err := pv.reconcileStandardDataMover(ctx, hcp); err != nil {
+			return fmt.Errorf("error reconciling standard data mover: %s", err.Error())
+		}
+
+		return nil
 	default:
 		return fmt.Errorf("unsupported platform type %s", hcp.Spec.Platform.Type)
 	}
