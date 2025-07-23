@@ -43,6 +43,8 @@ type BackupPlugin struct {
 	pvBackupFinished  bool
 	duStarted         bool
 	duFinished        bool
+	hcPaused          bool
+	npPaused          bool
 
 	*plugtypes.BackupOptions
 }
@@ -104,7 +106,7 @@ func NewBackupPlugin(logger logrus.FieldLogger) (*BackupPlugin, error) {
 		return nil, fmt.Errorf("error validating plugin configuration: %s", err.Error())
 	}
 
-	// Configurar los timeouts en el validator
+	// Set the timeouts for the validator
 	if validator, ok := bp.validator.(*validation.BackupPluginValidator); ok {
 		validator.DataUploadTimeout = bp.DataUploadTimeout
 		validator.DataUploadCheckPace = bp.DataUploadCheckPace
@@ -196,13 +198,19 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 
 	case common.MainKinds[kind]:
 		// Updating HostedClusters
-		if err := common.UpdateHostedCluster(ctx, p.client, p.log, "true", backup.Spec.IncludedNamespaces); err != nil {
-			return nil, nil, fmt.Errorf("error updating HostedClusters: %v", err)
+		if !p.hcPaused {
+			if err := common.UpdateHostedCluster(ctx, p.client, p.log, "true", backup.Spec.IncludedNamespaces); err != nil {
+				return nil, nil, fmt.Errorf("error updating HostedClusters: %v", err)
+			}
+			p.npPaused = true
 		}
 
 		// Updating NodePools
-		if err := common.UpdateNodepools(ctx, p.client, p.log, "true", backup.Spec.IncludedNamespaces); err != nil {
-			return nil, nil, fmt.Errorf("error updating NodePools: %v", err)
+		if !p.npPaused {
+			if err := common.UpdateNodepools(ctx, p.client, p.log, "true", backup.Spec.IncludedNamespaces); err != nil {
+				return nil, nil, fmt.Errorf("error updating NodePools: %v", err)
+			}
+			p.npPaused = true
 		}
 
 		if kind == common.HostedClusterKind {
@@ -245,7 +253,7 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 
 	if (backup.Spec.DefaultVolumesToFsBackup != nil && !*backup.Spec.DefaultVolumesToFsBackup) || backup.Spec.DefaultVolumesToFsBackup == nil {
 		p.log.Debug("Validating DataMover")
-		if err := p.validator.ValidateDataMover(ctx, p.hcp, backup); err != nil {
+		if err := p.validator.ValidateDataMover(ctx, p.hcp, backup, &p.pvBackupFinished, &p.duFinished); err != nil {
 			return nil, nil, fmt.Errorf("error validating DataMover: %v", err)
 		}
 
@@ -274,17 +282,19 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 		}
 	}
 
-	if p.pvBackupFinished || p.duFinished && !p.Migration {
-		p.log.Debug("Volume backup is done, updating HC and NPs")
+	if (p.pvBackupFinished || p.duFinished) && (p.npPaused || p.hcPaused) && !p.Migration {
+		p.log.Info("Volume backup is done, updating HC and NPs")
 		// updating NodePools
 		if err := common.UpdateNodepools(ctx, p.client, p.log, "false", backup.Spec.IncludedNamespaces); err != nil {
 			return nil, nil, fmt.Errorf("error updating NodePools: %v", err)
 		}
+		p.npPaused = false
 
 		// updating HostedClusters
 		if err := common.UpdateHostedCluster(ctx, p.client, p.log, "false", backup.Spec.IncludedNamespaces); err != nil {
 			return nil, nil, fmt.Errorf("error updating HostedClusters: %v", err)
 		}
+		p.hcPaused = false
 	}
 
 	return item, nil, nil

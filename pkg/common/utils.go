@@ -445,7 +445,7 @@ func WaitForPodVolumeBackup(ctx context.Context, c crclient.Client, log logrus.F
 // WaitForPausedPropagated waits for the HostedControlPlane (HCP) associated with the given HostedCluster (HC)
 // to be paused. It polls the status of the HCP at regular intervals until the HCP is found to be paused or the
 // specified timeout is reached.
-func WaitForPausedPropagated(ctx context.Context, c crclient.Client, log logrus.FieldLogger, hc *hyperv1.HostedCluster, timeout time.Duration) error {
+func WaitForPausedPropagated(ctx context.Context, c crclient.Client, log logrus.FieldLogger, hc *hyperv1.HostedCluster, timeout time.Duration, paused string) error {
 	if timeout == 0 {
 		timeout = defaultWaitForPausedTimeout
 	}
@@ -468,7 +468,7 @@ func WaitForPausedPropagated(ctx context.Context, c crclient.Client, log logrus.
 			log.Info(err, "failed to get HostedControlPlane")
 			return false, err
 		}
-		log.Infof("waiting for HCP to be paused")
+		log.Infof("waiting for HCP to set PausedUntil to %s", paused)
 
 		if hcp.Spec.PausedUntil != nil {
 			log.Debug("HostedControlPlane is paused")
@@ -534,7 +534,7 @@ func UpdateHostedCluster(ctx context.Context, c crclient.Client, log logrus.Fiel
 
 				// Checking the hc Object to validate the propagation of the PausedUntil field
 				log.Debug("checking paused state propagation")
-				if err := WaitForPausedPropagated(ctx, c, log, currentHC, defaultWaitForPausedTimeout); err != nil {
+				if err := WaitForPausedPropagated(ctx, c, log, currentHC, defaultWaitForPausedTimeout, paused); err != nil {
 					return false, err
 				}
 			}

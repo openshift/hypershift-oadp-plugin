@@ -309,7 +309,7 @@ func TestWaitForPausedPropagated(t *testing.T) {
 			client := clientBuilder.Build()
 			log := logrus.New()
 
-			err := WaitForPausedPropagated(context.TODO(), client, log, tt.hc, waitForPausedTimeout)
+			err := WaitForPausedPropagated(context.TODO(), client, log, tt.hc, waitForPausedTimeout, "true")
 			if tt.expectErr {
 				g.Expect(err).To(HaveOccurred())
 			} else {

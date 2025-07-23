@@ -186,7 +186,7 @@ func TestValidateDataMoverPlatformValidation(t *testing.T) {
 			}
 
 			ctx := context.Background()
-			err := validator.ValidateDataMover(ctx, hcp, backup)
+			err := validator.ValidateDataMover(ctx, hcp, backup, ptr.To(tt.pvBackupFinished), ptr.To(tt.duFinished))
 
 			if tt.expectError {
 				g.Expect(err).To(HaveOccurred())
@@ -246,7 +246,7 @@ func TestValidateDataMoverWithDifferentPlatforms(t *testing.T) {
 			}
 
 			ctx := context.Background()
-			err := validator.ValidateDataMover(ctx, hcp, backup)
+			err := validator.ValidateDataMover(ctx, hcp, backup, ptr.To(true), ptr.To(true))
 
 			// All supported platforms should not error
 			g.Expect(err).ToNot(HaveOccurred())
@@ -346,7 +346,7 @@ func TestValidateDataMoverWithFinishedStates(t *testing.T) {
 			}
 
 			ctx := context.Background()
-			err := validator.ValidateDataMover(ctx, hcp, backup)
+			err := validator.ValidateDataMover(ctx, hcp, backup, ptr.To(tt.pvBackupFinished), ptr.To(tt.duFinished))
 
 			// Should not error in any case
 			g.Expect(err).ToNot(HaveOccurred())
@@ -400,7 +400,7 @@ func TestValidateDataMoverWithClient(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := validator.ValidateDataMover(ctx, hcp, backup)
+	err := validator.ValidateDataMover(ctx, hcp, backup, ptr.To(false), ptr.To(false))
 
 	// Should not error even with a real client
 	g.Expect(err).ToNot(HaveOccurred())
@@ -494,13 +494,13 @@ func TestValidateDataMoverEdgeCases(t *testing.T) {
 			if tt.validator == nil || tt.hcp == nil || tt.backup == nil {
 				// Test with nil validator, hcp, or backup - this should panic
 				g.Expect(func() {
-					err := tt.validator.ValidateDataMover(ctx, tt.hcp, tt.backup)
+					err := tt.validator.ValidateDataMover(ctx, tt.hcp, tt.backup, ptr.To(false), ptr.To(false))
 					g.Expect(err).To(HaveOccurred())
 				}).To(Panic())
 				return
 			}
 
-			err := tt.validator.ValidateDataMover(ctx, tt.hcp, tt.backup)
+			err := tt.validator.ValidateDataMover(ctx, tt.hcp, tt.backup, ptr.To(false), ptr.To(false))
 
 			if tt.expectError {
 				g.Expect(err).To(HaveOccurred())
@@ -559,7 +559,7 @@ func TestValidateDataMoverWithHighAvailability(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	err := validator.ValidateDataMover(ctx, hcp, backup)
+	err := validator.ValidateDataMover(ctx, hcp, backup, ptr.To(false), ptr.To(false))
 
 	// Should not error even with HA enabled
 	g.Expect(err).ToNot(HaveOccurred())
@@ -637,7 +637,7 @@ func TestValidateDataMoverWithDifferentTimeouts(t *testing.T) {
 			}
 
 			ctx := context.Background()
-			err := validator.ValidateDataMover(ctx, hcp, backup)
+			err := validator.ValidateDataMover(ctx, hcp, backup, ptr.To(false), ptr.To(false))
 
 			// Should not error with different timeout configurations
 			g.Expect(err).ToNot(HaveOccurred())
@@ -727,7 +727,7 @@ func TestValidateDataMover_AWS_Reconciliation(t *testing.T) {
 		}
 
 		ctx := context.Background()
-		err := validator.ValidateDataMover(ctx, hcp, backup)
+		err := validator.ValidateDataMover(ctx, hcp, backup, ptr.To(false), ptr.To(false))
 
 		g.Expect(err).ToNot(HaveOccurred())
 	})
@@ -767,7 +767,7 @@ func TestValidateDataMover_AWS_Reconciliation(t *testing.T) {
 		}
 
 		ctx := context.Background()
-		err := validator.ValidateDataMover(ctx, hcp, backup)
+		err := validator.ValidateDataMover(ctx, hcp, backup, ptr.To(false), ptr.To(false))
 
 		g.Expect(err).ToNot(HaveOccurred())
 	})
@@ -833,7 +833,7 @@ func TestValidateDataMover_AWS_Reconciliation(t *testing.T) {
 		}
 
 		ctx := context.Background()
-		err := validator.ValidateDataMover(ctx, hcp, backup)
+		err := validator.ValidateDataMover(ctx, hcp, backup, ptr.To(false), ptr.To(false))
 
 		g.Expect(err).ToNot(HaveOccurred())
 	})
