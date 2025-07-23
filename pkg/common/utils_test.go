@@ -12,9 +12,12 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/utils/ptr"
 
+	snapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	hyperv1 "github.com/openshift/hypershift/api/hypershift/v1beta1"
 	"github.com/sirupsen/logrus"
 	veleroapiv1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
+	veleroapiv2alpha1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -306,7 +309,7 @@ func TestWaitForPausedPropagated(t *testing.T) {
 			client := clientBuilder.Build()
 			log := logrus.New()
 
-			err := WaitForPausedPropagated(context.TODO(), client, log, tt.hc, waitForPausedTimeout)
+			err := WaitForPausedPropagated(context.TODO(), client, log, tt.hc, waitForPausedTimeout, "true")
 			if tt.expectErr {
 				g.Expect(err).To(HaveOccurred())
 			} else {
@@ -841,6 +844,1993 @@ func TestCRDExists(t *testing.T) {
 			result, err := CRDExists(context.TODO(), "hostedcontrolplanes.hypershift.openshift.io", c)
 			g.Expect(err).NotTo(HaveOccurred())
 			g.Expect(result).To(Equal(tt.expectedResult))
+		})
+	}
+}
+
+func TestWaitForPodVolumeBackup(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = veleroapiv1.AddToScheme(scheme)
+
+	tests := []struct {
+		name                     string
+		backup                   *veleroapiv1.Backup
+		podVolumeBackups         []veleroapiv1.PodVolumeBackup
+		ha                       bool
+		podVolumeBackupTimeout   time.Duration
+		podVolumeBackupCheckPace time.Duration
+		expectSuccess            bool
+		expectError              bool
+	}{
+		{
+			name: "Single node backup completed successfully",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			podVolumeBackups: []veleroapiv1.PodVolumeBackup{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-pvb-1",
+						Namespace: "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Spec: veleroapiv1.PodVolumeBackupSpec{
+						Volume: "data",
+						Pod: corev1.ObjectReference{
+							Name: "test-pod",
+						},
+					},
+					Status: veleroapiv1.PodVolumeBackupStatus{
+						Phase: veleroapiv1.PodVolumeBackupPhaseCompleted,
+					},
+				},
+			},
+			ha:                       false,
+			podVolumeBackupTimeout:   5 * time.Second,
+			podVolumeBackupCheckPace: 100 * time.Millisecond,
+			expectSuccess:            true,
+			expectError:              false,
+		},
+		{
+			name: "HA backup completed successfully",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			podVolumeBackups: []veleroapiv1.PodVolumeBackup{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-pvb-1",
+						Namespace: "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Spec: veleroapiv1.PodVolumeBackupSpec{
+						Volume: "data",
+						Pod: corev1.ObjectReference{
+							Name: "test-pod-1",
+						},
+					},
+					Status: veleroapiv1.PodVolumeBackupStatus{
+						Phase: veleroapiv1.PodVolumeBackupPhaseCompleted,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-pvb-2",
+						Namespace: "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Spec: veleroapiv1.PodVolumeBackupSpec{
+						Volume: "data",
+						Pod: corev1.ObjectReference{
+							Name: "test-pod-2",
+						},
+					},
+					Status: veleroapiv1.PodVolumeBackupStatus{
+						Phase: veleroapiv1.PodVolumeBackupPhaseCompleted,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-pvb-3",
+						Namespace: "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Spec: veleroapiv1.PodVolumeBackupSpec{
+						Volume: "data",
+						Pod: corev1.ObjectReference{
+							Name: "test-pod-3",
+						},
+					},
+					Status: veleroapiv1.PodVolumeBackupStatus{
+						Phase: veleroapiv1.PodVolumeBackupPhaseCompleted,
+					},
+				},
+			},
+			ha:                       true,
+			podVolumeBackupTimeout:   5 * time.Second,
+			podVolumeBackupCheckPace: 100 * time.Millisecond,
+			expectSuccess:            true,
+			expectError:              false,
+		},
+		{
+			name: "PodVolumeBackup failed",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			podVolumeBackups: []veleroapiv1.PodVolumeBackup{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-pvb-1",
+						Namespace: "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Spec: veleroapiv1.PodVolumeBackupSpec{
+						Volume: "data",
+						Pod: corev1.ObjectReference{
+							Name: "test-pod",
+						},
+					},
+					Status: veleroapiv1.PodVolumeBackupStatus{
+						Phase: veleroapiv1.PodVolumeBackupPhaseFailed,
+					},
+				},
+			},
+			ha:                       false,
+			podVolumeBackupTimeout:   5 * time.Second,
+			podVolumeBackupCheckPace: 100 * time.Millisecond,
+			expectSuccess:            false,
+			expectError:              true,
+		},
+		{
+			name: "Timeout waiting for PodVolumeBackup",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			podVolumeBackups: []veleroapiv1.PodVolumeBackup{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-pvb-1",
+						Namespace: "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Spec: veleroapiv1.PodVolumeBackupSpec{
+						Volume: "data",
+						Pod: corev1.ObjectReference{
+							Name: "test-pod",
+						},
+					},
+					Status: veleroapiv1.PodVolumeBackupStatus{
+						Phase: veleroapiv1.PodVolumeBackupPhaseInProgress,
+					},
+				},
+			},
+			ha:                       false,
+			podVolumeBackupTimeout:   200 * time.Millisecond,
+			podVolumeBackupCheckPace: 50 * time.Millisecond,
+			expectSuccess:            false,
+			expectError:              true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+			client := fake.NewClientBuilder().WithScheme(scheme).WithLists(&veleroapiv1.PodVolumeBackupList{
+				Items: tt.podVolumeBackups,
+			}).Build()
+			log := logrus.New()
+
+			success, err := WaitForPodVolumeBackup(context.TODO(), client, log, tt.backup, tt.podVolumeBackupTimeout, tt.podVolumeBackupCheckPace, tt.ha)
+
+			if tt.expectError {
+				g.Expect(err).To(HaveOccurred())
+			} else {
+				g.Expect(err).NotTo(HaveOccurred())
+			}
+			g.Expect(success).To(Equal(tt.expectSuccess))
+		})
+	}
+}
+
+func TestCheckPodVolumeBackup(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = veleroapiv1.AddToScheme(scheme)
+
+	tests := []struct {
+		name             string
+		backup           *veleroapiv1.Backup
+		podVolumeBackups []veleroapiv1.PodVolumeBackup
+		ha               bool
+		expectStarted    bool
+		expectFinished   bool
+		expectError      bool
+	}{
+		{
+			name: "Single node backup not started",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			podVolumeBackups: []veleroapiv1.PodVolumeBackup{},
+			ha:               false,
+			expectStarted:    false,
+			expectFinished:   false,
+			expectError:      false,
+		},
+		{
+			name: "Single node backup in progress",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			podVolumeBackups: []veleroapiv1.PodVolumeBackup{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-pvb-1",
+						Namespace: "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Spec: veleroapiv1.PodVolumeBackupSpec{
+						Volume: "data",
+						Pod: corev1.ObjectReference{
+							Name: "test-pod",
+						},
+					},
+					Status: veleroapiv1.PodVolumeBackupStatus{
+						Phase: veleroapiv1.PodVolumeBackupPhaseInProgress,
+					},
+				},
+			},
+			ha:             false,
+			expectStarted:  true,
+			expectFinished: false,
+			expectError:    false,
+		},
+		{
+			name: "Single node backup completed",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			podVolumeBackups: []veleroapiv1.PodVolumeBackup{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-pvb-1",
+						Namespace: "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Spec: veleroapiv1.PodVolumeBackupSpec{
+						Volume: "data",
+						Pod: corev1.ObjectReference{
+							Name: "test-pod",
+						},
+					},
+					Status: veleroapiv1.PodVolumeBackupStatus{
+						Phase: veleroapiv1.PodVolumeBackupPhaseCompleted,
+					},
+				},
+			},
+			ha:             false,
+			expectStarted:  true,
+			expectFinished: true,
+			expectError:    false,
+		},
+		{
+			name: "HA backup completed",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			podVolumeBackups: []veleroapiv1.PodVolumeBackup{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-pvb-1",
+						Namespace: "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Spec: veleroapiv1.PodVolumeBackupSpec{
+						Volume: "data",
+						Pod: corev1.ObjectReference{
+							Name: "test-pod-1",
+						},
+					},
+					Status: veleroapiv1.PodVolumeBackupStatus{
+						Phase: veleroapiv1.PodVolumeBackupPhaseCompleted,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-pvb-2",
+						Namespace: "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Spec: veleroapiv1.PodVolumeBackupSpec{
+						Volume: "data",
+						Pod: corev1.ObjectReference{
+							Name: "test-pod-2",
+						},
+					},
+					Status: veleroapiv1.PodVolumeBackupStatus{
+						Phase: veleroapiv1.PodVolumeBackupPhaseCompleted,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-pvb-3",
+						Namespace: "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Spec: veleroapiv1.PodVolumeBackupSpec{
+						Volume: "data",
+						Pod: corev1.ObjectReference{
+							Name: "test-pod-3",
+						},
+					},
+					Status: veleroapiv1.PodVolumeBackupStatus{
+						Phase: veleroapiv1.PodVolumeBackupPhaseCompleted,
+					},
+				},
+			},
+			ha:             true,
+			expectStarted:  true,
+			expectFinished: true,
+			expectError:    false,
+		},
+		{
+			name: "PodVolumeBackup failed",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			podVolumeBackups: []veleroapiv1.PodVolumeBackup{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-pvb-1",
+						Namespace: "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Spec: veleroapiv1.PodVolumeBackupSpec{
+						Volume: "data",
+						Pod: corev1.ObjectReference{
+							Name: "test-pod",
+						},
+					},
+					Status: veleroapiv1.PodVolumeBackupStatus{
+						Phase: veleroapiv1.PodVolumeBackupPhaseFailed,
+					},
+				},
+			},
+			ha:             false,
+			expectStarted:  true,
+			expectFinished: false,
+			expectError:    true,
+		},
+		{
+			name: "HA backup waiting for more PodVolumeBackups",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			podVolumeBackups: []veleroapiv1.PodVolumeBackup{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-pvb-1",
+						Namespace: "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Spec: veleroapiv1.PodVolumeBackupSpec{
+						Volume: "data",
+						Pod: corev1.ObjectReference{
+							Name: "test-pod-1",
+						},
+					},
+					Status: veleroapiv1.PodVolumeBackupStatus{
+						Phase: veleroapiv1.PodVolumeBackupPhaseCompleted,
+					},
+				},
+			},
+			ha:             true,
+			expectStarted:  false,
+			expectFinished: false,
+			expectError:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+			client := fake.NewClientBuilder().WithScheme(scheme).WithLists(&veleroapiv1.PodVolumeBackupList{
+				Items: tt.podVolumeBackups,
+			}).Build()
+			log := logrus.New()
+
+			started, finished, err := CheckPodVolumeBackup(context.TODO(), client, log, tt.backup, tt.ha)
+
+			if tt.expectError {
+				g.Expect(err).To(HaveOccurred())
+			} else {
+				g.Expect(err).NotTo(HaveOccurred())
+			}
+			g.Expect(started).To(Equal(tt.expectStarted))
+			g.Expect(finished).To(Equal(tt.expectFinished))
+		})
+	}
+}
+
+func TestWaitForDataUpload(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = veleroapiv2alpha1.AddToScheme(scheme)
+
+	tests := []struct {
+		name                string
+		backup              *veleroapiv1.Backup
+		dataUploads         []veleroapiv2alpha1.DataUpload
+		ha                  bool
+		dataUploadTimeout   time.Duration
+		dataUploadCheckPace time.Duration
+		expectSuccess       bool
+		expectError         bool
+	}{
+		{
+			name: "Single node data upload completed successfully",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			dataUploads: []veleroapiv2alpha1.DataUpload{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "test-du-1",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+			},
+			ha:                  false,
+			dataUploadTimeout:   5 * time.Second,
+			dataUploadCheckPace: 100 * time.Millisecond,
+			expectSuccess:       true,
+			expectError:         false,
+		},
+		{
+			name: "HA data upload completed successfully",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			dataUploads: []veleroapiv2alpha1.DataUpload{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "test-du-1",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "test-du-2",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "test-du-3",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+			},
+			ha:                  true,
+			dataUploadTimeout:   5 * time.Second,
+			dataUploadCheckPace: 100 * time.Millisecond,
+			expectSuccess:       true,
+			expectError:         false,
+		},
+		{
+			name: "Data upload failed",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			dataUploads: []veleroapiv2alpha1.DataUpload{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "test-du-1",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseFailed,
+					},
+				},
+			},
+			ha:                  false,
+			dataUploadTimeout:   5 * time.Second,
+			dataUploadCheckPace: 100 * time.Millisecond,
+			expectSuccess:       false,
+			expectError:         true,
+		},
+		{
+			name: "Timeout waiting for data upload",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			dataUploads: []veleroapiv2alpha1.DataUpload{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "test-du-1",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseInProgress,
+					},
+				},
+			},
+			ha:                  false,
+			dataUploadTimeout:   200 * time.Millisecond,
+			dataUploadCheckPace: 50 * time.Millisecond,
+			expectSuccess:       false,
+			expectError:         true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+			client := fake.NewClientBuilder().WithScheme(scheme).WithLists(&veleroapiv2alpha1.DataUploadList{
+				Items: tt.dataUploads,
+			}).Build()
+			log := logrus.New()
+
+			success, err := WaitForDataUpload(context.TODO(), client, log, tt.backup, tt.dataUploadTimeout, tt.dataUploadCheckPace, tt.ha)
+
+			if tt.expectError {
+				g.Expect(err).To(HaveOccurred())
+			} else {
+				g.Expect(err).NotTo(HaveOccurred())
+			}
+			g.Expect(success).To(Equal(tt.expectSuccess))
+		})
+	}
+}
+
+func TestCheckDataUpload(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = veleroapiv2alpha1.AddToScheme(scheme)
+
+	tests := []struct {
+		name           string
+		backup         *veleroapiv1.Backup
+		dataUploads    []veleroapiv2alpha1.DataUpload
+		ha             bool
+		expectStarted  bool
+		expectFinished bool
+		expectError    bool
+	}{
+		{
+			name: "Single node data upload not started",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			dataUploads:    []veleroapiv2alpha1.DataUpload{},
+			ha:             false,
+			expectStarted:  false,
+			expectFinished: false,
+			expectError:    false,
+		},
+		{
+			name: "Single node data upload in progress",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			dataUploads: []veleroapiv2alpha1.DataUpload{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "test-du-1",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseInProgress,
+					},
+				},
+			},
+			ha:             false,
+			expectStarted:  true,
+			expectFinished: false,
+			expectError:    false,
+		},
+		{
+			name: "Single node data upload completed",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			dataUploads: []veleroapiv2alpha1.DataUpload{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "test-du-1",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+			},
+			ha:             false,
+			expectStarted:  true,
+			expectFinished: true,
+			expectError:    false,
+		},
+		{
+			name: "HA data upload completed",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			dataUploads: []veleroapiv2alpha1.DataUpload{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "test-du-1",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "test-du-2",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "test-du-3",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+			},
+			ha:             true,
+			expectStarted:  true,
+			expectFinished: true,
+			expectError:    false,
+		},
+		{
+			name: "Data upload failed",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			dataUploads: []veleroapiv2alpha1.DataUpload{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "test-du-1",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseFailed,
+					},
+				},
+			},
+			ha:             false,
+			expectStarted:  true,
+			expectFinished: false,
+			expectError:    true,
+		},
+		{
+			name: "HA data upload waiting for more uploads",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			dataUploads: []veleroapiv2alpha1.DataUpload{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "test-du-1",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+			},
+			ha:             true,
+			expectStarted:  false,
+			expectFinished: false,
+			expectError:    false,
+		},
+		{
+			name: "Data upload with different generate name",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			dataUploads: []veleroapiv2alpha1.DataUpload{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "test-du-1",
+						GenerateName: "different-backup-",
+						Namespace:    "velero",
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+			},
+			ha:             false,
+			expectStarted:  true,
+			expectFinished: false,
+			expectError:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+			client := fake.NewClientBuilder().WithScheme(scheme).WithLists(&veleroapiv2alpha1.DataUploadList{
+				Items: tt.dataUploads,
+			}).Build()
+			log := logrus.New()
+
+			started, finished, err := CheckDataUpload(context.TODO(), client, log, tt.backup, tt.ha)
+
+			if tt.expectError {
+				g.Expect(err).To(HaveOccurred())
+			} else {
+				g.Expect(err).NotTo(HaveOccurred())
+			}
+			g.Expect(started).To(Equal(tt.expectStarted))
+			g.Expect(finished).To(Equal(tt.expectFinished))
+		})
+	}
+}
+
+func TestWaitForVolumeSnapshot(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = veleroapiv1.AddToScheme(scheme)
+	_ = hyperv1.AddToScheme(scheme)
+	_ = snapshotv1.AddToScheme(scheme)
+
+	tests := []struct {
+		name             string
+		backup           *veleroapiv1.Backup
+		volumeSnapshots  []snapshotv1.VolumeSnapshot
+		hcp              *hyperv1.HostedControlPlane
+		ha               bool
+		pvBackupStarted  bool
+		pvBackupFinished bool
+		vsTimeout        time.Duration
+		vsCheckPace      time.Duration
+		expectSuccess    bool
+		expectError      bool
+	}{
+		{
+			name: "Single node volume snapshot completed successfully",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			volumeSnapshots: []snapshotv1.VolumeSnapshot{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vs-1",
+						Namespace: "test-namespace-test-hc",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+			},
+			hcp: &hyperv1.HostedControlPlane{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-hc",
+					Namespace: "test-namespace-test-hc",
+				},
+			},
+			ha:               false,
+			pvBackupStarted:  true,
+			pvBackupFinished: false,
+			vsTimeout:        5 * time.Second,
+			vsCheckPace:      100 * time.Millisecond,
+			expectSuccess:    true,
+			expectError:      false,
+		},
+		{
+			name: "HA volume snapshot completed successfully",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			volumeSnapshots: []snapshotv1.VolumeSnapshot{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vs-1",
+						Namespace: "test-namespace-test-hc",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vs-2",
+						Namespace: "test-namespace-test-hc",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vs-3",
+						Namespace: "test-namespace-test-hc",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+			},
+			hcp: &hyperv1.HostedControlPlane{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-hc",
+					Namespace: "test-namespace-test-hc",
+				},
+			},
+			ha:               true,
+			pvBackupStarted:  true,
+			pvBackupFinished: false,
+			vsTimeout:        5 * time.Second,
+			vsCheckPace:      100 * time.Millisecond,
+			expectSuccess:    true,
+			expectError:      false,
+		},
+		{
+			name: "Volume snapshot not ready",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			volumeSnapshots: []snapshotv1.VolumeSnapshot{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vs-1",
+						Namespace: "test-namespace-test-hc",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotStatus{
+						ReadyToUse: ptr.To(false),
+					},
+				},
+			},
+			hcp: &hyperv1.HostedControlPlane{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-hc",
+					Namespace: "test-namespace-test-hc",
+				},
+			},
+			ha:               false,
+			pvBackupStarted:  true,
+			pvBackupFinished: false,
+			vsTimeout:        200 * time.Millisecond,
+			vsCheckPace:      50 * time.Millisecond,
+			expectSuccess:    false,
+			expectError:      true,
+		},
+		{
+			name: "Already finished",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			volumeSnapshots: []snapshotv1.VolumeSnapshot{},
+			hcp: &hyperv1.HostedControlPlane{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-hc",
+					Namespace: "test-namespace-test-hc",
+				},
+			},
+			ha:               false,
+			pvBackupStarted:  true,
+			pvBackupFinished: true,
+			vsTimeout:        5 * time.Second,
+			vsCheckPace:      100 * time.Millisecond,
+			expectSuccess:    true,
+			expectError:      false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+			client := fake.NewClientBuilder().WithScheme(scheme).WithLists(&snapshotv1.VolumeSnapshotList{
+				Items: tt.volumeSnapshots,
+			}).Build()
+			log := logrus.New()
+
+			success, err := WaitForVolumeSnapshot(context.TODO(), client, log, tt.backup, tt.vsTimeout, tt.vsCheckPace, tt.ha, tt.hcp, &tt.pvBackupStarted, &tt.pvBackupFinished)
+
+			if tt.expectError {
+				g.Expect(err).To(HaveOccurred())
+			} else {
+				g.Expect(err).NotTo(HaveOccurred())
+			}
+			g.Expect(success).To(Equal(tt.expectSuccess))
+		})
+	}
+}
+
+func TestCheckVolumeSnapshot(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = veleroapiv1.AddToScheme(scheme)
+	_ = hyperv1.AddToScheme(scheme)
+	_ = snapshotv1.AddToScheme(scheme)
+
+	tests := []struct {
+		name             string
+		backup           *veleroapiv1.Backup
+		volumeSnapshots  []snapshotv1.VolumeSnapshot
+		hcp              *hyperv1.HostedControlPlane
+		ha               bool
+		pvBackupStarted  bool
+		pvBackupFinished bool
+		expectStarted    bool
+		expectFinished   bool
+		expectError      bool
+	}{
+		{
+			name: "Single node volume snapshot not started",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			volumeSnapshots: []snapshotv1.VolumeSnapshot{},
+			hcp: &hyperv1.HostedControlPlane{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-hc",
+					Namespace: "test-namespace-test-hc",
+				},
+			},
+			ha:               false,
+			pvBackupStarted:  false,
+			pvBackupFinished: false,
+			expectStarted:    false,
+			expectFinished:   false,
+			expectError:      false,
+		},
+		{
+			name: "Single node volume snapshot in progress",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			volumeSnapshots: []snapshotv1.VolumeSnapshot{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vs-1",
+						Namespace: "test-namespace-test-hc",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotStatus{
+						ReadyToUse: ptr.To(false),
+					},
+				},
+			},
+			hcp: &hyperv1.HostedControlPlane{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-hc",
+					Namespace: "test-namespace-test-hc",
+				},
+			},
+			ha:               false,
+			pvBackupStarted:  false,
+			pvBackupFinished: false,
+			expectStarted:    true,
+			expectFinished:   false,
+			expectError:      false,
+		},
+		{
+			name: "Single node volume snapshot completed",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			volumeSnapshots: []snapshotv1.VolumeSnapshot{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vs-1",
+						Namespace: "test-namespace-test-hc",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+			},
+			hcp: &hyperv1.HostedControlPlane{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-hc",
+					Namespace: "test-namespace-test-hc",
+				},
+			},
+			ha:               false,
+			pvBackupStarted:  false,
+			pvBackupFinished: false,
+			expectStarted:    true,
+			expectFinished:   true,
+			expectError:      false,
+		},
+		{
+			name: "HA volume snapshot completed",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			volumeSnapshots: []snapshotv1.VolumeSnapshot{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vs-1",
+						Namespace: "test-namespace-test-hc",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vs-2",
+						Namespace: "test-namespace-test-hc",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vs-3",
+						Namespace: "test-namespace-test-hc",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+			},
+			hcp: &hyperv1.HostedControlPlane{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-hc",
+					Namespace: "test-namespace-test-hc",
+				},
+			},
+			ha:               true,
+			pvBackupStarted:  false,
+			pvBackupFinished: false,
+			expectStarted:    true,
+			expectFinished:   true,
+			expectError:      false,
+		},
+		{
+			name: "Already finished",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			volumeSnapshots: []snapshotv1.VolumeSnapshot{},
+			hcp: &hyperv1.HostedControlPlane{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-hc",
+					Namespace: "test-namespace-test-hc",
+				},
+			},
+			ha:               false,
+			pvBackupStarted:  true,
+			pvBackupFinished: true,
+			expectStarted:    true,
+			expectFinished:   true,
+			expectError:      false,
+		},
+
+		{
+			name: "Empty HCP namespace",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			volumeSnapshots: []snapshotv1.VolumeSnapshot{},
+			hcp: &hyperv1.HostedControlPlane{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-hc",
+					Namespace: "",
+				},
+			},
+			ha:               false,
+			pvBackupStarted:  false,
+			pvBackupFinished: false,
+			expectStarted:    false,
+			expectFinished:   false,
+			expectError:      false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+			client := fake.NewClientBuilder().WithScheme(scheme).WithLists(&snapshotv1.VolumeSnapshotList{
+				Items: tt.volumeSnapshots,
+			}).Build()
+			log := logrus.New()
+
+			started, finished, err := CheckVolumeSnapshot(context.TODO(), client, log, tt.backup, tt.ha, tt.hcp, &tt.pvBackupStarted, &tt.pvBackupFinished)
+
+			if tt.expectError {
+				g.Expect(err).To(HaveOccurred())
+			} else {
+				g.Expect(err).NotTo(HaveOccurred())
+			}
+			g.Expect(started).To(Equal(tt.expectStarted))
+			g.Expect(finished).To(Equal(tt.expectFinished))
+		})
+	}
+}
+
+func TestWaitForVolumeSnapshotContent(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = veleroapiv1.AddToScheme(scheme)
+	_ = hyperv1.AddToScheme(scheme)
+	_ = snapshotv1.AddToScheme(scheme)
+
+	tests := []struct {
+		name                   string
+		backup                 *veleroapiv1.Backup
+		volumeSnapshotContents []snapshotv1.VolumeSnapshotContent
+		hcp                    *hyperv1.HostedControlPlane
+		ha                     bool
+		pvBackupStarted        bool
+		pvBackupFinished       bool
+		vscTimeout             time.Duration
+		vscCheckPace           time.Duration
+		expectSuccess          bool
+		expectError            bool
+	}{
+		{
+			name: "Single node volume snapshot content completed successfully",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			volumeSnapshotContents: []snapshotv1.VolumeSnapshotContent{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "test-vsc-1",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+			},
+			hcp: &hyperv1.HostedControlPlane{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-hc",
+					Namespace: "test-namespace-test-hc",
+				},
+			},
+			ha:               false,
+			pvBackupStarted:  true,
+			pvBackupFinished: false,
+			vscTimeout:       5 * time.Second,
+			vscCheckPace:     100 * time.Millisecond,
+			expectSuccess:    true,
+			expectError:      false,
+		},
+		{
+			name: "HA volume snapshot content completed successfully",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			volumeSnapshotContents: []snapshotv1.VolumeSnapshotContent{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "test-vsc-1",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "test-vsc-2",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "test-vsc-3",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+			},
+			hcp: &hyperv1.HostedControlPlane{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-hc",
+					Namespace: "test-namespace-test-hc",
+				},
+			},
+			ha:               true,
+			pvBackupStarted:  true,
+			pvBackupFinished: false,
+			vscTimeout:       5 * time.Second,
+			vscCheckPace:     100 * time.Millisecond,
+			expectSuccess:    true,
+			expectError:      false,
+		},
+		{
+			name: "Volume snapshot content not ready",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			volumeSnapshotContents: []snapshotv1.VolumeSnapshotContent{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "test-vsc-1",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(false),
+					},
+				},
+			},
+			hcp: &hyperv1.HostedControlPlane{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-hc",
+					Namespace: "test-namespace-test-hc",
+				},
+			},
+			ha:               false,
+			pvBackupStarted:  true,
+			pvBackupFinished: false,
+			vscTimeout:       200 * time.Millisecond,
+			vscCheckPace:     50 * time.Millisecond,
+			expectSuccess:    false,
+			expectError:      true,
+		},
+		{
+			name: "Already finished",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			volumeSnapshotContents: []snapshotv1.VolumeSnapshotContent{},
+			hcp: &hyperv1.HostedControlPlane{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-hc",
+					Namespace: "test-namespace-test-hc",
+				},
+			},
+			ha:               false,
+			pvBackupStarted:  true,
+			pvBackupFinished: true,
+			vscTimeout:       5 * time.Second,
+			vscCheckPace:     100 * time.Millisecond,
+			expectSuccess:    true,
+			expectError:      false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+			client := fake.NewClientBuilder().WithScheme(scheme).WithLists(&snapshotv1.VolumeSnapshotContentList{
+				Items: tt.volumeSnapshotContents,
+			}).Build()
+			log := logrus.New()
+
+			success, err := WaitForVolumeSnapshotContent(context.TODO(), client, log, tt.backup, tt.vscTimeout, tt.vscCheckPace, tt.ha, tt.hcp, &tt.pvBackupStarted, &tt.pvBackupFinished)
+
+			if tt.expectError {
+				g.Expect(err).To(HaveOccurred())
+			} else {
+				g.Expect(err).NotTo(HaveOccurred())
+			}
+			g.Expect(success).To(Equal(tt.expectSuccess))
+		})
+	}
+}
+
+func TestCheckVolumeSnapshotContent(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = veleroapiv1.AddToScheme(scheme)
+	_ = hyperv1.AddToScheme(scheme)
+	_ = snapshotv1.AddToScheme(scheme)
+
+	tests := []struct {
+		name                   string
+		backup                 *veleroapiv1.Backup
+		volumeSnapshotContents []snapshotv1.VolumeSnapshotContent
+		hcp                    *hyperv1.HostedControlPlane
+		ha                     bool
+		pvBackupStarted        bool
+		pvBackupFinished       bool
+		expectStarted          bool
+		expectFinished         bool
+		expectError            bool
+	}{
+		{
+			name: "Single node volume snapshot content not started",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			volumeSnapshotContents: []snapshotv1.VolumeSnapshotContent{},
+			hcp: &hyperv1.HostedControlPlane{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-hc",
+					Namespace: "test-namespace-test-hc",
+				},
+			},
+			ha:               false,
+			pvBackupStarted:  false,
+			pvBackupFinished: false,
+			expectStarted:    false,
+			expectFinished:   false,
+			expectError:      false,
+		},
+		{
+			name: "Single node volume snapshot content in progress",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			volumeSnapshotContents: []snapshotv1.VolumeSnapshotContent{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "test-vsc-1",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(false),
+					},
+				},
+			},
+			hcp: &hyperv1.HostedControlPlane{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-hc",
+					Namespace: "test-namespace-test-hc",
+				},
+			},
+			ha:               false,
+			pvBackupStarted:  false,
+			pvBackupFinished: false,
+			expectStarted:    true,
+			expectFinished:   false,
+			expectError:      false,
+		},
+		{
+			name: "Single node volume snapshot content completed",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			volumeSnapshotContents: []snapshotv1.VolumeSnapshotContent{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "test-vsc-1",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+			},
+			hcp: &hyperv1.HostedControlPlane{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-hc",
+					Namespace: "test-namespace-test-hc",
+				},
+			},
+			ha:               false,
+			pvBackupStarted:  false,
+			pvBackupFinished: false,
+			expectStarted:    true,
+			expectFinished:   true,
+			expectError:      false,
+		},
+		{
+			name: "HA volume snapshot content completed",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			volumeSnapshotContents: []snapshotv1.VolumeSnapshotContent{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "test-vsc-1",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "test-vsc-2",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "test-vsc-3",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+			},
+			hcp: &hyperv1.HostedControlPlane{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-hc",
+					Namespace: "test-namespace-test-hc",
+				},
+			},
+			ha:               true,
+			pvBackupStarted:  false,
+			pvBackupFinished: false,
+			expectStarted:    true,
+			expectFinished:   true,
+			expectError:      false,
+		},
+		{
+			name: "Already finished",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			volumeSnapshotContents: []snapshotv1.VolumeSnapshotContent{},
+			hcp: &hyperv1.HostedControlPlane{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-hc",
+					Namespace: "test-namespace-test-hc",
+				},
+			},
+			ha:               false,
+			pvBackupStarted:  true,
+			pvBackupFinished: true,
+			expectStarted:    true,
+			expectFinished:   true,
+			expectError:      false,
+		},
+		{
+			name: "Volume snapshot content with different namespace",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			volumeSnapshotContents: []snapshotv1.VolumeSnapshotContent{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "test-vsc-1",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "different-namespace",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+			},
+			hcp: &hyperv1.HostedControlPlane{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-hc",
+					Namespace: "test-namespace-test-hc",
+				},
+			},
+			ha:               false,
+			pvBackupStarted:  false,
+			pvBackupFinished: false,
+			expectStarted:    false,
+			expectFinished:   false,
+			expectError:      false,
+		},
+		{
+			name: "Empty HCP namespace",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			volumeSnapshotContents: []snapshotv1.VolumeSnapshotContent{},
+			hcp: &hyperv1.HostedControlPlane{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-hc",
+					Namespace: "",
+				},
+			},
+			ha:               false,
+			pvBackupStarted:  false,
+			pvBackupFinished: false,
+			expectStarted:    false,
+			expectFinished:   false,
+			expectError:      false,
+		},
+		{
+			name: "VolumeSnapshotContent with empty VolumeSnapshotRef namespace",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			volumeSnapshotContents: []snapshotv1.VolumeSnapshotContent{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "test-vsc-1",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+			},
+			hcp: &hyperv1.HostedControlPlane{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-hc",
+					Namespace: "test-namespace-test-hc",
+				},
+			},
+			ha:               false,
+			pvBackupStarted:  false,
+			pvBackupFinished: false,
+			expectStarted:    false,
+			expectFinished:   false,
+			expectError:      false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+			client := fake.NewClientBuilder().WithScheme(scheme).WithLists(&snapshotv1.VolumeSnapshotContentList{
+				Items: tt.volumeSnapshotContents,
+			}).Build()
+			log := logrus.New()
+
+			started, finished, err := CheckVolumeSnapshotContent(context.TODO(), client, log, tt.backup, tt.ha, tt.hcp, &tt.pvBackupStarted, &tt.pvBackupFinished)
+
+			if tt.expectError {
+				g.Expect(err).To(HaveOccurred())
+			} else {
+				g.Expect(err).NotTo(HaveOccurred())
+			}
+			g.Expect(started).To(Equal(tt.expectStarted))
+			g.Expect(finished).To(Equal(tt.expectFinished))
+		})
+	}
+}
+
+func TestReconcileVolumeSnapshotContent(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = veleroapiv1.AddToScheme(scheme)
+	_ = hyperv1.AddToScheme(scheme)
+	_ = snapshotv1.AddToScheme(scheme)
+
+	tests := []struct {
+		name                   string
+		backup                 *veleroapiv1.Backup
+		volumeSnapshotContents []snapshotv1.VolumeSnapshotContent
+		hcp                    *hyperv1.HostedControlPlane
+		ha                     bool
+		pvBackupStarted        bool
+		pvBackupFinished       bool
+		dataUploadTimeout      time.Duration
+		dataUploadCheckPace    time.Duration
+		expectSuccess          bool
+		expectError            bool
+	}{
+		{
+			name: "Already finished",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			volumeSnapshotContents: []snapshotv1.VolumeSnapshotContent{},
+			hcp: &hyperv1.HostedControlPlane{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-hc",
+					Namespace: "test-namespace-test-hc",
+				},
+			},
+			ha:                  false,
+			pvBackupStarted:     true,
+			pvBackupFinished:    true,
+			dataUploadTimeout:   5 * time.Second,
+			dataUploadCheckPace: 100 * time.Millisecond,
+			expectSuccess:       true,
+			expectError:         false,
+		},
+		{
+			name: "Volume snapshot content completed",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			volumeSnapshotContents: []snapshotv1.VolumeSnapshotContent{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "test-vsc-1",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+			},
+			hcp: &hyperv1.HostedControlPlane{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-hc",
+					Namespace: "test-namespace-test-hc",
+				},
+			},
+			ha:                  false,
+			pvBackupStarted:     false,
+			pvBackupFinished:    false,
+			dataUploadTimeout:   5 * time.Second,
+			dataUploadCheckPace: 100 * time.Millisecond,
+			expectSuccess:       true,
+			expectError:         false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+			client := fake.NewClientBuilder().WithScheme(scheme).WithLists(&snapshotv1.VolumeSnapshotContentList{
+				Items: tt.volumeSnapshotContents,
+			}).Build()
+			log := logrus.New()
+
+			success, err := ReconcileVolumeSnapshotContent(context.TODO(), tt.hcp, client, log, tt.backup, tt.ha, tt.dataUploadTimeout, tt.dataUploadCheckPace, &tt.pvBackupStarted, &tt.pvBackupFinished)
+
+			if tt.expectError {
+				g.Expect(err).To(HaveOccurred())
+			} else {
+				g.Expect(err).NotTo(HaveOccurred())
+			}
+			g.Expect(success).To(Equal(tt.expectSuccess))
+		})
+	}
+}
+
+func TestReconcileVolumeSnapshots(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = veleroapiv1.AddToScheme(scheme)
+	_ = hyperv1.AddToScheme(scheme)
+	_ = snapshotv1.AddToScheme(scheme)
+
+	tests := []struct {
+		name                string
+		backup              *veleroapiv1.Backup
+		volumeSnapshots     []snapshotv1.VolumeSnapshot
+		hcp                 *hyperv1.HostedControlPlane
+		ha                  bool
+		pvBackupStarted     bool
+		pvBackupFinished    bool
+		dataUploadTimeout   time.Duration
+		dataUploadCheckPace time.Duration
+		expectSuccess       bool
+		expectError         bool
+	}{
+		{
+			name: "Already finished",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			volumeSnapshots: []snapshotv1.VolumeSnapshot{},
+			hcp: &hyperv1.HostedControlPlane{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-hc",
+					Namespace: "test-namespace-test-hc",
+				},
+			},
+			ha:                  false,
+			pvBackupStarted:     true,
+			pvBackupFinished:    true,
+			dataUploadTimeout:   5 * time.Second,
+			dataUploadCheckPace: 100 * time.Millisecond,
+			expectSuccess:       true,
+			expectError:         false,
+		},
+		{
+			name: "Volume snapshot completed",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			volumeSnapshots: []snapshotv1.VolumeSnapshot{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-vs-1",
+						Namespace: "test-namespace-test-hc",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+			},
+			hcp: &hyperv1.HostedControlPlane{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-hc",
+					Namespace: "test-namespace-test-hc",
+				},
+			},
+			ha:                  false,
+			pvBackupStarted:     false,
+			pvBackupFinished:    false,
+			dataUploadTimeout:   5 * time.Second,
+			dataUploadCheckPace: 100 * time.Millisecond,
+			expectSuccess:       true,
+			expectError:         false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+			client := fake.NewClientBuilder().WithScheme(scheme).WithLists(&snapshotv1.VolumeSnapshotList{
+				Items: tt.volumeSnapshots,
+			}).Build()
+			log := logrus.New()
+
+			success, err := ReconcileVolumeSnapshots(context.TODO(), tt.hcp, client, log, tt.backup, tt.ha, tt.dataUploadTimeout, tt.dataUploadCheckPace, &tt.pvBackupStarted, &tt.pvBackupFinished)
+
+			if tt.expectError {
+				g.Expect(err).To(HaveOccurred())
+			} else {
+				g.Expect(err).NotTo(HaveOccurred())
+			}
+			g.Expect(success).To(Equal(tt.expectSuccess))
 		})
 	}
 }
