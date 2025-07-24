@@ -175,16 +175,12 @@ type HostedControlPlaneSpec struct {
 	// +optional
 	Autoscaling ClusterAutoscaling `json:"autoscaling,omitempty"`
 
-	// autoNode specifies the configuration for the autoNode feature.
-	// +openshift:enable:FeatureGate=AutoNodeKarpenter
-	AutoNode *AutoNode `json:"autoNode,omitempty"`
-
 	// NodeSelector when specified, must be true for the pods managed by the HostedCluster to be scheduled.
 	//
 	// +optional
 	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
 
-	// Tolerations when specified, define what custom tolerations are added to the hcp pods.
+	// Tolerations when specified, define what custome tolerations are added to the hcp pods.
 	//
 	// +optional
 	Tolerations []corev1.Toleration `json:"tolerations,omitempty"`

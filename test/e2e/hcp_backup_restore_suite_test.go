@@ -1,4 +1,4 @@
-package e2e_test
+package e2e
 
 import (
 	"context"
@@ -9,40 +9,10 @@ import (
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 
-	lib "github.com/openshift/hypershift-oadp-plugin/tests/e2e/lib"
-	libhcp "github.com/openshift/hypershift-oadp-plugin/tests/e2e/lib/hcp"
-
-	crclient "sigs.k8s.io/controller-runtime/pkg/client"
-
-	"k8s.io/client-go/kubernetes"
+	lib "github.com/openshift/hypershift-oadp-plugin/test/e2e/lib"
+	libhcp "github.com/openshift/hypershift-oadp-plugin/test/e2e/lib/hcp"
+	helpers "github.com/openshift/hypershift-oadp-plugin/test/e2e/lib/helpers"
 )
-
-type VerificationFunction func(crclient.Client, string) error
-
-var (
-	runTimeClientForSuiteRun    crclient.Client
-	dpaCR                       *lib.DpaCustomResource
-	knownFlake                  bool
-	namespace                   int64
-	accumulatedTestLogs         []string
-	kubernetesClientForSuiteRun *kubernetes.Clientset
-)
-
-type BackupRestoreCase struct {
-	Namespace         string
-	Name              string
-	BackupRestoreType lib.BackupRestoreType
-	PreBackupVerify   VerificationFunction
-	PostRestoreVerify VerificationFunction
-	SkipVerifyLogs    bool // TODO remove
-	BackupTimeout     time.Duration
-}
-
-type HCPBackupRestoreCase struct {
-	BackupRestoreCase
-	Template string
-	Provider string
-}
 
 func runHCPBackupAndRestore(brCase HCPBackupRestoreCase, updateLastBRcase func(brCase HCPBackupRestoreCase), h *libhcp.HCHandler) {
 	updateLastBRcase(brCase)
@@ -159,7 +129,7 @@ var _ = ginkgo.Describe("HCP Backup and Restore tests", ginkgo.Ordered, func() {
 			BackupRestoreCase: BackupRestoreCase{
 				Namespace:         libhcp.GetHCPNamespace(fmt.Sprintf("%s-none", libhcp.HostedClusterPrefix), libhcp.ClustersNamespace),
 				Name:              fmt.Sprintf("%s-none", libhcp.HostedClusterPrefix),
-				BackupRestoreType: lib.CSIDataMover,
+				BackupRestoreType: helpers.CSIDataMover,
 				PreBackupVerify:   libhcp.ValidateHCP(libhcp.ValidateHCPTimeout, libhcp.Wait10Min, []string{}, libhcp.GetHCPNamespace(fmt.Sprintf("%s-none", libhcp.HostedClusterPrefix), libhcp.ClustersNamespace)),
 				PostRestoreVerify: libhcp.ValidateHCP(libhcp.ValidateHCPTimeout, libhcp.Wait10Min, []string{}, libhcp.GetHCPNamespace(fmt.Sprintf("%s-none", libhcp.HostedClusterPrefix), libhcp.ClustersNamespace)),
 				BackupTimeout:     libhcp.HCPBackupTimeout,
@@ -172,7 +142,7 @@ var _ = ginkgo.Describe("HCP Backup and Restore tests", ginkgo.Ordered, func() {
 			BackupRestoreCase: BackupRestoreCase{
 				Namespace:         libhcp.GetHCPNamespace(fmt.Sprintf("%s-agent", libhcp.HostedClusterPrefix), libhcp.ClustersNamespace),
 				Name:              fmt.Sprintf("%s-agent", libhcp.HostedClusterPrefix),
-				BackupRestoreType: lib.CSIDataMover,
+				BackupRestoreType: helpers.CSIDataMover,
 				PreBackupVerify:   libhcp.ValidateHCP(libhcp.ValidateHCPTimeout, libhcp.Wait10Min, []string{}, libhcp.GetHCPNamespace(fmt.Sprintf("%s-agent", libhcp.HostedClusterPrefix), libhcp.ClustersNamespace)),
 				PostRestoreVerify: libhcp.ValidateHCP(libhcp.ValidateHCPTimeout, libhcp.Wait10Min, []string{}, libhcp.GetHCPNamespace(fmt.Sprintf("%s-agent", libhcp.HostedClusterPrefix), libhcp.ClustersNamespace)),
 				BackupTimeout:     libhcp.HCPBackupTimeout,
@@ -188,7 +158,7 @@ func runHCPBackup(brCase BackupRestoreCase, backupName string, h *libhcp.HCHandl
 
 	// create backup
 	log.Printf("Creating backup %s for case %s", backupName, brCase.Name)
-	err = lib.CreateCustomBackupForNamespaces(h.Client, namespace, backupName, namespaces, includedResources, excludedResources, brCase.BackupRestoreType == lib.RESTIC || brCase.BackupRestoreType == lib.KOPIA, brCase.BackupRestoreType == lib.CSIDataMover)
+	err = lib.CreateCustomBackupForNamespaces(h.Client, namespace, backupName, namespaces, includedResources, excludedResources, brCase.BackupRestoreType == helpers.RESTIC || brCase.BackupRestoreType == helpers.KOPIA, brCase.BackupRestoreType == helpers.CSIDataMover)
 	gomega.Expect(err).ToNot(gomega.HaveOccurred())
 
 	// wait for backup to not be running
@@ -214,7 +184,7 @@ func runHCPBackup(brCase BackupRestoreCase, backupName string, h *libhcp.HCHandl
 	gomega.Expect(succeeded).To(gomega.Equal(true))
 	log.Printf("Backup for case %s succeeded", brCase.Name)
 
-	if brCase.BackupRestoreType == lib.CSI {
+	if brCase.BackupRestoreType == helpers.CSI {
 		// wait for volume snapshot to be Ready
 		gomega.Eventually(lib.AreVolumeSnapshotsReady(h.Client, backupName), time.Minute*4, time.Second*10).Should(gomega.BeTrue())
 	}
@@ -255,7 +225,7 @@ func runHCPRestore(brCase BackupRestoreCase, backupName string, restoreName stri
 		// The script is designed to work with labels set by the
 		// openshift-velero-plugin and can be run without pre-conditions.
 		log.Printf("Running dc-post-restore.sh script.")
-		err = lib.RunDcPostRestoreScript(restoreName)
+		err = helpers.RunDcPostRestoreScript(restoreName)
 		gomega.Expect(err).ToNot(gomega.HaveOccurred())
 	}
 }

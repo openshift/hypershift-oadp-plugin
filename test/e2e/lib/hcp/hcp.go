@@ -18,7 +18,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/openshift/oadp-operator/tests/e2e/lib"
+	"github.com/openshift/hypershift-oadp-plugin/test/e2e/lib"
 )
 
 func (h *HCHandler) RemoveHCP(timeout time.Duration) error {

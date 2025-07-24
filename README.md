@@ -15,3 +15,20 @@ kubectl create secret generic cloud-credentials \
 4. Create the DataProtectionApplication (sample in `examples` folder)
 5. Fill and create the backup manifest (sample in `examples` folder)
 6. Check the Backup status.
+
+
+## Testing
+
+```sh
+OADP_CRED_FILE=<path_to_backupLocations_credentials_file>
+OADP_BUCKET=<bucket_name>
+CI_CRED_FILE=<path_to_snapshotLocations_credentials_file>
+VSL_REGION=<snapshotLocations_region>
+# non required
+BSL_REGION=<backupLocations_region>
+OADP_TEST_NAMESPACE=<test_namespace>
+OPENSHIFT_CI=false
+SKIP_MUST_GATHER=true
+
+TEST_HCP=true make test-e2e GINKGO_ARGS="--ginkgo.focus='HCP Backup and Restore tests'"
+```

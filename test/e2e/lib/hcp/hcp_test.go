@@ -16,7 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	"github.com/openshift/oadp-operator/tests/e2e/lib"
+	"github.com/openshift/hypershift-oadp-plugin/test/e2e/lib"
 )
 
 func TestRemoveHCP(t *testing.T) {
