@@ -252,6 +252,8 @@ func (p *BackupPluginValidator) reconcileStandardDataMover(ctx context.Context, 
 		return nil
 	}
 
+	*p.PVBackupFinished = true
+
 	if duFinished, err = common.ReconcileDataUpload(ctx, p.Client, p.Log, p.Backup, p.HA, p.DataUploadTimeout, p.DataUploadCheckPace, p.DUStarted, p.DUFinished); err != nil {
 		return fmt.Errorf("error reconciling data upload: %s", err.Error())
 	}
@@ -259,6 +261,8 @@ func (p *BackupPluginValidator) reconcileStandardDataMover(ctx context.Context, 
 	if !duFinished {
 		return nil
 	}
+
+	*p.DUFinished = true
 
 	return nil
 }
@@ -275,9 +279,19 @@ func (p *BackupPluginValidator) reconcileAzureDataMover(ctx context.Context, hcp
 		return fmt.Errorf("error reconciling volume snapshot content: %s", err.Error())
 	}
 
+	if !vscFinished {
+		return nil
+	}
+
 	if vsFinished, err = common.ReconcileVolumeSnapshots(ctx, hcp, p.Client, p.Log, p.Backup, p.HA, p.DataUploadTimeout, p.DataUploadCheckPace, p.PVBackupStarted, p.PVBackupFinished); err != nil {
 		return fmt.Errorf("error reconciling volume snapshots: %s", err.Error())
 	}
+
+	if !vsFinished {
+		return nil
+	}
+
+	*p.PVBackupFinished = true
 
 	return nil
 }
