@@ -297,5 +297,13 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 		p.hcPaused = false
 	}
 
+	if backup.Status.Progress.ItemsBackedUp == (backup.Status.Progress.TotalItems - 10) {
+		p.log.Info("Backup is almost done, updating progress")
+		p.pvBackupFinished = true
+		if p.hcp.Spec.Platform.Type != hyperv1.AzurePlatform {
+			p.duFinished = true
+		}
+	}
+
 	return item, nil, nil
 }
