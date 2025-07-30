@@ -1315,6 +1315,7 @@ func TestWaitForDataUpload(t *testing.T) {
 		name                string
 		backup              *veleroapiv1.Backup
 		dataUploads         []veleroapiv2alpha1.DataUpload
+		duBlackList         blackList
 		ha                  bool
 		dataUploadTimeout   time.Duration
 		dataUploadCheckPace time.Duration
@@ -1322,7 +1323,7 @@ func TestWaitForDataUpload(t *testing.T) {
 		expectError         bool
 	}{
 		{
-			name: "Single node data upload completed successfully",
+			name: "Single node data upload in progress",
 			backup: &veleroapiv1.Backup{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-backup",
@@ -1335,6 +1336,38 @@ func TestWaitForDataUpload(t *testing.T) {
 						Name:         "test-du-1",
 						GenerateName: "test-backup-",
 						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseInProgress,
+					},
+				},
+			},
+			ha:                  false,
+			dataUploadTimeout:   200 * time.Millisecond,
+			dataUploadCheckPace: 50 * time.Millisecond,
+			expectSuccess:       false,
+			expectError:         true,
+		},
+		{
+			name: "Single node data upload completed",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			dataUploads: []veleroapiv2alpha1.DataUpload{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "test-du-1",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
 					},
 					Status: veleroapiv2alpha1.DataUploadStatus{
 						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
@@ -1348,7 +1381,7 @@ func TestWaitForDataUpload(t *testing.T) {
 			expectError:         false,
 		},
 		{
-			name: "HA data upload completed successfully",
+			name: "HA data upload completed",
 			backup: &veleroapiv1.Backup{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-backup",
@@ -1361,6 +1394,9 @@ func TestWaitForDataUpload(t *testing.T) {
 						Name:         "test-du-1",
 						GenerateName: "test-backup-",
 						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
 					},
 					Status: veleroapiv2alpha1.DataUploadStatus{
 						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
@@ -1371,6 +1407,9 @@ func TestWaitForDataUpload(t *testing.T) {
 						Name:         "test-du-2",
 						GenerateName: "test-backup-",
 						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
 					},
 					Status: veleroapiv2alpha1.DataUploadStatus{
 						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
@@ -1381,6 +1420,9 @@ func TestWaitForDataUpload(t *testing.T) {
 						Name:         "test-du-3",
 						GenerateName: "test-backup-",
 						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
 					},
 					Status: veleroapiv2alpha1.DataUploadStatus{
 						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
@@ -1407,6 +1449,9 @@ func TestWaitForDataUpload(t *testing.T) {
 						Name:         "test-du-1",
 						GenerateName: "test-backup-",
 						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
 					},
 					Status: veleroapiv2alpha1.DataUploadStatus{
 						Phase: veleroapiv2alpha1.DataUploadPhaseFailed,
@@ -1420,7 +1465,7 @@ func TestWaitForDataUpload(t *testing.T) {
 			expectError:         true,
 		},
 		{
-			name: "Timeout waiting for data upload",
+			name: "HA data upload waiting for more uploads",
 			backup: &veleroapiv1.Backup{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-backup",
@@ -1435,15 +1480,619 @@ func TestWaitForDataUpload(t *testing.T) {
 						Namespace:    "velero",
 					},
 					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+			},
+			ha:                  true,
+			dataUploadTimeout:   5 * time.Second,
+			dataUploadCheckPace: 100 * time.Millisecond,
+			expectSuccess:       false,
+			expectError:         true,
+		},
+		{
+			name: "Single node with blacklisted DataUpload",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			dataUploads: []veleroapiv2alpha1.DataUpload{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "blacklisted-du",
+						GenerateName: "test-backup-hourly-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup-hourly",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "valid-du",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
 						Phase: veleroapiv2alpha1.DataUploadPhaseInProgress,
 					},
 				},
 			},
 			ha:                  false,
+			duBlackList:         dummyDUBlacklist(),
 			dataUploadTimeout:   200 * time.Millisecond,
 			dataUploadCheckPace: 50 * time.Millisecond,
 			expectSuccess:       false,
 			expectError:         true,
+		},
+		{
+			name: "Single node with blacklisted old and non related DataUpload",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			dataUploads: []veleroapiv2alpha1.DataUpload{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "blacklisted-du",
+						GenerateName: "test-backup-hourly-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup-hourly",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "valid-du",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseInProgress,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "blacklisted-du-old",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+			},
+			ha:                  false,
+			duBlackList:         dummyDUBlacklist(),
+			dataUploadTimeout:   200 * time.Millisecond,
+			dataUploadCheckPace: 50 * time.Millisecond,
+			expectSuccess:       false,
+			expectError:         true,
+		},
+		{
+			name: "HA with blacklisted data uploads",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			dataUploads: []veleroapiv2alpha1.DataUpload{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "blacklisted-du",
+						GenerateName: "test-backup-hourly-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup-hourly",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "blacklisted-du-old",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "valid-du-1",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "valid-du-2",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "valid-du-3",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+			},
+			ha:                  true,
+			duBlackList:         dummyDUBlacklist(),
+			dataUploadTimeout:   5 * time.Second,
+			dataUploadCheckPace: 100 * time.Millisecond,
+			expectSuccess:       true,
+			expectError:         false,
+		},
+		{
+			name: "Single node with unrelated data uploads",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			dataUploads: []veleroapiv2alpha1.DataUpload{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "blacklisted-du-1",
+						GenerateName: "other-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "other-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "blacklisted-du-2",
+						GenerateName: "another-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "another-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseInProgress,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "valid-du",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+			},
+			ha:                  false,
+			duBlackList:         dummyDUBlacklist(),
+			dataUploadTimeout:   5 * time.Second,
+			dataUploadCheckPace: 100 * time.Millisecond,
+			expectSuccess:       true,
+			expectError:         false,
+		},
+		{
+			name: "HA with unrelated data uploads",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			dataUploads: []veleroapiv2alpha1.DataUpload{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "blacklisted-du-1",
+						GenerateName: "other-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "other-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "blacklisted-du-2",
+						GenerateName: "another-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "another-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseFailed,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "blacklisted-du-3",
+						GenerateName: "another-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "another-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseInProgress,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "valid-du-1",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "valid-du-2",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "valid-du-3",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+			},
+			ha:                  true,
+			duBlackList:         dummyDUBlacklist(),
+			dataUploadTimeout:   5 * time.Second,
+			dataUploadCheckPace: 100 * time.Millisecond,
+			expectSuccess:       true,
+			expectError:         false,
+		},
+		{
+			name: "Single node with blacklisted, unrelated data uploads and old dataupload",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			dataUploads: []veleroapiv2alpha1.DataUpload{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "blacklisted-du",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "unrelated-du",
+						GenerateName: "other-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "other-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseInProgress,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "valid-du",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+			},
+			ha:                  false,
+			duBlackList:         dummyDUBlacklist(),
+			dataUploadTimeout:   5 * time.Second,
+			dataUploadCheckPace: 100 * time.Millisecond,
+			expectSuccess:       true,
+			expectError:         false,
+		},
+		{
+			name: "HA with blacklisted, with unrelated and old dataupload. DU in progress",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			dataUploads: []veleroapiv2alpha1.DataUpload{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "blacklisted-du-old",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "blacklisted-du-1",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "unrelated-du-1",
+						GenerateName: "other-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "other-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseFailed,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "unrelated-du-2",
+						GenerateName: "another-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "another-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseInProgress,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "valid-du-1",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "valid-du-2",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "valid-du-3",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseInProgress,
+					},
+				},
+			},
+			ha:                  true,
+			duBlackList:         dummyDUBlacklist(),
+			dataUploadTimeout:   200 * time.Millisecond,
+			dataUploadCheckPace: 50 * time.Millisecond,
+			expectSuccess:       false,
+			expectError:         true,
+		},
+		{
+			name: "HA with blacklisted, with unrelated and old dataupload. DU finished",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			dataUploads: []veleroapiv2alpha1.DataUpload{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "blacklisted-du-old",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "blacklisted-du-1",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "unrelated-du-1",
+						GenerateName: "other-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "other-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseFailed,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "unrelated-du-2",
+						GenerateName: "another-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "another-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseInProgress,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "valid-du-1",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "valid-du-2",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "valid-du-3",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+			},
+			ha:                  true,
+			duBlackList:         dummyDUBlacklist(),
+			dataUploadTimeout:   5 * time.Second,
+			dataUploadCheckPace: 100 * time.Millisecond,
+			expectSuccess:       true,
+			expectError:         false,
 		},
 	}
 
@@ -1455,7 +2104,7 @@ func TestWaitForDataUpload(t *testing.T) {
 			}).Build()
 			log := logrus.New()
 
-			success, err := WaitForDataUpload(context.TODO(), client, log, tt.backup, tt.dataUploadTimeout, tt.dataUploadCheckPace, tt.ha)
+			success, err := WaitForDataUpload(context.TODO(), client, log, tt.backup, tt.dataUploadTimeout, tt.dataUploadCheckPace, tt.ha, tt.duBlackList)
 
 			if tt.expectError {
 				g.Expect(err).To(HaveOccurred())
@@ -1475,6 +2124,7 @@ func TestCheckDataUpload(t *testing.T) {
 		name           string
 		backup         *veleroapiv1.Backup
 		dataUploads    []veleroapiv2alpha1.DataUpload
+		duBlackList    blackList
 		ha             bool
 		expectStarted  bool
 		expectFinished bool
@@ -1508,6 +2158,9 @@ func TestCheckDataUpload(t *testing.T) {
 						Name:         "test-du-1",
 						GenerateName: "test-backup-",
 						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
 					},
 					Status: veleroapiv2alpha1.DataUploadStatus{
 						Phase: veleroapiv2alpha1.DataUploadPhaseInProgress,
@@ -1533,6 +2186,9 @@ func TestCheckDataUpload(t *testing.T) {
 						Name:         "test-du-1",
 						GenerateName: "test-backup-",
 						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
 					},
 					Status: veleroapiv2alpha1.DataUploadStatus{
 						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
@@ -1558,6 +2214,9 @@ func TestCheckDataUpload(t *testing.T) {
 						Name:         "test-du-1",
 						GenerateName: "test-backup-",
 						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
 					},
 					Status: veleroapiv2alpha1.DataUploadStatus{
 						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
@@ -1568,6 +2227,9 @@ func TestCheckDataUpload(t *testing.T) {
 						Name:         "test-du-2",
 						GenerateName: "test-backup-",
 						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
 					},
 					Status: veleroapiv2alpha1.DataUploadStatus{
 						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
@@ -1578,6 +2240,9 @@ func TestCheckDataUpload(t *testing.T) {
 						Name:         "test-du-3",
 						GenerateName: "test-backup-",
 						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
 					},
 					Status: veleroapiv2alpha1.DataUploadStatus{
 						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
@@ -1603,6 +2268,9 @@ func TestCheckDataUpload(t *testing.T) {
 						Name:         "test-du-1",
 						GenerateName: "test-backup-",
 						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
 					},
 					Status: veleroapiv2alpha1.DataUploadStatus{
 						Phase: veleroapiv2alpha1.DataUploadPhaseFailed,
@@ -1640,7 +2308,7 @@ func TestCheckDataUpload(t *testing.T) {
 			expectError:    false,
 		},
 		{
-			name: "Data upload with different generate name",
+			name: "Single node with blacklisted DataUpload",
 			backup: &veleroapiv1.Backup{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-backup",
@@ -1650,9 +2318,80 @@ func TestCheckDataUpload(t *testing.T) {
 			dataUploads: []veleroapiv2alpha1.DataUpload{
 				{
 					ObjectMeta: metav1.ObjectMeta{
-						Name:         "test-du-1",
-						GenerateName: "different-backup-",
+						Name:         "blacklisted-du",
+						GenerateName: "test-backup-hourly-",
 						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup-hourly",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "valid-du",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseInProgress,
+					},
+				},
+			},
+			ha:             false,
+			duBlackList:    dummyDUBlacklist(),
+			expectStarted:  true,
+			expectFinished: false,
+			expectError:    false,
+		},
+		{
+			name: "Single node with blacklisted old and non related DataUpload",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			dataUploads: []veleroapiv2alpha1.DataUpload{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "blacklisted-du",
+						GenerateName: "test-backup-hourly-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup-hourly",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "valid-du",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseInProgress,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "blacklisted-du-old",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
 					},
 					Status: veleroapiv2alpha1.DataUploadStatus{
 						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
@@ -1660,8 +2399,495 @@ func TestCheckDataUpload(t *testing.T) {
 				},
 			},
 			ha:             false,
+			duBlackList:    dummyDUBlacklist(),
 			expectStarted:  true,
 			expectFinished: false,
+			expectError:    false,
+		},
+		{
+			name: "HA with blacklisted data uploads",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			dataUploads: []veleroapiv2alpha1.DataUpload{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "blacklisted-du",
+						GenerateName: "test-backup-hourly-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup-hourly",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "blacklisted-du-old",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "valid-du-1",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "valid-du-2",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "valid-du-3",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+			},
+			ha:             true,
+			duBlackList:    dummyDUBlacklist(),
+			expectStarted:  true,
+			expectFinished: true,
+			expectError:    false,
+		},
+		{
+			name: "Single node with unrelated data uploads",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			dataUploads: []veleroapiv2alpha1.DataUpload{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "blacklisted-du-1",
+						GenerateName: "other-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "other-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "blacklisted-du-2",
+						GenerateName: "another-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "another-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseInProgress,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "valid-du",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+			},
+			ha:             false,
+			duBlackList:    dummyDUBlacklist(),
+			expectStarted:  true,
+			expectFinished: true,
+			expectError:    false,
+		},
+		{
+			name: "HA with unrelated data uploads",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			dataUploads: []veleroapiv2alpha1.DataUpload{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "blacklisted-du-1",
+						GenerateName: "other-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "other-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "blacklisted-du-2",
+						GenerateName: "another-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "another-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseFailed,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "valid-du-1",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "valid-du-2",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "valid-du-3",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+			},
+			ha:             true,
+			duBlackList:    dummyDUBlacklist(),
+			expectStarted:  true,
+			expectFinished: true,
+			expectError:    false,
+		},
+		{
+			name: "Single node with blacklisted, unrelated data uploads and old dataupload",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			dataUploads: []veleroapiv2alpha1.DataUpload{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "blacklisted-du",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "unrelated-du",
+						GenerateName: "other-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "other-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseInProgress,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "valid-du",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+			},
+			ha:             false,
+			duBlackList:    dummyDUBlacklist(),
+			expectStarted:  true,
+			expectFinished: true,
+			expectError:    false,
+		},
+		{
+			name: "HA with blacklisted, unrelated data uploads and old dataupload. DU not in progress",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			dataUploads: []veleroapiv2alpha1.DataUpload{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "blacklisted-du-old",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "blacklisted-du-1",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "unrelated-du-1",
+						GenerateName: "other-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "other-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseFailed,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "unrelated-du-2",
+						GenerateName: "another-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "another-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseInProgress,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "valid-du-1",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "valid-du-2",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "valid-du-3",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseInProgress,
+					},
+				},
+			},
+			ha:             true,
+			duBlackList:    dummyDUBlacklist(),
+			expectStarted:  true,
+			expectFinished: false,
+			expectError:    false,
+		},
+		{
+			name: "HA with blacklisted, unrelated data uploads and old dataupload. DU finished",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			dataUploads: []veleroapiv2alpha1.DataUpload{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "blacklisted-du-old",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "blacklisted-du-1",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "unrelated-du-1",
+						GenerateName: "other-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "other-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseFailed,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "unrelated-du-2",
+						GenerateName: "another-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "another-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseInProgress,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "valid-du-1",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "valid-du-2",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:         "valid-du-3",
+						GenerateName: "test-backup-",
+						Namespace:    "velero",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: veleroapiv2alpha1.DataUploadStatus{
+						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
+					},
+				},
+			},
+			ha:             true,
+			duBlackList:    dummyDUBlacklist(),
+			expectStarted:  true,
+			expectFinished: true,
 			expectError:    false,
 		},
 	}
@@ -1674,7 +2900,7 @@ func TestCheckDataUpload(t *testing.T) {
 			}).Build()
 			log := logrus.New()
 
-			started, finished, err := CheckDataUpload(context.TODO(), client, log, tt.backup, tt.ha)
+			started, finished, err := CheckDataUpload(context.TODO(), client, log, tt.backup, tt.ha, tt.duBlackList)
 
 			if tt.expectError {
 				g.Expect(err).To(HaveOccurred())
@@ -1683,6 +2909,15 @@ func TestCheckDataUpload(t *testing.T) {
 			}
 			g.Expect(started).To(Equal(tt.expectStarted))
 			g.Expect(finished).To(Equal(tt.expectFinished))
+
+			// Add debug information for failing tests
+			if started != tt.expectStarted || finished != tt.expectFinished {
+				t.Logf("Test: %s", tt.name)
+				t.Logf("Expected started: %v, got: %v", tt.expectStarted, started)
+				t.Logf("Expected finished: %v, got: %v", tt.expectFinished, finished)
+				t.Logf("Number of data uploads: %d", len(tt.dataUploads))
+				t.Logf("Blacklist contains: %d items", len(duBlackList.duObjects))
+			}
 		})
 	}
 }
@@ -2832,5 +4067,427 @@ func TestReconcileVolumeSnapshots(t *testing.T) {
 			}
 			g.Expect(success).To(Equal(tt.expectSuccess))
 		})
+	}
+}
+
+func TestNewBlackList(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = veleroapiv2alpha1.AddToScheme(scheme)
+	_ = snapshotv1.AddToScheme(scheme)
+
+	tests := []struct {
+		name           string
+		kind           string
+		objects        interface{}
+		expectedKind   string
+		expectedLength int
+		expectError    bool
+	}{
+		{
+			name: "DataUpload list with items",
+			kind: "DataUpload",
+			objects: &veleroapiv2alpha1.DataUploadList{
+				Items: []veleroapiv2alpha1.DataUpload{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "du-1",
+							Namespace: "test-ns",
+						},
+					},
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "du-2",
+							Namespace: "test-ns",
+						},
+					},
+				},
+			},
+			expectedKind:   "DataUpload",
+			expectedLength: 2,
+			expectError:    false,
+		},
+		{
+			name: "VolumeSnapshotContent list with items",
+			kind: "VolumeSnapshotContent",
+			objects: &snapshotv1.VolumeSnapshotContentList{
+				Items: []snapshotv1.VolumeSnapshotContent{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "vsc-1",
+						},
+					},
+				},
+			},
+			expectedKind:   "VolumeSnapshotContent",
+			expectedLength: 1,
+			expectError:    false,
+		},
+		{
+			name: "VolumeSnapshot list with items",
+			kind: "VolumeSnapshot",
+			objects: &snapshotv1.VolumeSnapshotList{
+				Items: []snapshotv1.VolumeSnapshot{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "vs-1",
+							Namespace: "test-ns",
+						},
+					},
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "vs-2",
+							Namespace: "test-ns",
+						},
+					},
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "vs-3",
+							Namespace: "test-ns",
+						},
+					},
+				},
+			},
+			expectedKind:   "VolumeSnapshot",
+			expectedLength: 3,
+			expectError:    false,
+		},
+		{
+			name: "Empty DataUpload list",
+			kind: "DataUpload",
+			objects: &veleroapiv2alpha1.DataUploadList{
+				Items: []veleroapiv2alpha1.DataUpload{},
+			},
+			expectedKind:   "DataUpload",
+			expectedLength: 0,
+			expectError:    false,
+		},
+		{
+			name: "Invalid kind",
+			kind: "InvalidKind",
+			objects: &veleroapiv2alpha1.DataUploadList{
+				Items: []veleroapiv2alpha1.DataUpload{},
+			},
+			expectedKind:   "",
+			expectedLength: 0,
+			expectError:    true,
+		},
+		{
+			name: "Wrong object type for kind",
+			kind: "DataUpload",
+			objects: &snapshotv1.VolumeSnapshotList{
+				Items: []snapshotv1.VolumeSnapshot{},
+			},
+			expectedKind:   "",
+			expectedLength: 0,
+			expectError:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+			log := logrus.New()
+
+			result, err := NewBlackList(tt.kind, tt.objects, log)
+			if tt.expectError {
+				g.Expect(err).To(HaveOccurred())
+			} else {
+				g.Expect(err).NotTo(HaveOccurred())
+			}
+
+			g.Expect(result.kind).To(Equal(tt.expectedKind))
+
+			switch tt.kind {
+			case "DataUpload":
+				g.Expect(len(result.duObjects)).To(Equal(tt.expectedLength))
+				if tt.expectedLength > 0 {
+					g.Expect(result.duObjects[0]).NotTo(BeNil())
+				}
+			case "VolumeSnapshotContent":
+				g.Expect(len(result.vscObjects)).To(Equal(tt.expectedLength))
+				if tt.expectedLength > 0 {
+					g.Expect(result.vscObjects[0]).NotTo(BeNil())
+				}
+			case "VolumeSnapshot":
+				g.Expect(len(result.vsObjects)).To(Equal(tt.expectedLength))
+				if tt.expectedLength > 0 {
+					g.Expect(result.vsObjects[0]).NotTo(BeNil())
+				}
+			}
+		})
+	}
+}
+
+func TestIsBlackListed(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = veleroapiv2alpha1.AddToScheme(scheme)
+	_ = snapshotv1.AddToScheme(scheme)
+
+	tests := []struct {
+		name           string
+		blackList      blackList
+		object         any
+		expectedResult bool
+	}{
+		{
+			name: "DataUpload in blacklist, should return true",
+			blackList: blackList{
+				kind: "DataUpload",
+				duObjects: []*veleroapiv2alpha1.DataUpload{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "du-1",
+							Namespace: "test-ns",
+						},
+					},
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "du-2",
+							Namespace: "test-ns",
+						},
+					},
+				},
+			},
+			object: &veleroapiv2alpha1.DataUpload{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "du-1",
+					Namespace: "test-ns",
+				},
+			},
+			expectedResult: true,
+		},
+		{
+			name: "DataUpload not in blacklist, should return false",
+			blackList: blackList{
+				kind: "DataUpload",
+				duObjects: []*veleroapiv2alpha1.DataUpload{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "du-1",
+							Namespace: "test-ns",
+						},
+					},
+				},
+			},
+			object: &veleroapiv2alpha1.DataUpload{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "du-3",
+					Namespace: "test-ns",
+				},
+			},
+			expectedResult: false,
+		},
+		{
+			name: "VolumeSnapshotContent in blacklist, should be blacklisted",
+			blackList: blackList{
+				kind: "VolumeSnapshotContent",
+				vscObjects: []*snapshotv1.VolumeSnapshotContent{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "vsc-1",
+						},
+					},
+				},
+			},
+			object: &snapshotv1.VolumeSnapshotContent{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "vsc-1",
+				},
+			},
+			expectedResult: true,
+		},
+		{
+			name: "VolumeSnapshot in blacklist, should be blacklisted",
+			blackList: blackList{
+				kind: "VolumeSnapshot",
+				vsObjects: []*snapshotv1.VolumeSnapshot{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "vs-1",
+							Namespace: "test-ns",
+						},
+					},
+				},
+			},
+			object: &snapshotv1.VolumeSnapshot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "vs-1",
+					Namespace: "test-ns",
+				},
+			},
+			expectedResult: true,
+		},
+		{
+			name: "Wrong kind for object type, should return false",
+			blackList: blackList{
+				kind: "DataUpload",
+				duObjects: []*veleroapiv2alpha1.DataUpload{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "du-1",
+							Namespace: "test-ns",
+						},
+					},
+				},
+			},
+			object: &snapshotv1.VolumeSnapshot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "vs-1",
+					Namespace: "test-ns",
+				},
+			},
+			expectedResult: false,
+		},
+		{
+			name: "Unsupported object type, should return false",
+			blackList: blackList{
+				kind:      "DataUpload",
+				duObjects: []*veleroapiv2alpha1.DataUpload{},
+			},
+			object:         "not-a-kubernetes-object",
+			expectedResult: false,
+		},
+		{
+			name: "Empty blacklist, should not be blacklisted",
+			blackList: blackList{
+				kind:      "DataUpload",
+				duObjects: []*veleroapiv2alpha1.DataUpload{},
+			},
+			object: &veleroapiv2alpha1.DataUpload{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "du-1",
+					Namespace: "test-ns",
+				},
+			},
+			expectedResult: false,
+		},
+		{
+			name: "Different namespace, same name, should not be blacklisted",
+			blackList: blackList{
+				kind: "DataUpload",
+				duObjects: []*veleroapiv2alpha1.DataUpload{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "du-1",
+							Namespace: "test-ns",
+						},
+					},
+				},
+			},
+			object: &veleroapiv2alpha1.DataUpload{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "du-1",
+					Namespace: "different-ns",
+				},
+			},
+			expectedResult: false,
+		},
+		{
+			name: "Different name, same namespace, should not be blacklisted",
+			blackList: blackList{
+				kind: "DataUpload",
+				duObjects: []*veleroapiv2alpha1.DataUpload{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "du-1",
+							Namespace: "test-ns",
+						},
+					},
+				},
+			},
+			object: &veleroapiv2alpha1.DataUpload{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "du-2",
+					Namespace: "test-ns",
+				},
+			},
+			expectedResult: false,
+		},
+		{
+			name: "VolumeSnapshot empty namespace, name match, should be blacklisted",
+			blackList: blackList{
+				kind: "VolumeSnapshot",
+				vsObjects: []*snapshotv1.VolumeSnapshot{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "vs-1",
+						},
+					},
+				},
+			},
+			object: &snapshotv1.VolumeSnapshot{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "vs-1",
+				},
+			},
+			expectedResult: true,
+		},
+		{
+			name: "volumeSnapshotContent empty namespace, name match, should be blacklisted",
+			blackList: blackList{
+				kind: "VolumeSnapshotContent",
+				vscObjects: []*snapshotv1.VolumeSnapshotContent{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "vsc-1",
+						},
+					},
+				},
+			},
+			object: &snapshotv1.VolumeSnapshotContent{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "vsc-1",
+				},
+			},
+			expectedResult: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+			log := logrus.New()
+
+			result := tt.blackList.IsBlackListed(tt.object, log)
+			g.Expect(result).To(Equal(tt.expectedResult))
+		})
+	}
+}
+
+func dummyDUBlacklist() blackList {
+	return blackList{
+		kind: "DataUpload",
+		duObjects: []*veleroapiv2alpha1.DataUpload{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "blacklisted-du",
+					Namespace: "velero",
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "blacklisted-du-1",
+					Namespace: "velero",
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "blacklisted-du-2",
+					Namespace: "velero",
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "blacklisted-du-3",
+					Namespace: "velero",
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "blacklisted-du-old",
+					Namespace: "velero",
+				},
+			},
+		},
 	}
 }

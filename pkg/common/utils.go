@@ -30,12 +30,19 @@ import (
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+type blackList struct {
+	kind       string
+	duObjects  []*veleroapiv2alpha1.DataUpload
+	vscObjects []*snapshotv1.VolumeSnapshotContent
+	vsObjects  []*snapshotv1.VolumeSnapshot
+}
+
 var (
 	appBlackList = []string{
 		"openshift-apiserver",
 	}
-
-	k8sSAFilePath = DefaultK8sSAFilePath
+	k8sSAFilePath                          = DefaultK8sSAFilePath
+	vscBlackList, vsBlackList, duBlackList blackList
 )
 
 func getMetadataAndAnnotations(item runtime.Unstructured) (metav1.Object, map[string]string, error) {
@@ -80,7 +87,7 @@ func GetConfig() (*rest.Config, error) {
 // The first return value is true if the dataUpload is started, false otherwise.
 // The second return value is true if the dataUpload is finished, false otherwise.
 // The third return value is an error if the dataUpload is failed, nil otherwise.
-func CheckDataUpload(ctx context.Context, client crclient.Client, log logrus.FieldLogger, backup *veleroapiv1.Backup, ha bool) (bool, bool, error) {
+func CheckDataUpload(ctx context.Context, client crclient.Client, log logrus.FieldLogger, backup *veleroapiv1.Backup, ha bool, duBlackList blackList) (bool, bool, error) {
 	var (
 		started, finished bool = false, false
 		completed         int
@@ -88,49 +95,48 @@ func CheckDataUpload(ctx context.Context, client crclient.Client, log logrus.Fie
 	)
 
 	dataUploadSlice := &veleroapiv2alpha1.DataUploadList{}
-	if err := client.List(ctx, dataUploadSlice, crclient.InNamespace(backup.Namespace)); err != nil {
+	if err := client.List(ctx, dataUploadSlice, crclient.InNamespace(backup.Namespace), crclient.MatchingLabels{veleroapiv1.BackupNameLabel: backup.Name}); err != nil {
 		log.Error(err, "failed to get dataUploadList")
 		return started, finished, err
 	}
 
 	if ha {
+		log.Debugf("HA mode detected, setting nodes to 3")
 		nodes = 3
 	}
 
-	if len(dataUploadSlice.Items) != nodes {
-		log.Debugf("Only %d dataUploads found for backup %s, expecting to have %d DataUpload objects. Waiting...", len(dataUploadSlice.Items), backup.Name, nodes)
-		return started, finished, nil
-	}
-
-	started = true
-
 	for _, dataUpload := range dataUploadSlice.Items {
 		if strings.Contains(dataUpload.ObjectMeta.GenerateName, backup.Name) {
-			log.Infof("dataUpload found. Waiting for completion... StatusPhase: %s Name: %s", dataUpload.Status.Phase, dataUpload.Name)
+			if duBlackList.IsBlackListed(&dataUpload, log) {
+				log.Debugf("dataUpload found but blacklisted. Name: %s", dataUpload.Name)
+				continue
+			}
+			started = true
+			log.Infof("dataUpload found. Waiting for completion... StatusPhase: %s Name: %s, backup: %s", dataUpload.Status.Phase, dataUpload.Name, backup.Name)
 			switch dataUpload.Status.Phase {
 			case veleroapiv2alpha1.DataUploadPhaseCompleted:
-				log.Infof("dataUpload details. Name: %s Status: %s", dataUpload.Name, dataUpload.Status.Phase)
+				log.Infof("dataUpload details. Name: %s Status: %s, backup: %s", dataUpload.Name, dataUpload.Status.Phase, backup.Name)
 				completed++
 			case veleroapiv2alpha1.DataUploadPhaseFailed:
-				return started, finished, fmt.Errorf("dataUpload failed. Name: %s Status: %s", dataUpload.Name, dataUpload.Status.Phase)
+				return started, finished, fmt.Errorf("dataUpload failed. Name: %s Status: %s, backup: %s", dataUpload.Name, dataUpload.Status.Phase, backup.Name)
 			case veleroapiv2alpha1.DataUploadPhaseInProgress, veleroapiv2alpha1.DataUploadPhaseNew:
 				return started, finished, nil
 			}
 		}
 	}
 
-	if len(dataUploadSlice.Items) == completed {
-		log.Debugf("dataUpload is done. Name: %s", backup.Name)
+	if completed == nodes {
+		log.Infof("dataUpload process is done. Name: %s, started: %v, finished: %v, completed: %d/%d", backup.Name, started, finished, completed, nodes)
 		finished = true
 	}
 
-	log.Debugf("dataUpload not finished yet for backup %s", backup.Name)
+	log.Debugf("dataUpload process is not finished yet for backup %s, started: %v, finished: %v, completed: %d/%d", backup.Name, started, finished, completed, nodes)
 	return started, finished, nil
 }
 
 // WaitForBackupCompleted waits for the backup to be completed and uploaded to the destination backend
 // it returns true if the backup was completed successfully, false otherwise.
-func WaitForDataUpload(ctx context.Context, client crclient.Client, log logrus.FieldLogger, backup *veleroapiv1.Backup, dataUploadTimeout time.Duration, dataUploadCheckPace time.Duration, ha bool) (bool, error) {
+func WaitForDataUpload(ctx context.Context, client crclient.Client, log logrus.FieldLogger, backup *veleroapiv1.Backup, dataUploadTimeout time.Duration, dataUploadCheckPace time.Duration, ha bool, duBlackList blackList) (bool, error) {
 	if dataUploadTimeout == 0 {
 		dataUploadTimeout = defaultPVBackupTimeout
 	}
@@ -144,7 +150,7 @@ func WaitForDataUpload(ctx context.Context, client crclient.Client, log logrus.F
 
 	err := wait.PollUntilContextCancel(waitCtx, dataUploadCheckPace, true, func(ctx context.Context) (bool, error) {
 		log.Info("waiting for dataUpload to be completed...")
-		_, duFinished, err := CheckDataUpload(ctx, client, log, backup, ha)
+		_, duFinished, err := CheckDataUpload(ctx, client, log, backup, ha, duBlackList)
 		if err != nil {
 			return false, err
 		}
@@ -815,12 +821,29 @@ func ReconcileDataUpload(ctx context.Context, c crclient.Client, log logrus.Fiel
 		return true, nil
 	}
 
+	if duBlackList.kind == "" {
+		var err error
+
+		dataUploadSlice := &veleroapiv2alpha1.DataUploadList{}
+		if err := c.List(ctx, dataUploadSlice, crclient.InNamespace(backup.Namespace)); err != nil {
+			if !apierrors.IsNotFound(err) {
+				log.Error(err, "failed to get dataUploadList")
+			}
+			return true, nil
+		}
+
+		duBlackList, err = NewBlackList("DataUpload", dataUploadSlice, log)
+		if err != nil {
+			log.Errorf("Error creating dataUpload blacklist: %v", err)
+		}
+	}
+
 	switch {
 	case !*duStarted:
 		var err error
 
 		log.Debug("Checking if DataUpload exists")
-		*duStarted, finished, err = CheckDataUpload(ctx, c, log, backup, ha)
+		*duStarted, finished, err = CheckDataUpload(ctx, c, log, backup, ha, duBlackList)
 		if err != nil {
 			return false, err
 		}
@@ -832,7 +855,7 @@ func ReconcileDataUpload(ctx context.Context, c crclient.Client, log logrus.Fiel
 		var err error
 
 		log.Debug("DataUpload exists, waiting for it to be completed")
-		finished, err = WaitForDataUpload(ctx, c, log, backup, dataUploadTimeout, dataUploadCheckPace, ha)
+		finished, err = WaitForDataUpload(ctx, c, log, backup, dataUploadTimeout, dataUploadCheckPace, ha, duBlackList)
 		if err != nil {
 			return false, err
 		}
@@ -843,4 +866,85 @@ func ReconcileDataUpload(ctx context.Context, c crclient.Client, log logrus.Fiel
 	}
 
 	return finished, nil
+}
+
+func NewBlackList(kind string, objects any, log logrus.FieldLogger) (blackList, error) {
+	switch kind {
+	case "DataUpload":
+		if dataUploadList, ok := objects.(*veleroapiv2alpha1.DataUploadList); ok {
+			duObjects := make([]*veleroapiv2alpha1.DataUpload, len(dataUploadList.Items))
+			for i, item := range dataUploadList.Items {
+				duObjects[i] = &item
+			}
+			return blackList{
+				kind:      kind,
+				duObjects: duObjects,
+			}, nil
+		}
+		return blackList{}, fmt.Errorf("invalid object type for DataUpload blacklist: expected DataUpload list, got %T", objects)
+	case "VolumeSnapshotContent":
+		if vscList, ok := objects.(*snapshotv1.VolumeSnapshotContentList); ok {
+			vscObjects := make([]*snapshotv1.VolumeSnapshotContent, len(vscList.Items))
+			for i, item := range vscList.Items {
+				vscObjects[i] = &item
+			}
+			return blackList{
+				kind:       kind,
+				vscObjects: vscObjects,
+			}, nil
+		}
+		return blackList{}, fmt.Errorf("invalid object type for VolumeSnapshotContent blacklist: expected VolumeSnapshotContent list, got %T", objects)
+	case "VolumeSnapshot":
+		if vsList, ok := objects.(*snapshotv1.VolumeSnapshotList); ok {
+			vsObjects := make([]*snapshotv1.VolumeSnapshot, len(vsList.Items))
+			for i, item := range vsList.Items {
+				vsObjects[i] = &item
+			}
+			return blackList{
+				kind:      kind,
+				vsObjects: vsObjects,
+			}, nil
+		}
+		return blackList{}, fmt.Errorf("invalid object type for VolumeSnapshot blacklist: expected VolumeSnapshot list, got %T", objects)
+	}
+	return blackList{}, fmt.Errorf("unsupported resource type: %s (supported types: DataUpload, VolumeSnapshotContent, VolumeSnapshot)", kind)
+}
+
+func (b *blackList) IsBlackListed(obj any, log logrus.FieldLogger) bool {
+	switch o := obj.(type) {
+	case *veleroapiv2alpha1.DataUpload:
+		if b.kind != "DataUpload" {
+			return false
+		}
+		log.Debugf("Checking if DataUpload %s/%s is blacklisted", o.Namespace, o.Name)
+		for _, du := range b.duObjects {
+			if du.Name == o.Name && du.Namespace == o.Namespace {
+				return true
+			}
+		}
+	case *snapshotv1.VolumeSnapshotContent:
+		if b.kind != "VolumeSnapshotContent" {
+			return false
+		}
+		log.Debugf("Checking if VolumeSnapshotContent %s/%s is blacklisted", o.Namespace, o.Name)
+		for _, vsc := range b.vscObjects {
+			if vsc.Name == o.Name && vsc.Namespace == o.Namespace {
+				return true
+			}
+		}
+	case *snapshotv1.VolumeSnapshot:
+		if b.kind != "VolumeSnapshot" {
+			return false
+		}
+		log.Debugf("Checking if VolumeSnapshot %s/%s is blacklisted", o.Namespace, o.Name)
+		for _, vs := range b.vsObjects {
+			if vs.Name == o.Name && vs.Namespace == o.Namespace {
+				return true
+			}
+		}
+	default:
+		log.Debugf("Unsupported object type: %T", obj)
+		return false
+	}
+	return false
 }
