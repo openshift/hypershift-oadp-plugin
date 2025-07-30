@@ -3365,6 +3365,7 @@ func TestWaitForVolumeSnapshotContent(t *testing.T) {
 		name                   string
 		backup                 *veleroapiv1.Backup
 		volumeSnapshotContents []snapshotv1.VolumeSnapshotContent
+		vscBlackList           blackList
 		hcp                    *hyperv1.HostedControlPlane
 		ha                     bool
 		pvBackupStarted        bool
@@ -3512,6 +3513,29 @@ func TestWaitForVolumeSnapshotContent(t *testing.T) {
 			expectError:      true,
 		},
 		{
+			name: "VolumeSnapshotContent not found",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			volumeSnapshotContents: []snapshotv1.VolumeSnapshotContent{},
+			hcp: &hyperv1.HostedControlPlane{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-hc",
+					Namespace: "test-namespace-test-hc",
+				},
+			},
+			ha:               false,
+			pvBackupStarted:  false,
+			pvBackupFinished: false,
+			vscTimeout:       5 * time.Second,
+			vscCheckPace:     100 * time.Millisecond,
+			expectSuccess:    false,
+			expectError:      true,
+		},
+		{
 			name: "Already finished",
 			backup: &veleroapiv1.Backup{
 				ObjectMeta: metav1.ObjectMeta{
@@ -3534,6 +3558,610 @@ func TestWaitForVolumeSnapshotContent(t *testing.T) {
 			expectSuccess:    true,
 			expectError:      false,
 		},
+		{
+			name: "Single node with blacklisted VSC",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			volumeSnapshotContents: []snapshotv1.VolumeSnapshotContent{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "blacklisted-vsc",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "valid-vsc",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(false),
+					},
+				},
+			},
+			vscBlackList: dummyVSCBlacklist(),
+			hcp: &hyperv1.HostedControlPlane{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-hc",
+					Namespace: "test-namespace-test-hc",
+				},
+			},
+			ha:               false,
+			pvBackupStarted:  false,
+			pvBackupFinished: false,
+			vscTimeout:       200 * time.Millisecond,
+			vscCheckPace:     50 * time.Millisecond,
+			expectSuccess:    false,
+			expectError:      true,
+		},
+		{
+			name: "HA with blacklisted VSC",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			volumeSnapshotContents: []snapshotv1.VolumeSnapshotContent{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "blacklisted-vsc",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "blacklisted-vsc-old",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "valid-vsc-1",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "valid-vsc-2",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "valid-vsc-3",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+			},
+			vscBlackList: dummyVSCBlacklist(),
+			hcp: &hyperv1.HostedControlPlane{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-hc",
+					Namespace: "test-namespace-test-hc",
+				},
+			},
+			ha:               true,
+			pvBackupStarted:  false,
+			pvBackupFinished: false,
+			vscTimeout:       5 * time.Second,
+			vscCheckPace:     100 * time.Millisecond,
+			expectSuccess:    true,
+			expectError:      false,
+		},
+		{
+			name: "Single node with unrelated VSC",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			volumeSnapshotContents: []snapshotv1.VolumeSnapshotContent{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "blacklisted-vsc-1",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "other-namespace",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "blacklisted-vsc-2",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "another-namespace",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(false),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "valid-vsc",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+			},
+			vscBlackList: dummyVSCBlacklist(),
+			hcp: &hyperv1.HostedControlPlane{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-hc",
+					Namespace: "test-namespace-test-hc",
+				},
+			},
+			ha:               false,
+			pvBackupStarted:  false,
+			pvBackupFinished: false,
+			vscTimeout:       5 * time.Second,
+			vscCheckPace:     100 * time.Millisecond,
+			expectSuccess:    true,
+			expectError:      false,
+		},
+		{
+			name: "HA with unrelated VSC",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			volumeSnapshotContents: []snapshotv1.VolumeSnapshotContent{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "blacklisted-vsc-1",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "other-namespace",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "blacklisted-vsc-2",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "another-namespace",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(false),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "blacklisted-vsc-3",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "another-namespace",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(false),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "valid-vsc-1",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "valid-vsc-2",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "valid-vsc-3",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+			},
+			vscBlackList: dummyVSCBlacklist(),
+			hcp: &hyperv1.HostedControlPlane{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-hc",
+					Namespace: "test-namespace-test-hc",
+				},
+			},
+			ha:               true,
+			pvBackupStarted:  false,
+			pvBackupFinished: false,
+			vscTimeout:       5 * time.Second,
+			vscCheckPace:     100 * time.Millisecond,
+			expectSuccess:    true,
+			expectError:      false,
+		},
+		{
+			name: "Single node with blacklisted, unrelated and old VSC",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			volumeSnapshotContents: []snapshotv1.VolumeSnapshotContent{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "blacklisted-vsc",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "unrelated-vsc",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "other-namespace",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(false),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "valid-vsc",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+			},
+			vscBlackList: dummyVSCBlacklist(),
+			hcp: &hyperv1.HostedControlPlane{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-hc",
+					Namespace: "test-namespace-test-hc",
+				},
+			},
+			ha:               false,
+			pvBackupStarted:  false,
+			pvBackupFinished: false,
+			vscTimeout:       5 * time.Second,
+			vscCheckPace:     100 * time.Millisecond,
+			expectSuccess:    true,
+			expectError:      false,
+		},
+		{
+			name: "HA with blacklisted, unrelated and old VSC. VSC in progress",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			volumeSnapshotContents: []snapshotv1.VolumeSnapshotContent{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "blacklisted-vsc-old",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "blacklisted-vsc-1",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "unrelated-vsc-1",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "other-namespace",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(false),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "unrelated-vsc-2",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "another-namespace",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(false),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "valid-vsc-1",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "valid-vsc-2",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "valid-vsc-3",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(false),
+					},
+				},
+			},
+			vscBlackList: dummyVSCBlacklist(),
+			hcp: &hyperv1.HostedControlPlane{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-hc",
+					Namespace: "test-namespace-test-hc",
+				},
+			},
+			ha:               true,
+			pvBackupStarted:  false,
+			pvBackupFinished: false,
+			vscTimeout:       200 * time.Millisecond,
+			vscCheckPace:     50 * time.Millisecond,
+			expectSuccess:    false,
+			expectError:      true,
+		},
+		{
+			name: "HA with blacklisted, unrelated and old VSC. VSC finished",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			volumeSnapshotContents: []snapshotv1.VolumeSnapshotContent{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "blacklisted-vsc-old",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "blacklisted-vsc-1",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "unrelated-vsc-1",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "other-namespace",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(false),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "unrelated-vsc-2",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "another-namespace",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(false),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "valid-vsc-1",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "valid-vsc-2",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "valid-vsc-3",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+			},
+			vscBlackList: dummyVSCBlacklist(),
+			hcp: &hyperv1.HostedControlPlane{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-hc",
+					Namespace: "test-namespace-test-hc",
+				},
+			},
+			ha:               true,
+			pvBackupStarted:  false,
+			pvBackupFinished: false,
+			vscTimeout:       5 * time.Second,
+			vscCheckPace:     100 * time.Millisecond,
+			expectSuccess:    true,
+			expectError:      false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -3544,7 +4172,7 @@ func TestWaitForVolumeSnapshotContent(t *testing.T) {
 			}).Build()
 			log := logrus.New()
 
-			success, err := WaitForVolumeSnapshotContent(context.TODO(), client, log, tt.backup, tt.vscTimeout, tt.vscCheckPace, tt.ha, tt.hcp, &tt.pvBackupStarted, &tt.pvBackupFinished)
+			success, err := WaitForVolumeSnapshotContent(context.TODO(), client, log, tt.backup, tt.vscTimeout, tt.vscCheckPace, tt.ha, tt.hcp, &tt.pvBackupStarted, &tt.pvBackupFinished, tt.vscBlackList)
 
 			if tt.expectError {
 				g.Expect(err).To(HaveOccurred())
@@ -3566,6 +4194,7 @@ func TestCheckVolumeSnapshotContent(t *testing.T) {
 		name                   string
 		backup                 *veleroapiv1.Backup
 		volumeSnapshotContents []snapshotv1.VolumeSnapshotContent
+		vscBlackList           blackList
 		hcp                    *hyperv1.HostedControlPlane
 		ha                     bool
 		pvBackupStarted        bool
@@ -3731,7 +4360,7 @@ func TestCheckVolumeSnapshotContent(t *testing.T) {
 			expectError:      false,
 		},
 		{
-			name: "Already finished",
+			name: "VolumeSnapshotContent not found",
 			backup: &veleroapiv1.Backup{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-backup",
@@ -3743,64 +4372,6 @@ func TestCheckVolumeSnapshotContent(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-hc",
 					Namespace: "test-namespace-test-hc",
-				},
-			},
-			ha:               false,
-			pvBackupStarted:  true,
-			pvBackupFinished: true,
-			expectStarted:    true,
-			expectFinished:   true,
-			expectError:      false,
-		},
-		{
-			name: "Volume snapshot content with different namespace",
-			backup: &veleroapiv1.Backup{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-backup",
-					Namespace: "velero",
-				},
-			},
-			volumeSnapshotContents: []snapshotv1.VolumeSnapshotContent{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "test-vsc-1",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "different-namespace",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-			},
-			hcp: &hyperv1.HostedControlPlane{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-hc",
-					Namespace: "test-namespace-test-hc",
-				},
-			},
-			ha:               false,
-			pvBackupStarted:  false,
-			pvBackupFinished: false,
-			expectStarted:    false,
-			expectFinished:   false,
-			expectError:      false,
-		},
-		{
-			name: "Empty HCP namespace",
-			backup: &veleroapiv1.Backup{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-backup",
-					Namespace: "velero",
-				},
-			},
-			volumeSnapshotContents: []snapshotv1.VolumeSnapshotContent{},
-			hcp: &hyperv1.HostedControlPlane{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-hc",
-					Namespace: "",
 				},
 			},
 			ha:               false,
@@ -3846,6 +4417,603 @@ func TestCheckVolumeSnapshotContent(t *testing.T) {
 			expectFinished:   false,
 			expectError:      false,
 		},
+		{
+			name: "Single node with blacklisted VSC",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			volumeSnapshotContents: []snapshotv1.VolumeSnapshotContent{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "blacklisted-vsc",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "valid-vsc",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(false),
+					},
+				},
+			},
+			vscBlackList: dummyVSCBlacklist(),
+			hcp: &hyperv1.HostedControlPlane{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-hc",
+					Namespace: "test-namespace-test-hc",
+				},
+			},
+			ha:               false,
+			pvBackupStarted:  false,
+			pvBackupFinished: false,
+			expectStarted:    true,
+			expectFinished:   false,
+			expectError:      false,
+		},
+		{
+			name: "HA with blacklisted VSC",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			volumeSnapshotContents: []snapshotv1.VolumeSnapshotContent{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "blacklisted-vsc",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "blacklisted-vsc-old",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "valid-vsc-1",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "valid-vsc-2",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "valid-vsc-3",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+			},
+			vscBlackList: dummyVSCBlacklist(),
+			hcp: &hyperv1.HostedControlPlane{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-hc",
+					Namespace: "test-namespace-test-hc",
+				},
+			},
+			ha:               true,
+			pvBackupStarted:  false,
+			pvBackupFinished: false,
+			expectStarted:    true,
+			expectFinished:   true,
+			expectError:      false,
+		},
+		{
+			name: "Single node with unrelated VSC",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			volumeSnapshotContents: []snapshotv1.VolumeSnapshotContent{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "blacklisted-vsc-1",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "other-namespace",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "blacklisted-vsc-2",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "another-namespace",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(false),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "valid-vsc",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+			},
+			vscBlackList: dummyVSCBlacklist(),
+			hcp: &hyperv1.HostedControlPlane{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-hc",
+					Namespace: "test-namespace-test-hc",
+				},
+			},
+			ha:               false,
+			pvBackupStarted:  false,
+			pvBackupFinished: false,
+			expectStarted:    true,
+			expectFinished:   true,
+			expectError:      false,
+		},
+		{
+			name: "HA with unrelated VSC",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			volumeSnapshotContents: []snapshotv1.VolumeSnapshotContent{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "blacklisted-vsc-1",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "other-namespace",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "blacklisted-vsc-2",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "another-namespace",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(false),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "blacklisted-vsc-3",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "another-namespace",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(false),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "valid-vsc-1",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "valid-vsc-2",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "valid-vsc-3",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+			},
+			vscBlackList: dummyVSCBlacklist(),
+			hcp: &hyperv1.HostedControlPlane{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-hc",
+					Namespace: "test-namespace-test-hc",
+				},
+			},
+			ha:               true,
+			pvBackupStarted:  false,
+			pvBackupFinished: false,
+			expectStarted:    true,
+			expectFinished:   true,
+			expectError:      false,
+		},
+		{
+			name: "Single node with blacklisted, unrelated and old VSC",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			volumeSnapshotContents: []snapshotv1.VolumeSnapshotContent{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "blacklisted-vsc",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "unrelated-vsc",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "other-namespace",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(false),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "valid-vsc",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+			},
+			vscBlackList: dummyVSCBlacklist(),
+			hcp: &hyperv1.HostedControlPlane{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-hc",
+					Namespace: "test-namespace-test-hc",
+				},
+			},
+			ha:               false,
+			pvBackupStarted:  false,
+			pvBackupFinished: false,
+			expectStarted:    true,
+			expectFinished:   true,
+			expectError:      false,
+		},
+		{
+			name: "HA with blacklisted, unrelated and old VSC. VSC in progress",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			volumeSnapshotContents: []snapshotv1.VolumeSnapshotContent{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "blacklisted-vsc-old",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "blacklisted-vsc-1",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "unrelated-vsc-1",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "other-namespace",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(false),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "unrelated-vsc-2",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "another-namespace",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(false),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "valid-vsc-1",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "valid-vsc-2",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "valid-vsc-3",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(false),
+					},
+				},
+			},
+			vscBlackList: dummyVSCBlacklist(),
+			hcp: &hyperv1.HostedControlPlane{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-hc",
+					Namespace: "test-namespace-test-hc",
+				},
+			},
+			ha:               true,
+			pvBackupStarted:  false,
+			pvBackupFinished: false,
+			expectStarted:    true,
+			expectFinished:   false,
+			expectError:      false,
+		},
+		{
+			name: "HA with blacklisted, unrelated and old VSC. VSC finished",
+			backup: &veleroapiv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-backup",
+					Namespace: "velero",
+				},
+			},
+			volumeSnapshotContents: []snapshotv1.VolumeSnapshotContent{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "blacklisted-vsc-old",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "blacklisted-vsc-1",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "unrelated-vsc-1",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "other-namespace",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(false),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "unrelated-vsc-2",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "another-namespace",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(false),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "valid-vsc-1",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "valid-vsc-2",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "valid-vsc-3",
+					},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(true),
+					},
+				},
+			},
+			vscBlackList: dummyVSCBlacklist(),
+			hcp: &hyperv1.HostedControlPlane{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-hc",
+					Namespace: "test-namespace-test-hc",
+				},
+			},
+			ha:               true,
+			pvBackupStarted:  false,
+			pvBackupFinished: false,
+			expectStarted:    true,
+			expectFinished:   true,
+			expectError:      false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -3856,7 +5024,7 @@ func TestCheckVolumeSnapshotContent(t *testing.T) {
 			}).Build()
 			log := logrus.New()
 
-			started, finished, err := CheckVolumeSnapshotContent(context.TODO(), client, log, tt.backup, tt.ha, tt.hcp, &tt.pvBackupStarted, &tt.pvBackupFinished)
+			started, finished, err := CheckVolumeSnapshotContent(context.TODO(), client, log, tt.backup, tt.ha, tt.hcp, &tt.pvBackupStarted, &tt.pvBackupFinished, tt.vscBlackList)
 
 			if tt.expectError {
 				g.Expect(err).To(HaveOccurred())
@@ -4486,6 +5654,39 @@ func dummyDUBlacklist() blackList {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "blacklisted-du-old",
 					Namespace: "velero",
+				},
+			},
+		},
+	}
+}
+
+func dummyVSCBlacklist() blackList {
+	return blackList{
+		kind: "VolumeSnapshotContent",
+		vscObjects: []*snapshotv1.VolumeSnapshotContent{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "blacklisted-vsc",
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "blacklisted-vsc-1",
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "blacklisted-vsc-2",
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "blacklisted-vsc-3",
+				},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "blacklisted-vsc-old",
 				},
 			},
 		},
