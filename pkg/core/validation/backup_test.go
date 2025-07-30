@@ -11,7 +11,6 @@ import (
 	"github.com/sirupsen/logrus"
 	velerov1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	velerov2alpha1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/utils/ptr"
@@ -645,7 +644,7 @@ func TestValidateDataMoverWithDifferentTimeouts(t *testing.T) {
 	}
 }
 
-func TestValidateDataMover_AWS_Reconciliation(t *testing.T) {
+func TestValidateDataMoverWithDifferentDataUploadStates(t *testing.T) {
 	g := NewWithT(t)
 
 	scheme := runtime.NewScheme()
@@ -654,187 +653,180 @@ func TestValidateDataMover_AWS_Reconciliation(t *testing.T) {
 	_ = hyperv1.AddToScheme(scheme)
 	_ = snapshotv1.AddToScheme(scheme)
 
-	hcp := &hyperv1.HostedControlPlane{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-hcp",
-			Namespace: "test-namespace",
-		},
-		Spec: hyperv1.HostedControlPlaneSpec{
-			Platform: hyperv1.PlatformSpec{
-				Type: hyperv1.AWSPlatform,
+	// Helper function to create a test HCP
+	createTestHCP := func(platformType hyperv1.PlatformType) *hyperv1.HostedControlPlane {
+		return &hyperv1.HostedControlPlane{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-hcp",
+				Namespace: "test-namespace",
 			},
+			Spec: hyperv1.HostedControlPlaneSpec{
+				Platform: hyperv1.PlatformSpec{
+					Type: platformType,
+				},
+			},
+		}
+	}
+
+	// Helper function to create a test backup
+	createTestBackup := func() *velerov1.Backup {
+		return &velerov1.Backup{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-backup",
+				Namespace: "test-namespace",
+			},
+			Spec: velerov1.BackupSpec{
+				DefaultVolumesToFsBackup: ptr.To(false),
+			},
+		}
+	}
+
+	tests := []struct {
+		name              string
+		platformType      hyperv1.PlatformType
+		pvBackupFinished  bool
+		duFinished        bool
+		expectedBehavior  string
+		shouldReturnEarly bool
+	}{
+		{
+			name:              "AWS platform - both PV and DU finished - early return path",
+			platformType:      hyperv1.AWSPlatform,
+			pvBackupFinished:  true,
+			duFinished:        true,
+			expectedBehavior:  "should return early when both PV and DU are finished",
+			shouldReturnEarly: true,
+		},
+		{
+			name:              "AWS platform - only PV finished - continue path",
+			platformType:      hyperv1.AWSPlatform,
+			pvBackupFinished:  true,
+			duFinished:        false,
+			expectedBehavior:  "should continue processing when only PV is finished",
+			shouldReturnEarly: false,
+		},
+		{
+			name:              "Azure platform - PV finished - early return path",
+			platformType:      hyperv1.AzurePlatform,
+			pvBackupFinished:  true,
+			duFinished:        false,
+			expectedBehavior:  "should return early when PV is finished (Azure only needs PV)",
+			shouldReturnEarly: true,
+		},
+		{
+			name:              "Azure platform - PV not finished - continue path",
+			platformType:      hyperv1.AzurePlatform,
+			pvBackupFinished:  false,
+			duFinished:        false,
+			expectedBehavior:  "should continue processing when PV is not finished",
+			shouldReturnEarly: false,
+		},
+		{
+			name:              "IBM Cloud platform - both PV and DU finished - early return path",
+			platformType:      hyperv1.IBMCloudPlatform,
+			pvBackupFinished:  true,
+			duFinished:        true,
+			expectedBehavior:  "should return early when both PV and DU are finished",
+			shouldReturnEarly: true,
+		},
+		{
+			name:              "Kubevirt platform - both PV and DU finished - early return path",
+			platformType:      hyperv1.KubevirtPlatform,
+			pvBackupFinished:  true,
+			duFinished:        true,
+			expectedBehavior:  "should return early when both PV and DU are finished",
+			shouldReturnEarly: true,
+		},
+		{
+			name:              "OpenStack platform - both PV and DU finished - early return path",
+			platformType:      hyperv1.OpenStackPlatform,
+			pvBackupFinished:  true,
+			duFinished:        true,
+			expectedBehavior:  "should return early when both PV and DU are finished",
+			shouldReturnEarly: true,
+		},
+		{
+			name:              "Agent platform - both PV and DU finished - early return path",
+			platformType:      hyperv1.AgentPlatform,
+			pvBackupFinished:  true,
+			duFinished:        true,
+			expectedBehavior:  "should return early when both PV and DU are finished",
+			shouldReturnEarly: true,
+		},
+		{
+			name:              "None platform - both PV and DU finished - early return path",
+			platformType:      hyperv1.NonePlatform,
+			pvBackupFinished:  true,
+			duFinished:        true,
+			expectedBehavior:  "should return early when both PV and DU are finished",
+			shouldReturnEarly: true,
+		},
+		{
+			name:              "AWS platform - neither PV nor DU finished - continue path",
+			platformType:      hyperv1.AWSPlatform,
+			pvBackupFinished:  false,
+			duFinished:        false,
+			expectedBehavior:  "should continue processing when neither PV nor DU are finished",
+			shouldReturnEarly: false,
+		},
+		{
+			name:              "IBM Cloud platform - only DU finished - continue path",
+			platformType:      hyperv1.IBMCloudPlatform,
+			pvBackupFinished:  false,
+			duFinished:        true,
+			expectedBehavior:  "should continue processing when only DU is finished",
+			shouldReturnEarly: false,
 		},
 	}
 
-	backup := &velerov1.Backup{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-backup",
-			Namespace: "test-namespace",
-		},
-		Spec: velerov1.BackupSpec{
-			DefaultVolumesToFsBackup: ptr.To(false),
-		},
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hcp := createTestHCP(tt.platformType)
+			backup := createTestBackup()
+
+			// Create a fake client
+			client := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+			validator := &BackupPluginValidator{
+				Log:                 logrus.New(),
+				Client:              client,
+				Backup:              backup,
+				HA:                  false,
+				DataUploadTimeout:   15 * time.Minute,
+				DataUploadCheckPace: 30 * time.Second,
+				PVBackupStarted:     ptr.To(false),
+				PVBackupFinished:    ptr.To(tt.pvBackupFinished),
+				DUStarted:           ptr.To(false),
+				DUFinished:          ptr.To(tt.duFinished),
+			}
+
+			ctx := context.Background()
+
+			// Create pointers for the function parameters
+			pvBackupFinishedParam := ptr.To(tt.pvBackupFinished)
+			duFinishedParam := ptr.To(tt.duFinished)
+
+			err := validator.ValidateDataMover(ctx, hcp, backup, pvBackupFinishedParam, duFinishedParam)
+
+			// Should not error in any case
+			g.Expect(err).ToNot(HaveOccurred())
+
+			// Verify the behavior based on the expected path
+			if tt.shouldReturnEarly {
+				// For early return cases, the parameters should be updated to reflect the finished state
+				if tt.platformType == hyperv1.AzurePlatform {
+					// Azure only needs PV to be finished
+					g.Expect(*pvBackupFinishedParam).To(BeTrue())
+				} else {
+					// Other platforms need both PV and DU to be finished
+					g.Expect(*pvBackupFinishedParam).To(BeTrue())
+					g.Expect(*duFinishedParam).To(BeTrue())
+				}
+			} else {
+				// For continue cases, the parameters should remain as they were
+				g.Expect(*pvBackupFinishedParam).To(Equal(tt.pvBackupFinished))
+				g.Expect(*duFinishedParam).To(Equal(tt.duFinished))
+			}
+		})
 	}
-
-	t.Run("Solo PV", func(t *testing.T) {
-		pvStarted := false
-		pvFinished := false
-		duStarted := false
-		duFinished := false
-
-		vsc := &snapshotv1.VolumeSnapshotContent{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "vsc-1",
-				Namespace: "test-namespace",
-			},
-			Spec: snapshotv1.VolumeSnapshotContentSpec{
-				VolumeSnapshotRef: corev1.ObjectReference{
-					Namespace: "test-namespace",
-				},
-			},
-			Status: &snapshotv1.VolumeSnapshotContentStatus{
-				ReadyToUse: ptr.To(true),
-			},
-		}
-		vs := &snapshotv1.VolumeSnapshot{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "vs-1",
-				Namespace: "test-namespace",
-				Labels: map[string]string{
-					velerov1.BackupNameLabel: "test-backup",
-				},
-			},
-			Status: &snapshotv1.VolumeSnapshotStatus{
-				ReadyToUse: ptr.To(true),
-			},
-		}
-
-		client := fake.NewClientBuilder().WithScheme(scheme).
-			WithObjects(hcp, backup, vsc, vs).
-			Build()
-
-		validator := &BackupPluginValidator{
-			Log:                 logrus.New(),
-			Client:              client,
-			Backup:              backup,
-			HA:                  false,
-			DataUploadTimeout:   15 * time.Minute,
-			DataUploadCheckPace: 30 * time.Second,
-			PVBackupStarted:     &pvStarted,
-			PVBackupFinished:    &pvFinished,
-			DUStarted:           &duStarted,
-			DUFinished:          &duFinished,
-		}
-
-		ctx := context.Background()
-		err := validator.ValidateDataMover(ctx, hcp, backup, ptr.To(false), ptr.To(false))
-
-		g.Expect(err).ToNot(HaveOccurred())
-	})
-
-	t.Run("Solo DataUpload", func(t *testing.T) {
-		pvStarted := false
-		pvFinished := false
-		duStarted := false
-		duFinished := false
-
-		du := &velerov2alpha1.DataUpload{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:         "du-1",
-				Namespace:    "test-namespace",
-				GenerateName: "test-backup-",
-			},
-			Status: velerov2alpha1.DataUploadStatus{
-				Phase: velerov2alpha1.DataUploadPhaseCompleted,
-			},
-		}
-
-		client := fake.NewClientBuilder().WithScheme(scheme).
-			WithObjects(hcp, backup, du).
-			Build()
-
-		validator := &BackupPluginValidator{
-			Log:                 logrus.New(),
-			Client:              client,
-			Backup:              backup,
-			HA:                  false,
-			DataUploadTimeout:   15 * time.Minute,
-			DataUploadCheckPace: 30 * time.Second,
-			PVBackupStarted:     &pvStarted,
-			PVBackupFinished:    &pvFinished,
-			DUStarted:           &duStarted,
-			DUFinished:          &duFinished,
-		}
-
-		ctx := context.Background()
-		err := validator.ValidateDataMover(ctx, hcp, backup, ptr.To(false), ptr.To(false))
-
-		g.Expect(err).ToNot(HaveOccurred())
-	})
-
-	t.Run("PV y DataUpload", func(t *testing.T) {
-		pvStarted := false
-		pvFinished := false
-		duStarted := false
-		duFinished := false
-
-		vsc := &snapshotv1.VolumeSnapshotContent{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "vsc-1",
-				Namespace: "test-namespace",
-			},
-			Spec: snapshotv1.VolumeSnapshotContentSpec{
-				VolumeSnapshotRef: corev1.ObjectReference{
-					Namespace: "test-namespace",
-				},
-			},
-			Status: &snapshotv1.VolumeSnapshotContentStatus{
-				ReadyToUse: ptr.To(true),
-			},
-		}
-		vs := &snapshotv1.VolumeSnapshot{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "vs-1",
-				Namespace: "test-namespace",
-				Labels: map[string]string{
-					velerov1.BackupNameLabel: "test-backup",
-				},
-			},
-			Status: &snapshotv1.VolumeSnapshotStatus{
-				ReadyToUse: ptr.To(true),
-			},
-		}
-		du := &velerov2alpha1.DataUpload{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:         "du-1",
-				Namespace:    "test-namespace",
-				GenerateName: "test-backup-",
-			},
-			Status: velerov2alpha1.DataUploadStatus{
-				Phase: velerov2alpha1.DataUploadPhaseCompleted,
-			},
-		}
-
-		client := fake.NewClientBuilder().WithScheme(scheme).
-			WithObjects(hcp, backup, vsc, vs, du).
-			Build()
-
-		validator := &BackupPluginValidator{
-			Log:                 logrus.New(),
-			Client:              client,
-			Backup:              backup,
-			HA:                  false,
-			DataUploadTimeout:   15 * time.Minute,
-			DataUploadCheckPace: 30 * time.Second,
-			PVBackupStarted:     &pvStarted,
-			PVBackupFinished:    &pvFinished,
-			DUStarted:           &duStarted,
-			DUFinished:          &duFinished,
-		}
-
-		ctx := context.Background()
-		err := validator.ValidateDataMover(ctx, hcp, backup, ptr.To(false), ptr.To(false))
-
-		g.Expect(err).ToNot(HaveOccurred())
-	})
 }
