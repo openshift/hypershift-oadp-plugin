@@ -30,19 +30,21 @@ import (
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-type blackList struct {
-	kind       string
-	duObjects  []*veleroapiv2alpha1.DataUpload
-	vscObjects []*snapshotv1.VolumeSnapshotContent
-	vsObjects  []*snapshotv1.VolumeSnapshot
+type BlackList struct {
+	Kind       string
+	DUObjects  []*veleroapiv2alpha1.DataUpload
+	VSCObjects []*snapshotv1.VolumeSnapshotContent
+	VSObjects  []*snapshotv1.VolumeSnapshot
 }
 
 var (
 	appBlackList = []string{
 		"openshift-apiserver",
 	}
-	k8sSAFilePath                          = DefaultK8sSAFilePath
-	vscBlackList, vsBlackList, duBlackList blackList
+	k8sSAFilePath = DefaultK8sSAFilePath
+	VSCStatus     = make(map[string]bool)
+	VSStatus      = make(map[string]bool)
+	DUStatus      = make(map[string]bool)
 )
 
 func getMetadataAndAnnotations(item runtime.Unstructured) (metav1.Object, map[string]string, error) {
@@ -88,11 +90,9 @@ func GetConfig() (*rest.Config, error) {
 // The second return value is true if the dataUpload is finished, false otherwise.
 // The third return value is an error if the dataUpload is failed, nil otherwise.
 // The function supports blacklisting of DataUpload objects to exclude them from processing.
-func CheckDataUpload(ctx context.Context, client crclient.Client, log logrus.FieldLogger, backup *veleroapiv1.Backup, ha bool, duBlackList blackList) (bool, bool, error) {
+func CheckDataUpload(ctx context.Context, client crclient.Client, log logrus.FieldLogger, backup *veleroapiv1.Backup, duBlackList *BlackList) (bool, bool, error) {
 	var (
-		started, finished bool = false, false
-		completed         int
-		nodes             int = 1
+		started, finished = false, false
 	)
 
 	dataUploadSlice := &veleroapiv2alpha1.DataUploadList{}
@@ -101,44 +101,42 @@ func CheckDataUpload(ctx context.Context, client crclient.Client, log logrus.Fie
 		return started, finished, err
 	}
 
-	if ha {
-		log.Debugf("HA mode detected, setting nodes to 3")
-		nodes = 3
-	}
-
 	for _, dataUpload := range dataUploadSlice.Items {
-		if strings.Contains(dataUpload.ObjectMeta.GenerateName, backup.Name) {
-			if duBlackList.IsBlackListed(&dataUpload, log) {
-				log.Debugf("dataUpload found but blacklisted. Name: %s", dataUpload.Name)
+		object := &veleroapiv2alpha1.DataUpload{}
+		if err := client.Get(ctx, types.NamespacedName{Name: dataUpload.Name, Namespace: dataUpload.Namespace}, object); err != nil {
+			log.Error(err, "failed to get dataUpload")
+			return started, finished, err
+		}
+
+		if strings.Contains(object.GenerateName, backup.Name) {
+			if duBlackList.IsBlackListed(object, log) {
+				log.Infof("dataUpload found but blacklisted. Name: %s, Namespace: %s", object.Name, object.Namespace)
 				continue
 			}
 			started = true
-			log.Infof("dataUpload found. Waiting for completion... StatusPhase: %s Name: %s, backup: %s", dataUpload.Status.Phase, dataUpload.Name, backup.Name)
-			switch dataUpload.Status.Phase {
+			log.Infof("dataUpload found. Waiting for completion... StatusPhase: %s Name: %s, backup: %s", object.Status.Phase, object.Name, backup.Name)
+			switch object.Status.Phase {
 			case veleroapiv2alpha1.DataUploadPhaseCompleted:
-				log.Infof("dataUpload details. Name: %s Status: %s, backup: %s", dataUpload.Name, dataUpload.Status.Phase, backup.Name)
-				completed++
+				log.Infof("dataUpload finished details. Name: %s Status: %s, backup: %s", object.Name, object.Status.Phase, backup.Name)
+				finished = true
+				DUStatus[object.Name] = true
+				duBlackList.AddObject(object)
+				return started, finished, nil
 			case veleroapiv2alpha1.DataUploadPhaseFailed:
-				return started, finished, fmt.Errorf("dataUpload failed. Name: %s Status: %s, backup: %s", dataUpload.Name, dataUpload.Status.Phase, backup.Name)
+				return started, finished, fmt.Errorf("dataUpload failed. Name: %s Status: %s, backup: %s", object.Name, object.Status.Phase, backup.Name)
 			case veleroapiv2alpha1.DataUploadPhaseInProgress, veleroapiv2alpha1.DataUploadPhaseNew:
 				return started, finished, nil
 			}
 		}
 	}
 
-	if completed == nodes {
-		log.Infof("dataUpload process is done. Name: %s, started: %v, finished: %v, completed: %d/%d", backup.Name, started, finished, completed, nodes)
-		finished = true
-	}
-
-	log.Debugf("dataUpload process is not finished yet for backup %s, started: %v, finished: %v, completed: %d/%d", backup.Name, started, finished, completed, nodes)
 	return started, finished, nil
 }
 
 // WaitForDataUpload waits for the dataUpload to be completed.
 // It returns true if the dataUpload was completed successfully, false otherwise.
 // The function supports blacklisting of DataUpload objects to exclude them from processing.
-func WaitForDataUpload(ctx context.Context, client crclient.Client, log logrus.FieldLogger, backup *veleroapiv1.Backup, dataUploadTimeout time.Duration, dataUploadCheckPace time.Duration, ha bool, duBlackList blackList) (bool, error) {
+func WaitForDataUpload(ctx context.Context, client crclient.Client, log logrus.FieldLogger, backup *veleroapiv1.Backup, dataUploadTimeout time.Duration, dataUploadCheckPace time.Duration, duBlackList *BlackList) (bool, error) {
 	if dataUploadTimeout == 0 {
 		dataUploadTimeout = defaultPVBackupTimeout
 	}
@@ -151,8 +149,7 @@ func WaitForDataUpload(ctx context.Context, client crclient.Client, log logrus.F
 	defer cancel()
 
 	err := wait.PollUntilContextCancel(waitCtx, dataUploadCheckPace, true, func(ctx context.Context) (bool, error) {
-		log.Info("waiting for dataUpload to be completed...")
-		_, duFinished, err := CheckDataUpload(ctx, client, log, backup, ha, duBlackList)
+		_, duFinished, err := CheckDataUpload(ctx, client, log, backup, duBlackList)
 		if err != nil {
 			return false, err
 		}
@@ -177,13 +174,11 @@ func WaitForDataUpload(ctx context.Context, client crclient.Client, log logrus.F
 // The second return value is true if the volumeSnapshotContent is finished, false otherwise.
 // The third return value is an error if the volumeSnapshotContent is failed, nil otherwise.
 // The function supports blacklisting of VolumeSnapshotContent objects to exclude them from processing.
-func CheckVolumeSnapshotContent(ctx context.Context, c crclient.Client, log logrus.FieldLogger, backup *veleroapiv1.Backup, ha bool, hcp *hyperv1.HostedControlPlane, pvBackupStarted *bool, pvBackupFinished *bool, vscBlackList blackList) (bool, bool, error) {
+func CheckVolumeSnapshotContent(ctx context.Context, c crclient.Client, log logrus.FieldLogger, backup *veleroapiv1.Backup, hcp *hyperv1.HostedControlPlane, pvBackupStarted *bool, pvBackupFinished *bool, vscBlackList *BlackList) (bool, bool, error) {
 	var (
-		started   = *pvBackupStarted
-		finished  = false
-		completed = 0
-		nodes     = 1
-		relevant  = 0
+		started  = *pvBackupStarted
+		finished = false
+		relevant = 0
 	)
 
 	if *pvBackupFinished {
@@ -195,50 +190,52 @@ func CheckVolumeSnapshotContent(ctx context.Context, c crclient.Client, log logr
 		return started, finished, fmt.Errorf("failed to get volumeSnapshotContentList: %w", err)
 	}
 
-	if ha {
-		log.Debugf("HA mode detected, setting nodes to 3")
-		nodes = 3
-	}
-
 	for _, vsc := range volumeSnapshotContentSlice.Items {
-		if vsc.Spec.VolumeSnapshotRef.Namespace == hcp.Namespace && (vsc.Status != nil && vsc.Status.ReadyToUse != nil) {
-			if vscBlackList.IsBlackListed(&vsc, log) {
-				log.Debugf("volumeSnapshotContent found but blacklisted. Name: %s", vsc.Name)
-				continue
-			}
-
-			object := vsc.DeepCopy()
-			if err := c.Get(ctx, types.NamespacedName{Name: vsc.Name}, object); err != nil {
+		object := &snapshotv1.VolumeSnapshotContent{}
+		if err := c.Get(ctx, types.NamespacedName{Name: vsc.Name, Namespace: vsc.Namespace}, object); err != nil {
+			if !apierrors.IsNotFound(err) {
 				return started, finished, fmt.Errorf("failed to get volumeSnapshotContent: %w", err)
+			}
+			continue
+		}
+
+		if object.Spec.VolumeSnapshotRef.Namespace == hcp.Namespace && (object.Status != nil && object.Status.ReadyToUse != nil) {
+			if vscBlackList.IsBlackListed(object, log) {
+				log.Infof("volumeSnapshotContent found but blacklisted. Name: %s", object.Name)
+				continue
 			}
 
 			started = true
 			if !*object.Status.ReadyToUse {
 				relevant++
 				*pvBackupStarted = true
-				log.Debugf("volumeSnapshotContent found. Waiting for completion... ReadyToUse: %v Name: %s Total Relevant: %d/%d", *object.Status.ReadyToUse, vsc.Name, relevant, nodes)
+				log.Infof("volumeSnapshotContent found. Waiting for completion... ReadyToUse: %v Name: %s Total Relevant: %d", *object.Status.ReadyToUse, object.Name, relevant)
 			}
 
 			if *object.Status.ReadyToUse {
-				completed++
-				log.Infof("volumeSnapshotContent details. Name: %s ReadyToUse: %v Total: %d/%d, backup: %s", vsc.Name, *object.Status.ReadyToUse, completed, nodes, backup.Name)
+				finished = true
+				VSCStatus[object.Name] = true
+				vscBlackList.AddObject(object)
+				log.Infof("volumeSnapshotContent finished details. Name: %s ReadyToUse: %v Total: %d, backup: %s", object.Name, *object.Status.ReadyToUse, relevant, backup.Name)
+				return started, finished, nil
 			}
 		}
 	}
 
-	if completed == nodes {
-		log.Infof("volumeSnapshotContent process is done. Name: %s, started: %v, finished: %v, completed: %d/%d", backup.Name, started, finished, completed, nodes)
+	if relevant == 0 {
+		log.Infof("No volumeSnapshotContent found for backup %s", backup.Name)
+		started = true
 		finished = true
+		return started, finished, nil
 	}
 
-	log.Debugf("volumeSnapshotContent process is not finished yet for backup %s, started: %v, finished: %v, completed: %d/%d", backup.Name, started, finished, completed, nodes)
 	return started, finished, nil
 }
 
 // WaitForVolumeSnapshotContent waits for the volumeSnapshotContent to be completed.
 // It returns true if the volumeSnapshotContent was completed successfully, false otherwise.
 // The function supports blacklisting of VolumeSnapshotContent objects to exclude them from processing.
-func WaitForVolumeSnapshotContent(ctx context.Context, c crclient.Client, log logrus.FieldLogger, backup *veleroapiv1.Backup, vscTimeout time.Duration, vscCheckPace time.Duration, ha bool, hcp *hyperv1.HostedControlPlane, pvBackupStarted *bool, pvBackupFinished *bool, vscBlackList blackList) (bool, error) {
+func WaitForVolumeSnapshotContent(ctx context.Context, c crclient.Client, log logrus.FieldLogger, backup *veleroapiv1.Backup, vscTimeout time.Duration, vscCheckPace time.Duration, hcp *hyperv1.HostedControlPlane, pvBackupStarted *bool, pvBackupFinished *bool, vscBlackList *BlackList) (bool, error) {
 	if vscTimeout == 0 {
 		vscTimeout = defaultPVBackupTimeout
 	}
@@ -251,8 +248,7 @@ func WaitForVolumeSnapshotContent(ctx context.Context, c crclient.Client, log lo
 	defer cancel()
 
 	err := wait.PollUntilContextCancel(waitCtx, vscCheckPace, true, func(ctx context.Context) (bool, error) {
-		log.Info("waiting for volumeSnapshotContent to be completed...")
-		_, vscFinished, err := CheckVolumeSnapshotContent(ctx, c, log, backup, ha, hcp, pvBackupStarted, pvBackupFinished, vscBlackList)
+		_, vscFinished, err := CheckVolumeSnapshotContent(ctx, c, log, backup, hcp, pvBackupStarted, pvBackupFinished, vscBlackList)
 		if err != nil {
 			return false, err
 		}
@@ -276,13 +272,11 @@ func WaitForVolumeSnapshotContent(ctx context.Context, c crclient.Client, log lo
 // The second return value is true if the volumeSnapshot is finished, false otherwise.
 // The third return value is an error if the volumeSnapshot is failed, nil otherwise.
 // The function supports blacklisting of VolumeSnapshot objects to exclude them from processing.
-func CheckVolumeSnapshot(ctx context.Context, c crclient.Client, log logrus.FieldLogger, backup *veleroapiv1.Backup, ha bool, hcp *hyperv1.HostedControlPlane, pvBackupStarted *bool, pvBackupFinished *bool, vsBlackList blackList) (bool, bool, error) {
+func CheckVolumeSnapshot(ctx context.Context, c crclient.Client, log logrus.FieldLogger, backup *veleroapiv1.Backup, hcp *hyperv1.HostedControlPlane, pvBackupStarted *bool, pvBackupFinished *bool, vsBlackList *BlackList) (bool, bool, error) {
 	var (
-		started   = *pvBackupStarted
-		finished  = false
-		completed = 0
-		nodes     = 1
-		relevant  = 0
+		started  = *pvBackupStarted
+		finished = false
+		relevant = 0
 	)
 
 	if *pvBackupFinished {
@@ -294,46 +288,49 @@ func CheckVolumeSnapshot(ctx context.Context, c crclient.Client, log logrus.Fiel
 		return started, finished, fmt.Errorf("failed to get volumeSnapshotList: %w", err)
 	}
 
-	if ha {
-		nodes = 3
-	}
-
 	for _, vs := range volumeSnapshotSlice.Items {
-		if vs.Labels[veleroapiv1.BackupNameLabel] == backup.Name && (vs.Status != nil && vs.Status.ReadyToUse != nil) {
-			if vsBlackList.IsBlackListed(&vs, log) {
-				log.Debugf("volumeSnapshot found but blacklisted. Name: %s", vs.Name)
+		object := &snapshotv1.VolumeSnapshot{}
+		if err := c.Get(ctx, types.NamespacedName{Name: vs.Name, Namespace: vs.Namespace}, object); err != nil {
+			return started, finished, fmt.Errorf("failed to get volumeSnapshot: %w", err)
+		}
+
+		if object.Labels[veleroapiv1.BackupNameLabel] == backup.Name && (object.Status != nil && object.Status.ReadyToUse != nil) {
+			if vsBlackList.IsBlackListed(object, log) {
+				log.Infof("volumeSnapshot found but blacklisted. Name: %s", object.Name)
 				continue
 			}
 
-			object := vs.DeepCopy()
-			if err := c.Get(ctx, types.NamespacedName{Name: vs.Name, Namespace: vs.Namespace}, object); err != nil {
-				return started, finished, fmt.Errorf("failed to get volumeSnapshot: %w", err)
-			}
-			relevant++
 			started = true
-			*pvBackupStarted = true
-			log.Debugf("volumeSnapshot found. Waiting for completion... ReadyToUse: %v Name: %s Total Relevant: %d/%d", *object.Status.ReadyToUse, vs.Name, relevant, nodes)
+			if !*object.Status.ReadyToUse {
+				relevant++
+				*pvBackupStarted = true
+				log.Infof("volumeSnapshot found. Waiting for completion... ReadyToUse: %v Name: %s Total Relevant: %d", *object.Status.ReadyToUse, vs.Name, relevant)
+			}
 
 			if *object.Status.ReadyToUse {
-				completed++
-				log.Infof("volumeSnapshot details. Name: %s ReadyToUse: %v Total: %d/%d, backup: %s", vs.Name, *object.Status.ReadyToUse, completed, nodes, backup.Name)
+				finished = true
+				VSStatus[vs.Name] = true
+				vsBlackList.AddObject(object)
+				log.Infof("volumeSnapshot finished details. Name: %s ReadyToUse: %v Total: %d, backup: %s", vs.Name, *object.Status.ReadyToUse, relevant, backup.Name)
+				return started, finished, nil
 			}
 		}
 	}
 
-	if completed == nodes {
-		log.Infof("volumeSnapshot is done. Name: %s", backup.Name)
-		return true, true, nil
+	if relevant == 0 {
+		log.Infof("No volumeSnapshot found for backup %s", backup.Name)
+		started = true
+		finished = true
+		return started, finished, nil
 	}
 
-	log.Debugf("volumeSnapshot not finished yet for backup. Name: %s Started: %v Finished: %v Completed: %d/%d", backup.Name, started, finished, completed, nodes)
 	return started, finished, nil
 }
 
 // WaitForVolumeSnapshot waits for the volumeSnapshot to be completed.
 // It returns true if the volumeSnapshot was completed successfully, false otherwise.
 // The function supports blacklisting of VolumeSnapshot objects to exclude them from processing.
-func WaitForVolumeSnapshot(ctx context.Context, c crclient.Client, log logrus.FieldLogger, backup *veleroapiv1.Backup, vsTimeout time.Duration, vsCheckPace time.Duration, ha bool, hcp *hyperv1.HostedControlPlane, pvBackupStarted *bool, pvBackupFinished *bool, vsBlackList blackList) (bool, error) {
+func WaitForVolumeSnapshot(ctx context.Context, c crclient.Client, log logrus.FieldLogger, backup *veleroapiv1.Backup, vsTimeout time.Duration, vsCheckPace time.Duration, hcp *hyperv1.HostedControlPlane, pvBackupStarted *bool, pvBackupFinished *bool, vsBlackList *BlackList) (bool, error) {
 	if vsTimeout == 0 {
 		vsTimeout = defaultPVBackupTimeout
 	}
@@ -346,8 +343,7 @@ func WaitForVolumeSnapshot(ctx context.Context, c crclient.Client, log logrus.Fi
 	defer cancel()
 
 	err := wait.PollUntilContextCancel(waitCtx, vsCheckPace, true, func(ctx context.Context) (bool, error) {
-		log.Info("waiting for volumeSnapshot to be completed...")
-		_, vsFinished, err := CheckVolumeSnapshot(ctx, c, log, backup, ha, hcp, pvBackupStarted, pvBackupFinished, vsBlackList)
+		_, vsFinished, err := CheckVolumeSnapshot(ctx, c, log, backup, hcp, pvBackupStarted, pvBackupFinished, vsBlackList)
 		if err != nil {
 			return false, err
 		}
@@ -750,7 +746,7 @@ func CRDExists(ctx context.Context, crdName string, c crclient.Client) (bool, er
 	return true, nil
 }
 
-func ReconcileVolumeSnapshotContent(ctx context.Context, hcp *hyperv1.HostedControlPlane, c crclient.Client, log logrus.FieldLogger, backup *veleroapiv1.Backup, ha bool, dataUploadTimeout time.Duration, dataUploadCheckPace time.Duration, pvBackupStarted *bool, pvBackupFinished *bool) (bool, error) {
+func ReconcileVolumeSnapshotContent(ctx context.Context, hcp *hyperv1.HostedControlPlane, c crclient.Client, log logrus.FieldLogger, backup *veleroapiv1.Backup, dataUploadTimeout time.Duration, dataUploadCheckPace time.Duration, pvBackupStarted *bool, pvBackupFinished *bool, vscBlackList *BlackList) (bool, error) {
 	var (
 		vscFinished = false
 	)
@@ -759,30 +755,13 @@ func ReconcileVolumeSnapshotContent(ctx context.Context, hcp *hyperv1.HostedCont
 		return true, nil
 	}
 
-	if vscBlackList.kind == "" {
-		var err error
-
-		volumeSnapshotContentSlice := &snapshotv1.VolumeSnapshotContentList{}
-		if err := c.List(ctx, volumeSnapshotContentSlice); err != nil {
-			if !apierrors.IsNotFound(err) {
-				return false, fmt.Errorf("failed to get volumeSnapshotContentList: %w", err)
-			}
-			return false, nil
-		}
-
-		vscBlackList, err = NewBlackList("VolumeSnapshotContent", volumeSnapshotContentSlice, log)
-		if err != nil {
-			log.Errorf("Error creating volumeSnapshotContent blacklist: %v", err)
-		}
-	}
-
 	log.Debug("Reconciling VolumeSnapshotContent")
 	switch {
 	case !*pvBackupStarted:
 		var err error
 
 		log.Debug("Checking if VolumeSnapshotContent exists")
-		*pvBackupStarted, vscFinished, err = CheckVolumeSnapshotContent(ctx, c, log, backup, ha, hcp, pvBackupStarted, pvBackupFinished, vscBlackList)
+		*pvBackupStarted, vscFinished, err = CheckVolumeSnapshotContent(ctx, c, log, backup, hcp, pvBackupStarted, pvBackupFinished, vscBlackList)
 		if err != nil {
 			return false, err
 		}
@@ -791,7 +770,7 @@ func ReconcileVolumeSnapshotContent(ctx context.Context, hcp *hyperv1.HostedCont
 		var err error
 
 		log.Debug("VolumeSnapshotContent exists, waiting for it to be completed")
-		vscFinished, err = WaitForVolumeSnapshotContent(ctx, c, log, backup, dataUploadTimeout, dataUploadCheckPace, ha, hcp, pvBackupStarted, pvBackupFinished, vscBlackList)
+		vscFinished, err = WaitForVolumeSnapshotContent(ctx, c, log, backup, dataUploadTimeout, dataUploadCheckPace, hcp, pvBackupStarted, pvBackupFinished, vscBlackList)
 		if err != nil {
 			return false, err
 		}
@@ -799,7 +778,7 @@ func ReconcileVolumeSnapshotContent(ctx context.Context, hcp *hyperv1.HostedCont
 	return vscFinished, nil
 }
 
-func ReconcileVolumeSnapshots(ctx context.Context, hcp *hyperv1.HostedControlPlane, c crclient.Client, log logrus.FieldLogger, backup *veleroapiv1.Backup, ha bool, dataUploadTimeout time.Duration, dataUploadCheckPace time.Duration, pvBackupStarted *bool, pvBackupFinished *bool) (bool, error) {
+func ReconcileVolumeSnapshots(ctx context.Context, hcp *hyperv1.HostedControlPlane, c crclient.Client, log logrus.FieldLogger, backup *veleroapiv1.Backup, dataUploadTimeout time.Duration, dataUploadCheckPace time.Duration, pvBackupStarted *bool, pvBackupFinished *bool, vsBlackList *BlackList) (bool, error) {
 	var (
 		vsFinished = false
 	)
@@ -808,30 +787,13 @@ func ReconcileVolumeSnapshots(ctx context.Context, hcp *hyperv1.HostedControlPla
 		return true, nil
 	}
 
-	if vsBlackList.kind == "" {
-		var err error
-
-		volumeSnapshotSlice := &snapshotv1.VolumeSnapshotList{}
-		if err := c.List(ctx, volumeSnapshotSlice, crclient.InNamespace(hcp.Namespace)); err != nil {
-			if !apierrors.IsNotFound(err) {
-				return false, fmt.Errorf("failed to get volumeSnapshotList: %w", err)
-			}
-			return false, nil
-		}
-
-		vsBlackList, err = NewBlackList("VolumeSnapshot", volumeSnapshotSlice, log)
-		if err != nil {
-			log.Errorf("Error creating volumeSnapshot blacklist: %v", err)
-		}
-	}
-
 	log.Debug("Reconciling VolumeSnapshots")
 	switch {
 	case !*pvBackupStarted:
 		var err error
 
 		log.Debug("Checking if VolumeSnapshot exists")
-		*pvBackupStarted, vsFinished, err = CheckVolumeSnapshot(ctx, c, log, backup, ha, hcp, pvBackupStarted, pvBackupFinished, vsBlackList)
+		*pvBackupStarted, vsFinished, err = CheckVolumeSnapshot(ctx, c, log, backup, hcp, pvBackupStarted, pvBackupFinished, vsBlackList)
 		if err != nil {
 			return false, err
 		}
@@ -840,7 +802,7 @@ func ReconcileVolumeSnapshots(ctx context.Context, hcp *hyperv1.HostedControlPla
 		var err error
 
 		log.Debug("VolumeSnapshot exists, waiting for it to be completed")
-		vsFinished, err = WaitForVolumeSnapshot(ctx, c, log, backup, dataUploadTimeout, dataUploadCheckPace, ha, hcp, pvBackupStarted, pvBackupFinished, vsBlackList)
+		vsFinished, err = WaitForVolumeSnapshot(ctx, c, log, backup, dataUploadTimeout, dataUploadCheckPace, hcp, pvBackupStarted, pvBackupFinished, vsBlackList)
 		if err != nil {
 			return false, err
 		}
@@ -849,7 +811,7 @@ func ReconcileVolumeSnapshots(ctx context.Context, hcp *hyperv1.HostedControlPla
 	return vsFinished, nil
 }
 
-func ReconcileDataUpload(ctx context.Context, c crclient.Client, log logrus.FieldLogger, backup *veleroapiv1.Backup, ha bool, dataUploadTimeout time.Duration, dataUploadCheckPace time.Duration, duStarted *bool, duFinished *bool) (bool, error) {
+func ReconcileDataUpload(ctx context.Context, c crclient.Client, log logrus.FieldLogger, backup *veleroapiv1.Backup, dataUploadTimeout time.Duration, dataUploadCheckPace time.Duration, duStarted *bool, duFinished *bool, duBlackList *BlackList) (bool, error) {
 	var (
 		finished = false
 	)
@@ -858,29 +820,12 @@ func ReconcileDataUpload(ctx context.Context, c crclient.Client, log logrus.Fiel
 		return true, nil
 	}
 
-	if duBlackList.kind == "" {
-		var err error
-
-		dataUploadSlice := &veleroapiv2alpha1.DataUploadList{}
-		if err := c.List(ctx, dataUploadSlice, crclient.InNamespace(backup.Namespace)); err != nil {
-			if !apierrors.IsNotFound(err) {
-				return false, fmt.Errorf("failed to get dataUploadList: %w", err)
-			}
-			return false, nil
-		}
-
-		duBlackList, err = NewBlackList("DataUpload", dataUploadSlice, log)
-		if err != nil {
-			log.Errorf("Error creating dataUpload blacklist: %v", err)
-		}
-	}
-
 	switch {
 	case !*duStarted:
 		var err error
 
 		log.Debug("Checking if DataUpload exists")
-		*duStarted, finished, err = CheckDataUpload(ctx, c, log, backup, ha, duBlackList)
+		*duStarted, finished, err = CheckDataUpload(ctx, c, log, backup, duBlackList)
 		if err != nil {
 			return false, err
 		}
@@ -892,7 +837,7 @@ func ReconcileDataUpload(ctx context.Context, c crclient.Client, log logrus.Fiel
 		var err error
 
 		log.Debug("DataUpload exists, waiting for it to be completed")
-		finished, err = WaitForDataUpload(ctx, c, log, backup, dataUploadTimeout, dataUploadCheckPace, ha, duBlackList)
+		finished, err = WaitForDataUpload(ctx, c, log, backup, dataUploadTimeout, dataUploadCheckPace, duBlackList)
 		if err != nil {
 			return false, err
 		}
@@ -905,7 +850,7 @@ func ReconcileDataUpload(ctx context.Context, c crclient.Client, log logrus.Fiel
 	return finished, nil
 }
 
-func NewBlackList(kind string, objects any, log logrus.FieldLogger) (blackList, error) {
+func NewBlackList(kind string, objects any, log logrus.FieldLogger) (BlackList, error) {
 	switch kind {
 	case "DataUpload":
 		if dataUploadList, ok := objects.(*veleroapiv2alpha1.DataUploadList); ok {
@@ -913,68 +858,68 @@ func NewBlackList(kind string, objects any, log logrus.FieldLogger) (blackList, 
 			for i, item := range dataUploadList.Items {
 				duObjects[i] = &item
 			}
-			return blackList{
-				kind:      kind,
-				duObjects: duObjects,
+			return BlackList{
+				Kind:      kind,
+				DUObjects: duObjects,
 			}, nil
 		}
-		return blackList{}, fmt.Errorf("invalid object type for DataUpload blacklist: expected DataUpload list, got %T", objects)
+		return BlackList{}, fmt.Errorf("invalid object type for DataUpload blacklist: expected DataUpload list, got %T", objects)
 	case "VolumeSnapshotContent":
 		if vscList, ok := objects.(*snapshotv1.VolumeSnapshotContentList); ok {
 			vscObjects := make([]*snapshotv1.VolumeSnapshotContent, len(vscList.Items))
 			for i, item := range vscList.Items {
 				vscObjects[i] = &item
 			}
-			return blackList{
-				kind:       kind,
-				vscObjects: vscObjects,
+			return BlackList{
+				Kind:       kind,
+				VSCObjects: vscObjects,
 			}, nil
 		}
-		return blackList{}, fmt.Errorf("invalid object type for VolumeSnapshotContent blacklist: expected VolumeSnapshotContent list, got %T", objects)
+		return BlackList{}, fmt.Errorf("invalid object type for VolumeSnapshotContent blacklist: expected VolumeSnapshotContent list, got %T", objects)
 	case "VolumeSnapshot":
 		if vsList, ok := objects.(*snapshotv1.VolumeSnapshotList); ok {
 			vsObjects := make([]*snapshotv1.VolumeSnapshot, len(vsList.Items))
 			for i, item := range vsList.Items {
 				vsObjects[i] = &item
 			}
-			return blackList{
-				kind:      kind,
-				vsObjects: vsObjects,
+			return BlackList{
+				Kind:      kind,
+				VSObjects: vsObjects,
 			}, nil
 		}
-		return blackList{}, fmt.Errorf("invalid object type for VolumeSnapshot blacklist: expected VolumeSnapshot list, got %T", objects)
+		return BlackList{}, fmt.Errorf("invalid object type for VolumeSnapshot blacklist: expected VolumeSnapshot list, got %T", objects)
 	}
-	return blackList{}, fmt.Errorf("unsupported resource type: %s (supported types: DataUpload, VolumeSnapshotContent, VolumeSnapshot)", kind)
+	return BlackList{}, fmt.Errorf("unsupported resource type: %s (supported types: DataUpload, VolumeSnapshotContent, VolumeSnapshot)", kind)
 }
 
-func (b *blackList) IsBlackListed(obj any, log logrus.FieldLogger) bool {
+func (b *BlackList) IsBlackListed(obj any, log logrus.FieldLogger) bool {
 	switch o := obj.(type) {
 	case *veleroapiv2alpha1.DataUpload:
-		if b.kind != "DataUpload" {
+		if b.Kind != "DataUpload" {
 			return false
 		}
 		log.Debugf("Checking if DataUpload %s/%s is blacklisted", o.Namespace, o.Name)
-		for _, du := range b.duObjects {
+		for _, du := range b.DUObjects {
 			if du.Name == o.Name && du.Namespace == o.Namespace {
 				return true
 			}
 		}
 	case *snapshotv1.VolumeSnapshotContent:
-		if b.kind != "VolumeSnapshotContent" {
+		if b.Kind != "VolumeSnapshotContent" {
 			return false
 		}
 		log.Debugf("Checking if VolumeSnapshotContent %s/%s is blacklisted", o.Namespace, o.Name)
-		for _, vsc := range b.vscObjects {
+		for _, vsc := range b.VSCObjects {
 			if vsc.Name == o.Name && vsc.Namespace == o.Namespace {
 				return true
 			}
 		}
 	case *snapshotv1.VolumeSnapshot:
-		if b.kind != "VolumeSnapshot" {
+		if b.Kind != "VolumeSnapshot" {
 			return false
 		}
 		log.Debugf("Checking if VolumeSnapshot %s/%s is blacklisted", o.Namespace, o.Name)
-		for _, vs := range b.vsObjects {
+		for _, vs := range b.VSObjects {
 			if vs.Name == o.Name && vs.Namespace == o.Namespace {
 				return true
 			}
@@ -984,4 +929,69 @@ func (b *blackList) IsBlackListed(obj any, log logrus.FieldLogger) bool {
 		return false
 	}
 	return false
+}
+
+func (b *BlackList) AddObject(obj any) {
+	switch o := obj.(type) {
+	case *veleroapiv2alpha1.DataUpload:
+		b.DUObjects = append(b.DUObjects, o)
+	case *snapshotv1.VolumeSnapshotContent:
+		b.VSCObjects = append(b.VSCObjects, o)
+	case *snapshotv1.VolumeSnapshot:
+		b.VSObjects = append(b.VSObjects, o)
+	}
+}
+
+func InitializeBlacklists(ctx context.Context, c crclient.Client, log logrus.FieldLogger, hcp *hyperv1.HostedControlPlane, backup *veleroapiv1.Backup) (BlackList, BlackList, BlackList, error) {
+	var (
+		vscBlackList, vsBlackList, duBlackList BlackList
+		err                                    error
+	)
+
+	volumeSnapshotContentSlice := &snapshotv1.VolumeSnapshotContentList{}
+	if err := c.List(ctx, volumeSnapshotContentSlice); err != nil {
+		if !apierrors.IsNotFound(err) {
+			return BlackList{}, BlackList{}, BlackList{}, fmt.Errorf("failed to get volumeSnapshotContentList: %w", err)
+		}
+	}
+
+	vscBlackList, err = NewBlackList("VolumeSnapshotContent", volumeSnapshotContentSlice, log)
+	if err != nil {
+		log.Errorf("Error creating volumeSnapshotContent blacklist: %v", err)
+	}
+
+	volumeSnapshotSlice := &snapshotv1.VolumeSnapshotList{}
+	if err := c.List(ctx, volumeSnapshotSlice, crclient.InNamespace(hcp.Namespace)); err != nil {
+		if !apierrors.IsNotFound(err) {
+			return BlackList{}, BlackList{}, BlackList{}, fmt.Errorf("failed to get volumeSnapshotList: %w", err)
+		}
+	}
+
+	vsBlackList, err = NewBlackList("VolumeSnapshot", volumeSnapshotSlice, log)
+	if err != nil {
+		log.Errorf("Error creating volumeSnapshot blacklist: %v", err)
+	}
+
+	dataUploadSlice := &veleroapiv2alpha1.DataUploadList{}
+	if err := c.List(ctx, dataUploadSlice, crclient.InNamespace(backup.Namespace)); err != nil {
+		if !apierrors.IsNotFound(err) {
+			return BlackList{}, BlackList{}, BlackList{}, fmt.Errorf("failed to get dataUploadList: %w", err)
+		}
+	}
+
+	duBlackList, err = NewBlackList("DataUpload", dataUploadSlice, log)
+	if err != nil {
+		log.Errorf("Error creating dataUpload blacklist: %v", err)
+	}
+
+	return vscBlackList, vsBlackList, duBlackList, nil
+}
+
+func AllObjectsCompleted(status map[string]bool) bool {
+	for _, completed := range status {
+		if !completed {
+			return false
+		}
+	}
+	return true
 }
