@@ -2286,8 +2286,8 @@ func TestCheckVolumeSnapshot(t *testing.T) {
 			},
 			pvBackupStarted:  false,
 			pvBackupFinished: false,
-			expectStarted:    false,
-			expectFinished:   false,
+			expectStarted:    true,
+			expectFinished:   true,
 			expectError:      false,
 		},
 		{
@@ -2397,8 +2397,8 @@ func TestCheckVolumeSnapshot(t *testing.T) {
 			},
 			pvBackupStarted:  false,
 			pvBackupFinished: false,
-			expectStarted:    false,
-			expectFinished:   false,
+			expectStarted:    true,
+			expectFinished:   true,
 			expectError:      false,
 		},
 	}
@@ -2534,8 +2534,8 @@ func TestWaitForVolumeSnapshotContent(t *testing.T) {
 			pvBackupFinished: false,
 			vscTimeout:       5 * time.Second,
 			vscCheckPace:     100 * time.Millisecond,
-			expectSuccess:    false,
-			expectError:      true,
+			expectSuccess:    true,
+			expectError:      false,
 		},
 		{
 			name: "Already finished",
@@ -2792,8 +2792,8 @@ func TestCheckVolumeSnapshotContent(t *testing.T) {
 			},
 			pvBackupStarted:  false,
 			pvBackupFinished: false,
-			expectStarted:    false,
-			expectFinished:   false,
+			expectStarted:    true,
+			expectFinished:   true,
 			expectError:      false,
 		},
 		{
@@ -2883,8 +2883,8 @@ func TestCheckVolumeSnapshotContent(t *testing.T) {
 			},
 			pvBackupStarted:  false,
 			pvBackupFinished: false,
-			expectStarted:    false,
-			expectFinished:   false,
+			expectStarted:    true,
+			expectFinished:   true,
 			expectError:      false,
 		},
 		{
@@ -2918,8 +2918,8 @@ func TestCheckVolumeSnapshotContent(t *testing.T) {
 			},
 			pvBackupStarted:  false,
 			pvBackupFinished: false,
-			expectStarted:    false,
-			expectFinished:   false,
+			expectStarted:    true,
+			expectFinished:   true,
 			expectError:      false,
 		},
 		{
@@ -3237,8 +3237,8 @@ func TestReconcileDataUpload(t *testing.T) {
 			duFinished:          false,
 			dataUploadTimeout:   5 * time.Second,
 			dataUploadCheckPace: 500 * time.Millisecond,
-			expectSuccess:       true,
-			expectError:         false,
+			expectSuccess:       false,
+			expectError:         true,
 		},
 	}
 
@@ -3300,7 +3300,7 @@ func TestReconcileVolumeSnapshotContent(t *testing.T) {
 			pvBackupFinished:    false,
 			dataUploadTimeout:   5 * time.Second,
 			dataUploadCheckPace: 500 * time.Millisecond,
-			expectSuccess:       false,
+			expectSuccess:       true,
 			expectError:         false,
 		},
 		{
@@ -3317,12 +3317,20 @@ func TestReconcileVolumeSnapshotContent(t *testing.T) {
 					Namespace: "test-namespace-test-hc",
 				},
 			},
+
 			volumeSnapshotContents: []snapshotv1.VolumeSnapshotContent{
 				{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "test-vsc-1",
 					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{},
+					Spec: snapshotv1.VolumeSnapshotContentSpec{
+						VolumeSnapshotRef: corev1.ObjectReference{
+							Namespace: "test-namespace-test-hc",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotContentStatus{
+						ReadyToUse: ptr.To(false),
+					},
 				},
 			},
 			pvBackupStarted:     true,
@@ -3411,7 +3419,7 @@ func TestReconcileVolumeSnapshots(t *testing.T) {
 		expectError         bool
 	}{
 		{
-			name: "Volume snapshot content not found",
+			name: "Volume snapshot not found",
 			backup: &veleroapiv1.Backup{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-backup",
@@ -3429,11 +3437,11 @@ func TestReconcileVolumeSnapshots(t *testing.T) {
 			pvBackupFinished:    false,
 			dataUploadTimeout:   5 * time.Second,
 			dataUploadCheckPace: 500 * time.Millisecond,
-			expectSuccess:       false,
+			expectSuccess:       true,
 			expectError:         false,
 		},
 		{
-			name: "Volume snapshot content in progress",
+			name: "Volume snapshot in progress",
 			backup: &veleroapiv1.Backup{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-backup",
@@ -3449,7 +3457,14 @@ func TestReconcileVolumeSnapshots(t *testing.T) {
 			volumeSnapshots: []snapshotv1.VolumeSnapshot{
 				{
 					ObjectMeta: metav1.ObjectMeta{
-						Name: "test-vs-1",
+						Name:      "test-vs-1",
+						Namespace: "test-namespace-test-hc",
+						Labels: map[string]string{
+							veleroapiv1.BackupNameLabel: "test-backup",
+						},
+					},
+					Status: &snapshotv1.VolumeSnapshotStatus{
+						ReadyToUse: ptr.To(false),
 					},
 				},
 			},
