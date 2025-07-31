@@ -1315,8 +1315,7 @@ func TestWaitForDataUpload(t *testing.T) {
 		name                string
 		backup              *veleroapiv1.Backup
 		dataUploads         []veleroapiv2alpha1.DataUpload
-		duBlackList         blackList
-		ha                  bool
+		duBlackList         BlackList
 		dataUploadTimeout   time.Duration
 		dataUploadCheckPace time.Duration
 		expectSuccess       bool
@@ -1345,7 +1344,6 @@ func TestWaitForDataUpload(t *testing.T) {
 					},
 				},
 			},
-			ha:                  false,
 			dataUploadTimeout:   200 * time.Millisecond,
 			dataUploadCheckPace: 50 * time.Millisecond,
 			expectSuccess:       false,
@@ -1374,62 +1372,6 @@ func TestWaitForDataUpload(t *testing.T) {
 					},
 				},
 			},
-			ha:                  false,
-			dataUploadTimeout:   5 * time.Second,
-			dataUploadCheckPace: 100 * time.Millisecond,
-			expectSuccess:       true,
-			expectError:         false,
-		},
-		{
-			name: "HA data upload completed",
-			backup: &veleroapiv1.Backup{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-backup",
-					Namespace: "velero",
-				},
-			},
-			dataUploads: []veleroapiv2alpha1.DataUpload{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "test-du-1",
-						GenerateName: "test-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "test-du-2",
-						GenerateName: "test-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "test-du-3",
-						GenerateName: "test-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
-					},
-				},
-			},
-			ha:                  true,
 			dataUploadTimeout:   5 * time.Second,
 			dataUploadCheckPace: 100 * time.Millisecond,
 			expectSuccess:       true,
@@ -1458,38 +1400,12 @@ func TestWaitForDataUpload(t *testing.T) {
 					},
 				},
 			},
-			ha:                  false,
 			dataUploadTimeout:   5 * time.Second,
 			dataUploadCheckPace: 100 * time.Millisecond,
 			expectSuccess:       false,
 			expectError:         true,
 		},
-		{
-			name: "HA data upload waiting for more uploads",
-			backup: &veleroapiv1.Backup{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-backup",
-					Namespace: "velero",
-				},
-			},
-			dataUploads: []veleroapiv2alpha1.DataUpload{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "test-du-1",
-						GenerateName: "test-backup-",
-						Namespace:    "velero",
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
-					},
-				},
-			},
-			ha:                  true,
-			dataUploadTimeout:   5 * time.Second,
-			dataUploadCheckPace: 100 * time.Millisecond,
-			expectSuccess:       false,
-			expectError:         true,
-		},
+
 		{
 			name: "Single node with blacklisted DataUpload",
 			backup: &veleroapiv1.Backup{
@@ -1526,7 +1442,6 @@ func TestWaitForDataUpload(t *testing.T) {
 					},
 				},
 			},
-			ha:                  false,
 			duBlackList:         dummyDUBlacklist(),
 			dataUploadTimeout:   200 * time.Millisecond,
 			dataUploadCheckPace: 50 * time.Millisecond,
@@ -1582,94 +1497,11 @@ func TestWaitForDataUpload(t *testing.T) {
 					},
 				},
 			},
-			ha:                  false,
 			duBlackList:         dummyDUBlacklist(),
 			dataUploadTimeout:   200 * time.Millisecond,
 			dataUploadCheckPace: 50 * time.Millisecond,
 			expectSuccess:       false,
 			expectError:         true,
-		},
-		{
-			name: "HA with blacklisted data uploads",
-			backup: &veleroapiv1.Backup{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-backup",
-					Namespace: "velero",
-				},
-			},
-			dataUploads: []veleroapiv2alpha1.DataUpload{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "blacklisted-du",
-						GenerateName: "test-backup-hourly-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup-hourly",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "blacklisted-du-old",
-						GenerateName: "test-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "valid-du-1",
-						GenerateName: "test-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "valid-du-2",
-						GenerateName: "test-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "valid-du-3",
-						GenerateName: "test-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
-					},
-				},
-			},
-			ha:                  true,
-			duBlackList:         dummyDUBlacklist(),
-			dataUploadTimeout:   5 * time.Second,
-			dataUploadCheckPace: 100 * time.Millisecond,
-			expectSuccess:       true,
-			expectError:         false,
 		},
 		{
 			name: "Single node with unrelated data uploads",
@@ -1720,102 +1552,6 @@ func TestWaitForDataUpload(t *testing.T) {
 					},
 				},
 			},
-			ha:                  false,
-			duBlackList:         dummyDUBlacklist(),
-			dataUploadTimeout:   5 * time.Second,
-			dataUploadCheckPace: 100 * time.Millisecond,
-			expectSuccess:       true,
-			expectError:         false,
-		},
-		{
-			name: "HA with unrelated data uploads",
-			backup: &veleroapiv1.Backup{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-backup",
-					Namespace: "velero",
-				},
-			},
-			dataUploads: []veleroapiv2alpha1.DataUpload{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "blacklisted-du-1",
-						GenerateName: "other-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "other-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "blacklisted-du-2",
-						GenerateName: "another-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "another-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseFailed,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "blacklisted-du-3",
-						GenerateName: "another-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "another-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseInProgress,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "valid-du-1",
-						GenerateName: "test-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "valid-du-2",
-						GenerateName: "test-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "valid-du-3",
-						GenerateName: "test-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
-					},
-				},
-			},
-			ha:                  true,
 			duBlackList:         dummyDUBlacklist(),
 			dataUploadTimeout:   5 * time.Second,
 			dataUploadCheckPace: 100 * time.Millisecond,
@@ -1871,223 +1607,6 @@ func TestWaitForDataUpload(t *testing.T) {
 					},
 				},
 			},
-			ha:                  false,
-			duBlackList:         dummyDUBlacklist(),
-			dataUploadTimeout:   5 * time.Second,
-			dataUploadCheckPace: 100 * time.Millisecond,
-			expectSuccess:       true,
-			expectError:         false,
-		},
-		{
-			name: "HA with blacklisted, with unrelated and old dataupload. DU in progress",
-			backup: &veleroapiv1.Backup{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-backup",
-					Namespace: "velero",
-				},
-			},
-			dataUploads: []veleroapiv2alpha1.DataUpload{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "blacklisted-du-old",
-						GenerateName: "test-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "blacklisted-du-1",
-						GenerateName: "test-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "unrelated-du-1",
-						GenerateName: "other-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "other-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseFailed,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "unrelated-du-2",
-						GenerateName: "another-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "another-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseInProgress,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "valid-du-1",
-						GenerateName: "test-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "valid-du-2",
-						GenerateName: "test-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "valid-du-3",
-						GenerateName: "test-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseInProgress,
-					},
-				},
-			},
-			ha:                  true,
-			duBlackList:         dummyDUBlacklist(),
-			dataUploadTimeout:   200 * time.Millisecond,
-			dataUploadCheckPace: 50 * time.Millisecond,
-			expectSuccess:       false,
-			expectError:         true,
-		},
-		{
-			name: "HA with blacklisted, with unrelated and old dataupload. DU finished",
-			backup: &veleroapiv1.Backup{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-backup",
-					Namespace: "velero",
-				},
-			},
-			dataUploads: []veleroapiv2alpha1.DataUpload{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "blacklisted-du-old",
-						GenerateName: "test-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "blacklisted-du-1",
-						GenerateName: "test-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "unrelated-du-1",
-						GenerateName: "other-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "other-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseFailed,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "unrelated-du-2",
-						GenerateName: "another-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "another-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseInProgress,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "valid-du-1",
-						GenerateName: "test-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "valid-du-2",
-						GenerateName: "test-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "valid-du-3",
-						GenerateName: "test-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
-					},
-				},
-			},
-			ha:                  true,
 			duBlackList:         dummyDUBlacklist(),
 			dataUploadTimeout:   5 * time.Second,
 			dataUploadCheckPace: 100 * time.Millisecond,
@@ -2104,7 +1623,7 @@ func TestWaitForDataUpload(t *testing.T) {
 			}).Build()
 			log := logrus.New()
 
-			success, err := WaitForDataUpload(context.TODO(), client, log, tt.backup, tt.dataUploadTimeout, tt.dataUploadCheckPace, tt.ha, tt.duBlackList)
+			success, err := WaitForDataUpload(context.TODO(), client, log, tt.backup, tt.dataUploadTimeout, tt.dataUploadCheckPace, &tt.duBlackList)
 
 			if tt.expectError {
 				g.Expect(err).To(HaveOccurred())
@@ -2124,8 +1643,7 @@ func TestCheckDataUpload(t *testing.T) {
 		name           string
 		backup         *veleroapiv1.Backup
 		dataUploads    []veleroapiv2alpha1.DataUpload
-		duBlackList    blackList
-		ha             bool
+		duBlackList    BlackList
 		expectStarted  bool
 		expectFinished bool
 		expectError    bool
@@ -2139,7 +1657,6 @@ func TestCheckDataUpload(t *testing.T) {
 				},
 			},
 			dataUploads:    []veleroapiv2alpha1.DataUpload{},
-			ha:             false,
 			expectStarted:  false,
 			expectFinished: false,
 			expectError:    false,
@@ -2167,7 +1684,6 @@ func TestCheckDataUpload(t *testing.T) {
 					},
 				},
 			},
-			ha:             false,
 			expectStarted:  true,
 			expectFinished: false,
 			expectError:    false,
@@ -2195,116 +1711,8 @@ func TestCheckDataUpload(t *testing.T) {
 					},
 				},
 			},
-			ha:             false,
 			expectStarted:  true,
 			expectFinished: true,
-			expectError:    false,
-		},
-		{
-			name: "HA data upload completed",
-			backup: &veleroapiv1.Backup{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-backup",
-					Namespace: "velero",
-				},
-			},
-			dataUploads: []veleroapiv2alpha1.DataUpload{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "test-du-1",
-						GenerateName: "test-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "test-du-2",
-						GenerateName: "test-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "test-du-3",
-						GenerateName: "test-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
-					},
-				},
-			},
-			ha:             true,
-			expectStarted:  true,
-			expectFinished: true,
-			expectError:    false,
-		},
-		{
-			name: "Data upload failed",
-			backup: &veleroapiv1.Backup{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-backup",
-					Namespace: "velero",
-				},
-			},
-			dataUploads: []veleroapiv2alpha1.DataUpload{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "test-du-1",
-						GenerateName: "test-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseFailed,
-					},
-				},
-			},
-			ha:             false,
-			expectStarted:  true,
-			expectFinished: false,
-			expectError:    true,
-		},
-		{
-			name: "HA data upload waiting for more uploads",
-			backup: &veleroapiv1.Backup{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-backup",
-					Namespace: "velero",
-				},
-			},
-			dataUploads: []veleroapiv2alpha1.DataUpload{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "test-du-1",
-						GenerateName: "test-backup-",
-						Namespace:    "velero",
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
-					},
-				},
-			},
-			ha:             true,
-			expectStarted:  false,
-			expectFinished: false,
 			expectError:    false,
 		},
 		{
@@ -2343,7 +1751,6 @@ func TestCheckDataUpload(t *testing.T) {
 					},
 				},
 			},
-			ha:             false,
 			duBlackList:    dummyDUBlacklist(),
 			expectStarted:  true,
 			expectFinished: false,
@@ -2398,91 +1805,9 @@ func TestCheckDataUpload(t *testing.T) {
 					},
 				},
 			},
-			ha:             false,
 			duBlackList:    dummyDUBlacklist(),
 			expectStarted:  true,
 			expectFinished: false,
-			expectError:    false,
-		},
-		{
-			name: "HA with blacklisted data uploads",
-			backup: &veleroapiv1.Backup{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-backup",
-					Namespace: "velero",
-				},
-			},
-			dataUploads: []veleroapiv2alpha1.DataUpload{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "blacklisted-du",
-						GenerateName: "test-backup-hourly-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup-hourly",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "blacklisted-du-old",
-						GenerateName: "test-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "valid-du-1",
-						GenerateName: "test-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "valid-du-2",
-						GenerateName: "test-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "valid-du-3",
-						GenerateName: "test-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
-					},
-				},
-			},
-			ha:             true,
-			duBlackList:    dummyDUBlacklist(),
-			expectStarted:  true,
-			expectFinished: true,
 			expectError:    false,
 		},
 		{
@@ -2534,88 +1859,6 @@ func TestCheckDataUpload(t *testing.T) {
 					},
 				},
 			},
-			ha:             false,
-			duBlackList:    dummyDUBlacklist(),
-			expectStarted:  true,
-			expectFinished: true,
-			expectError:    false,
-		},
-		{
-			name: "HA with unrelated data uploads",
-			backup: &veleroapiv1.Backup{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-backup",
-					Namespace: "velero",
-				},
-			},
-			dataUploads: []veleroapiv2alpha1.DataUpload{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "blacklisted-du-1",
-						GenerateName: "other-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "other-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "blacklisted-du-2",
-						GenerateName: "another-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "another-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseFailed,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "valid-du-1",
-						GenerateName: "test-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "valid-du-2",
-						GenerateName: "test-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "valid-du-3",
-						GenerateName: "test-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
-					},
-				},
-			},
-			ha:             true,
 			duBlackList:    dummyDUBlacklist(),
 			expectStarted:  true,
 			expectFinished: true,
@@ -2670,221 +1913,6 @@ func TestCheckDataUpload(t *testing.T) {
 					},
 				},
 			},
-			ha:             false,
-			duBlackList:    dummyDUBlacklist(),
-			expectStarted:  true,
-			expectFinished: true,
-			expectError:    false,
-		},
-		{
-			name: "HA with blacklisted, unrelated data uploads and old dataupload. DU not in progress",
-			backup: &veleroapiv1.Backup{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-backup",
-					Namespace: "velero",
-				},
-			},
-			dataUploads: []veleroapiv2alpha1.DataUpload{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "blacklisted-du-old",
-						GenerateName: "test-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "blacklisted-du-1",
-						GenerateName: "test-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "unrelated-du-1",
-						GenerateName: "other-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "other-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseFailed,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "unrelated-du-2",
-						GenerateName: "another-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "another-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseInProgress,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "valid-du-1",
-						GenerateName: "test-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "valid-du-2",
-						GenerateName: "test-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "valid-du-3",
-						GenerateName: "test-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseInProgress,
-					},
-				},
-			},
-			ha:             true,
-			duBlackList:    dummyDUBlacklist(),
-			expectStarted:  true,
-			expectFinished: false,
-			expectError:    false,
-		},
-		{
-			name: "HA with blacklisted, unrelated data uploads and old dataupload. DU finished",
-			backup: &veleroapiv1.Backup{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-backup",
-					Namespace: "velero",
-				},
-			},
-			dataUploads: []veleroapiv2alpha1.DataUpload{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "blacklisted-du-old",
-						GenerateName: "test-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "blacklisted-du-1",
-						GenerateName: "test-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "unrelated-du-1",
-						GenerateName: "other-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "other-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseFailed,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "unrelated-du-2",
-						GenerateName: "another-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "another-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseInProgress,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "valid-du-1",
-						GenerateName: "test-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "valid-du-2",
-						GenerateName: "test-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "valid-du-3",
-						GenerateName: "test-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
-					},
-				},
-			},
-			ha:             true,
 			duBlackList:    dummyDUBlacklist(),
 			expectStarted:  true,
 			expectFinished: true,
@@ -2900,7 +1928,7 @@ func TestCheckDataUpload(t *testing.T) {
 			}).Build()
 			log := logrus.New()
 
-			started, finished, err := CheckDataUpload(context.TODO(), client, log, tt.backup, tt.ha, tt.duBlackList)
+			started, finished, err := CheckDataUpload(context.TODO(), client, log, tt.backup, &tt.duBlackList)
 
 			if tt.expectError {
 				g.Expect(err).To(HaveOccurred())
@@ -2916,7 +1944,7 @@ func TestCheckDataUpload(t *testing.T) {
 				t.Logf("Expected started: %v, got: %v", tt.expectStarted, started)
 				t.Logf("Expected finished: %v, got: %v", tt.expectFinished, finished)
 				t.Logf("Number of data uploads: %d", len(tt.dataUploads))
-				t.Logf("Blacklist contains: %d items", len(duBlackList.duObjects))
+				t.Logf("Blacklist contains: %d items", len(tt.duBlackList.DUObjects))
 			}
 		})
 	}
@@ -2932,9 +1960,8 @@ func TestWaitForVolumeSnapshot(t *testing.T) {
 		name             string
 		backup           *veleroapiv1.Backup
 		volumeSnapshots  []snapshotv1.VolumeSnapshot
-		vsBlackList      blackList
+		vsBlackList      BlackList
 		hcp              *hyperv1.HostedControlPlane
-		ha               bool
 		pvBackupStarted  bool
 		pvBackupFinished bool
 		vsTimeout        time.Duration
@@ -2970,67 +1997,6 @@ func TestWaitForVolumeSnapshot(t *testing.T) {
 					Namespace: "test-namespace-test-hc",
 				},
 			},
-			ha:               false,
-			pvBackupStarted:  true,
-			pvBackupFinished: false,
-			vsTimeout:        5 * time.Second,
-			vsCheckPace:      100 * time.Millisecond,
-			expectSuccess:    true,
-			expectError:      false,
-		},
-		{
-			name: "HA volume snapshot completed successfully",
-			backup: &veleroapiv1.Backup{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-backup",
-					Namespace: "velero",
-				},
-			},
-			volumeSnapshots: []snapshotv1.VolumeSnapshot{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "test-vs-1",
-						Namespace: "test-namespace-test-hc",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "test-vs-2",
-						Namespace: "test-namespace-test-hc",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "test-vs-3",
-						Namespace: "test-namespace-test-hc",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-			},
-			hcp: &hyperv1.HostedControlPlane{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-hc",
-					Namespace: "test-namespace-test-hc",
-				},
-			},
-			ha:               true,
 			pvBackupStarted:  true,
 			pvBackupFinished: false,
 			vsTimeout:        5 * time.Second,
@@ -3066,7 +2032,6 @@ func TestWaitForVolumeSnapshot(t *testing.T) {
 					Namespace: "test-namespace-test-hc",
 				},
 			},
-			ha:               false,
 			pvBackupStarted:  true,
 			pvBackupFinished: false,
 			vsTimeout:        200 * time.Millisecond,
@@ -3089,7 +2054,6 @@ func TestWaitForVolumeSnapshot(t *testing.T) {
 					Namespace: "test-namespace-test-hc",
 				},
 			},
-			ha:               false,
 			pvBackupStarted:  true,
 			pvBackupFinished: true,
 			vsTimeout:        5 * time.Second,
@@ -3138,98 +2102,12 @@ func TestWaitForVolumeSnapshot(t *testing.T) {
 					Namespace: "test-namespace-test-hc",
 				},
 			},
-			ha:               false,
 			pvBackupStarted:  false,
 			pvBackupFinished: false,
 			vsTimeout:        200 * time.Millisecond,
 			vsCheckPace:      50 * time.Millisecond,
 			expectSuccess:    false,
 			expectError:      true,
-		},
-		{
-			name: "HA with blacklisted VS",
-			backup: &veleroapiv1.Backup{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-backup",
-					Namespace: "velero",
-				},
-			},
-			volumeSnapshots: []snapshotv1.VolumeSnapshot{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "blacklisted-vs",
-						Namespace: "test-namespace-test-hc",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "blacklisted-vs-old",
-						Namespace: "test-namespace-test-hc",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "valid-vs-1",
-						Namespace: "test-namespace-test-hc",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "valid-vs-2",
-						Namespace: "test-namespace-test-hc",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "valid-vs-3",
-						Namespace: "test-namespace-test-hc",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-			},
-			vsBlackList: dummyVSBlacklist(),
-			hcp: &hyperv1.HostedControlPlane{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-hc",
-					Namespace: "test-namespace-test-hc",
-				},
-			},
-			ha:               true,
-			pvBackupStarted:  false,
-			pvBackupFinished: false,
-			vsTimeout:        5 * time.Second,
-			vsCheckPace:      100 * time.Millisecond,
-			expectSuccess:    true,
-			expectError:      false,
 		},
 		{
 			name: "Single node with unrelated VS",
@@ -3284,104 +2162,6 @@ func TestWaitForVolumeSnapshot(t *testing.T) {
 					Namespace: "test-namespace-test-hc",
 				},
 			},
-			ha:               false,
-			pvBackupStarted:  false,
-			pvBackupFinished: false,
-			vsTimeout:        5 * time.Second,
-			vsCheckPace:      100 * time.Millisecond,
-			expectSuccess:    true,
-			expectError:      false,
-		},
-		{
-			name: "HA with unrelated VS",
-			backup: &veleroapiv1.Backup{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-backup",
-					Namespace: "velero",
-				},
-			},
-			volumeSnapshots: []snapshotv1.VolumeSnapshot{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "blacklisted-vs-1",
-						Namespace: "other-namespace",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "blacklisted-vs-2",
-						Namespace: "another-namespace",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotStatus{
-						ReadyToUse: ptr.To(false),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "blacklisted-vs-3",
-						Namespace: "another-namespace",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotStatus{
-						ReadyToUse: ptr.To(false),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "valid-vs-1",
-						Namespace: "test-namespace-test-hc",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "valid-vs-2",
-						Namespace: "test-namespace-test-hc",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "valid-vs-3",
-						Namespace: "test-namespace-test-hc",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-			},
-			vsBlackList: dummyVSBlacklist(),
-			hcp: &hyperv1.HostedControlPlane{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-hc",
-					Namespace: "test-namespace-test-hc",
-				},
-			},
-			ha:               true,
 			pvBackupStarted:  false,
 			pvBackupFinished: false,
 			vsTimeout:        5 * time.Second,
@@ -3442,225 +2222,6 @@ func TestWaitForVolumeSnapshot(t *testing.T) {
 					Namespace: "test-namespace-test-hc",
 				},
 			},
-			ha:               false,
-			pvBackupStarted:  false,
-			pvBackupFinished: false,
-			vsTimeout:        5 * time.Second,
-			vsCheckPace:      100 * time.Millisecond,
-			expectSuccess:    true,
-			expectError:      false,
-		},
-		{
-			name: "HA with blacklisted, unrelated and old VS. VS in progress",
-			backup: &veleroapiv1.Backup{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-backup",
-					Namespace: "velero",
-				},
-			},
-			volumeSnapshots: []snapshotv1.VolumeSnapshot{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "blacklisted-vs-old",
-						Namespace: "test-namespace-test-hc",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "blacklisted-vs",
-						Namespace: "test-namespace-test-hc",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "unrelated-vs-1",
-						Namespace: "other-namespace",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotStatus{
-						ReadyToUse: ptr.To(false),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "unrelated-vs-2",
-						Namespace: "another-namespace",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotStatus{
-						ReadyToUse: ptr.To(false),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "valid-vs-1",
-						Namespace: "test-namespace-test-hc",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "valid-vs-2",
-						Namespace: "test-namespace-test-hc",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "valid-vs-3",
-						Namespace: "test-namespace-test-hc",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotStatus{
-						ReadyToUse: ptr.To(false),
-					},
-				},
-			},
-			vsBlackList: dummyVSBlacklist(),
-			hcp: &hyperv1.HostedControlPlane{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-hc",
-					Namespace: "test-namespace-test-hc",
-				},
-			},
-			ha:               true,
-			pvBackupStarted:  false,
-			pvBackupFinished: false,
-			vsTimeout:        200 * time.Millisecond,
-			vsCheckPace:      50 * time.Millisecond,
-			expectSuccess:    false,
-			expectError:      true,
-		},
-		{
-			name: "HA with blacklisted, unrelated and old VS. VS finished",
-			backup: &veleroapiv1.Backup{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-backup",
-					Namespace: "velero",
-				},
-			},
-			volumeSnapshots: []snapshotv1.VolumeSnapshot{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "blacklisted-vs-old",
-						Namespace: "test-namespace-test-hc",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "blacklisted-vs",
-						Namespace: "test-namespace-test-hc",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "unrelated-vs-1",
-						Namespace: "other-namespace",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotStatus{
-						ReadyToUse: ptr.To(false),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "unrelated-vs-2",
-						Namespace: "another-namespace",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotStatus{
-						ReadyToUse: ptr.To(false),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "valid-vs-1",
-						Namespace: "test-namespace-test-hc",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "valid-vs-2",
-						Namespace: "test-namespace-test-hc",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "valid-vs-3",
-						Namespace: "test-namespace-test-hc",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-			},
-			vsBlackList: dummyVSBlacklist(),
-			hcp: &hyperv1.HostedControlPlane{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-hc",
-					Namespace: "test-namespace-test-hc",
-				},
-			},
-			ha:               true,
 			pvBackupStarted:  false,
 			pvBackupFinished: false,
 			vsTimeout:        5 * time.Second,
@@ -3678,7 +2239,7 @@ func TestWaitForVolumeSnapshot(t *testing.T) {
 			}).Build()
 			log := logrus.New()
 
-			success, err := WaitForVolumeSnapshot(context.TODO(), client, log, tt.backup, tt.vsTimeout, tt.vsCheckPace, tt.ha, tt.hcp, &tt.pvBackupStarted, &tt.pvBackupFinished, tt.vsBlackList)
+			success, err := WaitForVolumeSnapshot(context.TODO(), client, log, tt.backup, tt.vsTimeout, tt.vsCheckPace, tt.hcp, &tt.pvBackupStarted, &tt.pvBackupFinished, &tt.vsBlackList)
 
 			if tt.expectError {
 				g.Expect(err).To(HaveOccurred())
@@ -3700,9 +2261,8 @@ func TestCheckVolumeSnapshot(t *testing.T) {
 		name             string
 		backup           *veleroapiv1.Backup
 		volumeSnapshots  []snapshotv1.VolumeSnapshot
-		vsBlackList      blackList
+		vsBlackList      BlackList
 		hcp              *hyperv1.HostedControlPlane
-		ha               bool
 		pvBackupStarted  bool
 		pvBackupFinished bool
 		expectStarted    bool
@@ -3724,7 +2284,6 @@ func TestCheckVolumeSnapshot(t *testing.T) {
 					Namespace: "test-namespace-test-hc",
 				},
 			},
-			ha:               false,
 			pvBackupStarted:  false,
 			pvBackupFinished: false,
 			expectStarted:    false,
@@ -3759,7 +2318,6 @@ func TestCheckVolumeSnapshot(t *testing.T) {
 					Namespace: "test-namespace-test-hc",
 				},
 			},
-			ha:               false,
 			pvBackupStarted:  false,
 			pvBackupFinished: false,
 			expectStarted:    true,
@@ -3794,66 +2352,6 @@ func TestCheckVolumeSnapshot(t *testing.T) {
 					Namespace: "test-namespace-test-hc",
 				},
 			},
-			ha:               false,
-			pvBackupStarted:  false,
-			pvBackupFinished: false,
-			expectStarted:    true,
-			expectFinished:   true,
-			expectError:      false,
-		},
-		{
-			name: "HA volume snapshot completed",
-			backup: &veleroapiv1.Backup{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-backup",
-					Namespace: "velero",
-				},
-			},
-			volumeSnapshots: []snapshotv1.VolumeSnapshot{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "test-vs-1",
-						Namespace: "test-namespace-test-hc",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "test-vs-2",
-						Namespace: "test-namespace-test-hc",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "test-vs-3",
-						Namespace: "test-namespace-test-hc",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-			},
-			hcp: &hyperv1.HostedControlPlane{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-hc",
-					Namespace: "test-namespace-test-hc",
-				},
-			},
-			ha:               true,
 			pvBackupStarted:  false,
 			pvBackupFinished: false,
 			expectStarted:    true,
@@ -3875,7 +2373,6 @@ func TestCheckVolumeSnapshot(t *testing.T) {
 					Namespace: "test-namespace-test-hc",
 				},
 			},
-			ha:               false,
 			pvBackupStarted:  true,
 			pvBackupFinished: true,
 			expectStarted:    true,
@@ -3898,7 +2395,6 @@ func TestCheckVolumeSnapshot(t *testing.T) {
 					Namespace: "",
 				},
 			},
-			ha:               false,
 			pvBackupStarted:  false,
 			pvBackupFinished: false,
 			expectStarted:    false,
@@ -3915,7 +2411,7 @@ func TestCheckVolumeSnapshot(t *testing.T) {
 			}).Build()
 			log := logrus.New()
 
-			started, finished, err := CheckVolumeSnapshot(context.TODO(), client, log, tt.backup, tt.ha, tt.hcp, &tt.pvBackupStarted, &tt.pvBackupFinished, tt.vsBlackList)
+			started, finished, err := CheckVolumeSnapshot(context.TODO(), client, log, tt.backup, tt.hcp, &tt.pvBackupStarted, &tt.pvBackupFinished, &tt.vsBlackList)
 
 			if tt.expectError {
 				g.Expect(err).To(HaveOccurred())
@@ -3938,9 +2434,8 @@ func TestWaitForVolumeSnapshotContent(t *testing.T) {
 		name                   string
 		backup                 *veleroapiv1.Backup
 		volumeSnapshotContents []snapshotv1.VolumeSnapshotContent
-		vscBlackList           blackList
+		vscBlackList           BlackList
 		hcp                    *hyperv1.HostedControlPlane
-		ha                     bool
 		pvBackupStarted        bool
 		pvBackupFinished       bool
 		vscTimeout             time.Duration
@@ -3977,70 +2472,6 @@ func TestWaitForVolumeSnapshotContent(t *testing.T) {
 					Namespace: "test-namespace-test-hc",
 				},
 			},
-			ha:               false,
-			pvBackupStarted:  true,
-			pvBackupFinished: false,
-			vscTimeout:       5 * time.Second,
-			vscCheckPace:     100 * time.Millisecond,
-			expectSuccess:    true,
-			expectError:      false,
-		},
-		{
-			name: "HA volume snapshot content completed successfully",
-			backup: &veleroapiv1.Backup{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-backup",
-					Namespace: "velero",
-				},
-			},
-			volumeSnapshotContents: []snapshotv1.VolumeSnapshotContent{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "test-vsc-1",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "test-namespace-test-hc",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "test-vsc-2",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "test-namespace-test-hc",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "test-vsc-3",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "test-namespace-test-hc",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-			},
-			hcp: &hyperv1.HostedControlPlane{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-hc",
-					Namespace: "test-namespace-test-hc",
-				},
-			},
-			ha:               true,
 			pvBackupStarted:  true,
 			pvBackupFinished: false,
 			vscTimeout:       5 * time.Second,
@@ -4077,7 +2508,6 @@ func TestWaitForVolumeSnapshotContent(t *testing.T) {
 					Namespace: "test-namespace-test-hc",
 				},
 			},
-			ha:               false,
 			pvBackupStarted:  true,
 			pvBackupFinished: false,
 			vscTimeout:       200 * time.Millisecond,
@@ -4100,7 +2530,6 @@ func TestWaitForVolumeSnapshotContent(t *testing.T) {
 					Namespace: "test-namespace-test-hc",
 				},
 			},
-			ha:               false,
 			pvBackupStarted:  false,
 			pvBackupFinished: false,
 			vscTimeout:       5 * time.Second,
@@ -4123,7 +2552,6 @@ func TestWaitForVolumeSnapshotContent(t *testing.T) {
 					Namespace: "test-namespace-test-hc",
 				},
 			},
-			ha:               false,
 			pvBackupStarted:  true,
 			pvBackupFinished: true,
 			vscTimeout:       5 * time.Second,
@@ -4174,103 +2602,12 @@ func TestWaitForVolumeSnapshotContent(t *testing.T) {
 					Namespace: "test-namespace-test-hc",
 				},
 			},
-			ha:               false,
 			pvBackupStarted:  false,
 			pvBackupFinished: false,
 			vscTimeout:       200 * time.Millisecond,
 			vscCheckPace:     50 * time.Millisecond,
 			expectSuccess:    false,
 			expectError:      true,
-		},
-		{
-			name: "HA with blacklisted VSC",
-			backup: &veleroapiv1.Backup{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-backup",
-					Namespace: "velero",
-				},
-			},
-			volumeSnapshotContents: []snapshotv1.VolumeSnapshotContent{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "blacklisted-vsc",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "test-namespace-test-hc",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "blacklisted-vsc-old",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "test-namespace-test-hc",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "valid-vsc-1",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "test-namespace-test-hc",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "valid-vsc-2",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "test-namespace-test-hc",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "valid-vsc-3",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "test-namespace-test-hc",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-			},
-			vscBlackList: dummyVSCBlacklist(),
-			hcp: &hyperv1.HostedControlPlane{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-hc",
-					Namespace: "test-namespace-test-hc",
-				},
-			},
-			ha:               true,
-			pvBackupStarted:  false,
-			pvBackupFinished: false,
-			vscTimeout:       5 * time.Second,
-			vscCheckPace:     100 * time.Millisecond,
-			expectSuccess:    true,
-			expectError:      false,
 		},
 		{
 			name: "Single node with unrelated VSC",
@@ -4328,110 +2665,6 @@ func TestWaitForVolumeSnapshotContent(t *testing.T) {
 					Namespace: "test-namespace-test-hc",
 				},
 			},
-			ha:               false,
-			pvBackupStarted:  false,
-			pvBackupFinished: false,
-			vscTimeout:       5 * time.Second,
-			vscCheckPace:     100 * time.Millisecond,
-			expectSuccess:    true,
-			expectError:      false,
-		},
-		{
-			name: "HA with unrelated VSC",
-			backup: &veleroapiv1.Backup{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-backup",
-					Namespace: "velero",
-				},
-			},
-			volumeSnapshotContents: []snapshotv1.VolumeSnapshotContent{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "blacklisted-vsc-1",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "other-namespace",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "blacklisted-vsc-2",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "another-namespace",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(false),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "blacklisted-vsc-3",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "another-namespace",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(false),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "valid-vsc-1",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "test-namespace-test-hc",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "valid-vsc-2",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "test-namespace-test-hc",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "valid-vsc-3",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "test-namespace-test-hc",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-			},
-			vscBlackList: dummyVSCBlacklist(),
-			hcp: &hyperv1.HostedControlPlane{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-hc",
-					Namespace: "test-namespace-test-hc",
-				},
-			},
-			ha:               true,
 			pvBackupStarted:  false,
 			pvBackupFinished: false,
 			vscTimeout:       5 * time.Second,
@@ -4495,239 +2728,6 @@ func TestWaitForVolumeSnapshotContent(t *testing.T) {
 					Namespace: "test-namespace-test-hc",
 				},
 			},
-			ha:               false,
-			pvBackupStarted:  false,
-			pvBackupFinished: false,
-			vscTimeout:       5 * time.Second,
-			vscCheckPace:     100 * time.Millisecond,
-			expectSuccess:    true,
-			expectError:      false,
-		},
-		{
-			name: "HA with blacklisted, unrelated and old VSC. VSC in progress",
-			backup: &veleroapiv1.Backup{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-backup",
-					Namespace: "velero",
-				},
-			},
-			volumeSnapshotContents: []snapshotv1.VolumeSnapshotContent{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "blacklisted-vsc-old",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "test-namespace-test-hc",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "blacklisted-vsc-1",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "test-namespace-test-hc",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "unrelated-vsc-1",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "other-namespace",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(false),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "unrelated-vsc-2",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "another-namespace",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(false),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "valid-vsc-1",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "test-namespace-test-hc",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "valid-vsc-2",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "test-namespace-test-hc",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "valid-vsc-3",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "test-namespace-test-hc",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(false),
-					},
-				},
-			},
-			vscBlackList: dummyVSCBlacklist(),
-			hcp: &hyperv1.HostedControlPlane{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-hc",
-					Namespace: "test-namespace-test-hc",
-				},
-			},
-			ha:               true,
-			pvBackupStarted:  false,
-			pvBackupFinished: false,
-			vscTimeout:       200 * time.Millisecond,
-			vscCheckPace:     50 * time.Millisecond,
-			expectSuccess:    false,
-			expectError:      true,
-		},
-		{
-			name: "HA with blacklisted, unrelated and old VSC. VSC finished",
-			backup: &veleroapiv1.Backup{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-backup",
-					Namespace: "velero",
-				},
-			},
-			volumeSnapshotContents: []snapshotv1.VolumeSnapshotContent{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "blacklisted-vsc-old",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "test-namespace-test-hc",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "blacklisted-vsc-1",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "test-namespace-test-hc",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "unrelated-vsc-1",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "other-namespace",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(false),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "unrelated-vsc-2",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "another-namespace",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(false),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "valid-vsc-1",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "test-namespace-test-hc",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "valid-vsc-2",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "test-namespace-test-hc",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "valid-vsc-3",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "test-namespace-test-hc",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-			},
-			vscBlackList: dummyVSCBlacklist(),
-			hcp: &hyperv1.HostedControlPlane{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-hc",
-					Namespace: "test-namespace-test-hc",
-				},
-			},
-			ha:               true,
 			pvBackupStarted:  false,
 			pvBackupFinished: false,
 			vscTimeout:       5 * time.Second,
@@ -4745,7 +2745,7 @@ func TestWaitForVolumeSnapshotContent(t *testing.T) {
 			}).Build()
 			log := logrus.New()
 
-			success, err := WaitForVolumeSnapshotContent(context.TODO(), client, log, tt.backup, tt.vscTimeout, tt.vscCheckPace, tt.ha, tt.hcp, &tt.pvBackupStarted, &tt.pvBackupFinished, tt.vscBlackList)
+			success, err := WaitForVolumeSnapshotContent(context.TODO(), client, log, tt.backup, tt.vscTimeout, tt.vscCheckPace, tt.hcp, &tt.pvBackupStarted, &tt.pvBackupFinished, &tt.vscBlackList)
 
 			if tt.expectError {
 				g.Expect(err).To(HaveOccurred())
@@ -4767,9 +2767,8 @@ func TestCheckVolumeSnapshotContent(t *testing.T) {
 		name                   string
 		backup                 *veleroapiv1.Backup
 		volumeSnapshotContents []snapshotv1.VolumeSnapshotContent
-		vscBlackList           blackList
+		vscBlackList           BlackList
 		hcp                    *hyperv1.HostedControlPlane
-		ha                     bool
 		pvBackupStarted        bool
 		pvBackupFinished       bool
 		expectStarted          bool
@@ -4791,7 +2790,6 @@ func TestCheckVolumeSnapshotContent(t *testing.T) {
 					Namespace: "test-namespace-test-hc",
 				},
 			},
-			ha:               false,
 			pvBackupStarted:  false,
 			pvBackupFinished: false,
 			expectStarted:    false,
@@ -4827,7 +2825,6 @@ func TestCheckVolumeSnapshotContent(t *testing.T) {
 					Namespace: "test-namespace-test-hc",
 				},
 			},
-			ha:               false,
 			pvBackupStarted:  false,
 			pvBackupFinished: false,
 			expectStarted:    true,
@@ -4863,69 +2860,6 @@ func TestCheckVolumeSnapshotContent(t *testing.T) {
 					Namespace: "test-namespace-test-hc",
 				},
 			},
-			ha:               false,
-			pvBackupStarted:  false,
-			pvBackupFinished: false,
-			expectStarted:    true,
-			expectFinished:   true,
-			expectError:      false,
-		},
-		{
-			name: "HA volume snapshot content completed",
-			backup: &veleroapiv1.Backup{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-backup",
-					Namespace: "velero",
-				},
-			},
-			volumeSnapshotContents: []snapshotv1.VolumeSnapshotContent{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "test-vsc-1",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "test-namespace-test-hc",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "test-vsc-2",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "test-namespace-test-hc",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "test-vsc-3",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "test-namespace-test-hc",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-			},
-			hcp: &hyperv1.HostedControlPlane{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-hc",
-					Namespace: "test-namespace-test-hc",
-				},
-			},
-			ha:               true,
 			pvBackupStarted:  false,
 			pvBackupFinished: false,
 			expectStarted:    true,
@@ -4947,7 +2881,6 @@ func TestCheckVolumeSnapshotContent(t *testing.T) {
 					Namespace: "test-namespace-test-hc",
 				},
 			},
-			ha:               false,
 			pvBackupStarted:  false,
 			pvBackupFinished: false,
 			expectStarted:    false,
@@ -4983,7 +2916,6 @@ func TestCheckVolumeSnapshotContent(t *testing.T) {
 					Namespace: "test-namespace-test-hc",
 				},
 			},
-			ha:               false,
 			pvBackupStarted:  false,
 			pvBackupFinished: false,
 			expectStarted:    false,
@@ -5033,100 +2965,10 @@ func TestCheckVolumeSnapshotContent(t *testing.T) {
 					Namespace: "test-namespace-test-hc",
 				},
 			},
-			ha:               false,
 			pvBackupStarted:  false,
 			pvBackupFinished: false,
 			expectStarted:    true,
 			expectFinished:   false,
-			expectError:      false,
-		},
-		{
-			name: "HA with blacklisted VSC",
-			backup: &veleroapiv1.Backup{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-backup",
-					Namespace: "velero",
-				},
-			},
-			volumeSnapshotContents: []snapshotv1.VolumeSnapshotContent{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "blacklisted-vsc",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "test-namespace-test-hc",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "blacklisted-vsc-old",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "test-namespace-test-hc",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "valid-vsc-1",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "test-namespace-test-hc",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "valid-vsc-2",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "test-namespace-test-hc",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "valid-vsc-3",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "test-namespace-test-hc",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-			},
-			vscBlackList: dummyVSCBlacklist(),
-			hcp: &hyperv1.HostedControlPlane{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-hc",
-					Namespace: "test-namespace-test-hc",
-				},
-			},
-			ha:               true,
-			pvBackupStarted:  false,
-			pvBackupFinished: false,
-			expectStarted:    true,
-			expectFinished:   true,
 			expectError:      false,
 		},
 		{
@@ -5185,109 +3027,6 @@ func TestCheckVolumeSnapshotContent(t *testing.T) {
 					Namespace: "test-namespace-test-hc",
 				},
 			},
-			ha:               false,
-			pvBackupStarted:  false,
-			pvBackupFinished: false,
-			expectStarted:    true,
-			expectFinished:   true,
-			expectError:      false,
-		},
-		{
-			name: "HA with unrelated VSC",
-			backup: &veleroapiv1.Backup{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-backup",
-					Namespace: "velero",
-				},
-			},
-			volumeSnapshotContents: []snapshotv1.VolumeSnapshotContent{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "blacklisted-vsc-1",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "other-namespace",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "blacklisted-vsc-2",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "another-namespace",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(false),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "blacklisted-vsc-3",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "another-namespace",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(false),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "valid-vsc-1",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "test-namespace-test-hc",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "valid-vsc-2",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "test-namespace-test-hc",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "valid-vsc-3",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "test-namespace-test-hc",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-			},
-			vscBlackList: dummyVSCBlacklist(),
-			hcp: &hyperv1.HostedControlPlane{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-hc",
-					Namespace: "test-namespace-test-hc",
-				},
-			},
-			ha:               true,
 			pvBackupStarted:  false,
 			pvBackupFinished: false,
 			expectStarted:    true,
@@ -5350,237 +3089,6 @@ func TestCheckVolumeSnapshotContent(t *testing.T) {
 					Namespace: "test-namespace-test-hc",
 				},
 			},
-			ha:               false,
-			pvBackupStarted:  false,
-			pvBackupFinished: false,
-			expectStarted:    true,
-			expectFinished:   true,
-			expectError:      false,
-		},
-		{
-			name: "HA with blacklisted, unrelated and old VSC. VSC in progress",
-			backup: &veleroapiv1.Backup{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-backup",
-					Namespace: "velero",
-				},
-			},
-			volumeSnapshotContents: []snapshotv1.VolumeSnapshotContent{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "blacklisted-vsc-old",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "test-namespace-test-hc",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "blacklisted-vsc-1",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "test-namespace-test-hc",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "unrelated-vsc-1",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "other-namespace",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(false),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "unrelated-vsc-2",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "another-namespace",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(false),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "valid-vsc-1",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "test-namespace-test-hc",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "valid-vsc-2",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "test-namespace-test-hc",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "valid-vsc-3",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "test-namespace-test-hc",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(false),
-					},
-				},
-			},
-			vscBlackList: dummyVSCBlacklist(),
-			hcp: &hyperv1.HostedControlPlane{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-hc",
-					Namespace: "test-namespace-test-hc",
-				},
-			},
-			ha:               true,
-			pvBackupStarted:  false,
-			pvBackupFinished: false,
-			expectStarted:    true,
-			expectFinished:   false,
-			expectError:      false,
-		},
-		{
-			name: "HA with blacklisted, unrelated and old VSC. VSC finished",
-			backup: &veleroapiv1.Backup{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-backup",
-					Namespace: "velero",
-				},
-			},
-			volumeSnapshotContents: []snapshotv1.VolumeSnapshotContent{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "blacklisted-vsc-old",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "test-namespace-test-hc",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "blacklisted-vsc-1",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "test-namespace-test-hc",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "unrelated-vsc-1",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "other-namespace",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(false),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "unrelated-vsc-2",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "another-namespace",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(false),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "valid-vsc-1",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "test-namespace-test-hc",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "valid-vsc-2",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "test-namespace-test-hc",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "valid-vsc-3",
-					},
-					Spec: snapshotv1.VolumeSnapshotContentSpec{
-						VolumeSnapshotRef: corev1.ObjectReference{
-							Namespace: "test-namespace-test-hc",
-						},
-					},
-					Status: &snapshotv1.VolumeSnapshotContentStatus{
-						ReadyToUse: ptr.To(true),
-					},
-				},
-			},
-			vscBlackList: dummyVSCBlacklist(),
-			hcp: &hyperv1.HostedControlPlane{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-hc",
-					Namespace: "test-namespace-test-hc",
-				},
-			},
-			ha:               true,
 			pvBackupStarted:  false,
 			pvBackupFinished: false,
 			expectStarted:    true,
@@ -5597,7 +3105,7 @@ func TestCheckVolumeSnapshotContent(t *testing.T) {
 			}).Build()
 			log := logrus.New()
 
-			started, finished, err := CheckVolumeSnapshotContent(context.TODO(), client, log, tt.backup, tt.ha, tt.hcp, &tt.pvBackupStarted, &tt.pvBackupFinished, tt.vscBlackList)
+			started, finished, err := CheckVolumeSnapshotContent(context.TODO(), client, log, tt.backup, tt.hcp, &tt.pvBackupStarted, &tt.pvBackupFinished, &tt.vscBlackList)
 
 			if tt.expectError {
 				g.Expect(err).To(HaveOccurred())
@@ -5615,12 +3123,11 @@ func TestReconcileDataUpload(t *testing.T) {
 	_ = veleroapiv1.AddToScheme(scheme)
 	_ = veleroapiv2alpha1.AddToScheme(scheme)
 
-	duBlackList = dummyDUBlacklist()
+	duBlackList := dummyDUBlacklist()
 	tests := []struct {
 		name                string
 		backup              *veleroapiv1.Backup
 		dataUploads         []veleroapiv2alpha1.DataUpload
-		ha                  bool
 		duStarted           bool
 		duFinished          bool
 		dataUploadTimeout   time.Duration
@@ -5637,7 +3144,6 @@ func TestReconcileDataUpload(t *testing.T) {
 				},
 			},
 			dataUploads:         []veleroapiv2alpha1.DataUpload{},
-			ha:                  false,
 			duStarted:           false,
 			duFinished:          false,
 			dataUploadTimeout:   5 * time.Second,
@@ -5667,7 +3173,6 @@ func TestReconcileDataUpload(t *testing.T) {
 					},
 				},
 			},
-			ha:                  false,
 			duStarted:           true,
 			duFinished:          false,
 			dataUploadTimeout:   5 * time.Second,
@@ -5698,7 +3203,6 @@ func TestReconcileDataUpload(t *testing.T) {
 					},
 				},
 			},
-			ha:                  false,
 			duStarted:           false,
 			duFinished:          false,
 			dataUploadTimeout:   5 * time.Second,
@@ -5729,64 +3233,6 @@ func TestReconcileDataUpload(t *testing.T) {
 					},
 				},
 			},
-			ha:                  false,
-			duStarted:           true,
-			duFinished:          false,
-			dataUploadTimeout:   5 * time.Second,
-			dataUploadCheckPace: 500 * time.Millisecond,
-			expectSuccess:       true,
-			expectError:         false,
-		},
-		{
-			name: "HA DataUpload completed",
-			backup: &veleroapiv1.Backup{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-backup",
-					Namespace: "velero",
-				},
-			},
-			dataUploads: []veleroapiv2alpha1.DataUpload{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "test-du-1",
-						GenerateName: "test-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "test-du-2",
-						GenerateName: "test-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:         "test-du-3",
-						GenerateName: "test-backup-",
-						Namespace:    "velero",
-						Labels: map[string]string{
-							veleroapiv1.BackupNameLabel: "test-backup",
-						},
-					},
-					Status: veleroapiv2alpha1.DataUploadStatus{
-						Phase: veleroapiv2alpha1.DataUploadPhaseCompleted,
-					},
-				},
-			},
-			ha:                  true,
 			duStarted:           true,
 			duFinished:          false,
 			dataUploadTimeout:   5 * time.Second,
@@ -5804,7 +3250,7 @@ func TestReconcileDataUpload(t *testing.T) {
 			}).Build()
 			log := logrus.New()
 
-			success, err := ReconcileDataUpload(context.TODO(), client, log, tt.backup, tt.ha, tt.dataUploadTimeout, tt.dataUploadCheckPace, &tt.duStarted, &tt.duFinished)
+			success, err := ReconcileDataUpload(context.TODO(), client, log, tt.backup, tt.dataUploadTimeout, tt.dataUploadCheckPace, &tt.duStarted, &tt.duFinished, &duBlackList)
 
 			if tt.expectError {
 				g.Expect(err).To(HaveOccurred())
@@ -5822,12 +3268,12 @@ func TestReconcileVolumeSnapshotContent(t *testing.T) {
 	_ = hyperv1.AddToScheme(scheme)
 	_ = snapshotv1.AddToScheme(scheme)
 
+	vscBlackList := dummyVSCBlacklist()
 	tests := []struct {
 		name                   string
 		backup                 *veleroapiv1.Backup
 		volumeSnapshotContents []snapshotv1.VolumeSnapshotContent
 		hcp                    *hyperv1.HostedControlPlane
-		ha                     bool
 		pvBackupStarted        bool
 		pvBackupFinished       bool
 		dataUploadTimeout      time.Duration
@@ -5850,7 +3296,6 @@ func TestReconcileVolumeSnapshotContent(t *testing.T) {
 					Namespace: "test-namespace-test-hc",
 				},
 			},
-			ha:                  false,
 			pvBackupStarted:     false,
 			pvBackupFinished:    false,
 			dataUploadTimeout:   5 * time.Second,
@@ -5880,7 +3325,6 @@ func TestReconcileVolumeSnapshotContent(t *testing.T) {
 					Status: &snapshotv1.VolumeSnapshotContentStatus{},
 				},
 			},
-			ha:                  false,
 			pvBackupStarted:     true,
 			pvBackupFinished:    false,
 			dataUploadTimeout:   5 * time.Second,
@@ -5918,7 +3362,6 @@ func TestReconcileVolumeSnapshotContent(t *testing.T) {
 				},
 			},
 
-			ha:                  false,
 			pvBackupStarted:     true,
 			pvBackupFinished:    false,
 			dataUploadTimeout:   5 * time.Second,
@@ -5936,7 +3379,7 @@ func TestReconcileVolumeSnapshotContent(t *testing.T) {
 			}).Build()
 			log := logrus.New()
 
-			success, err := ReconcileVolumeSnapshotContent(context.TODO(), tt.hcp, client, log, tt.backup, tt.ha, tt.dataUploadTimeout, tt.dataUploadCheckPace, &tt.pvBackupStarted, &tt.pvBackupFinished)
+			success, err := ReconcileVolumeSnapshotContent(context.TODO(), tt.hcp, client, log, tt.backup, tt.dataUploadTimeout, tt.dataUploadCheckPace, &tt.pvBackupStarted, &tt.pvBackupFinished, &vscBlackList)
 
 			if tt.expectError {
 				g.Expect(err).To(HaveOccurred())
@@ -5954,12 +3397,12 @@ func TestReconcileVolumeSnapshots(t *testing.T) {
 	_ = hyperv1.AddToScheme(scheme)
 	_ = snapshotv1.AddToScheme(scheme)
 
+	vsBlackList := dummyVSBlacklist()
 	tests := []struct {
 		name                string
 		backup              *veleroapiv1.Backup
 		volumeSnapshots     []snapshotv1.VolumeSnapshot
 		hcp                 *hyperv1.HostedControlPlane
-		ha                  bool
 		pvBackupStarted     bool
 		pvBackupFinished    bool
 		dataUploadTimeout   time.Duration
@@ -5982,7 +3425,6 @@ func TestReconcileVolumeSnapshots(t *testing.T) {
 					Namespace: "test-namespace-test-hc",
 				},
 			},
-			ha:                  false,
 			pvBackupStarted:     false,
 			pvBackupFinished:    false,
 			dataUploadTimeout:   5 * time.Second,
@@ -6011,7 +3453,6 @@ func TestReconcileVolumeSnapshots(t *testing.T) {
 					},
 				},
 			},
-			ha:                  false,
 			pvBackupStarted:     true,
 			pvBackupFinished:    false,
 			dataUploadTimeout:   5 * time.Second,
@@ -6047,7 +3488,6 @@ func TestReconcileVolumeSnapshots(t *testing.T) {
 					Namespace: "test-namespace-test-hc",
 				},
 			},
-			ha:                  false,
 			pvBackupStarted:     true,
 			pvBackupFinished:    true,
 			dataUploadTimeout:   5 * time.Second,
@@ -6065,7 +3505,7 @@ func TestReconcileVolumeSnapshots(t *testing.T) {
 			}).Build()
 			log := logrus.New()
 
-			success, err := ReconcileVolumeSnapshots(context.TODO(), tt.hcp, client, log, tt.backup, tt.ha, tt.dataUploadTimeout, tt.dataUploadCheckPace, &tt.pvBackupStarted, &tt.pvBackupFinished)
+			success, err := ReconcileVolumeSnapshots(context.TODO(), tt.hcp, client, log, tt.backup, tt.dataUploadTimeout, tt.dataUploadCheckPace, &tt.pvBackupStarted, &tt.pvBackupFinished, &vsBlackList)
 
 			if tt.expectError {
 				g.Expect(err).To(HaveOccurred())
@@ -6202,23 +3642,23 @@ func TestNewBlackList(t *testing.T) {
 				g.Expect(err).NotTo(HaveOccurred())
 			}
 
-			g.Expect(result.kind).To(Equal(tt.expectedKind))
+			g.Expect(result.Kind).To(Equal(tt.expectedKind))
 
 			switch tt.kind {
 			case "DataUpload":
-				g.Expect(len(result.duObjects)).To(Equal(tt.expectedLength))
+				g.Expect(len(result.DUObjects)).To(Equal(tt.expectedLength))
 				if tt.expectedLength > 0 {
-					g.Expect(result.duObjects[0]).NotTo(BeNil())
+					g.Expect(result.DUObjects[0]).NotTo(BeNil())
 				}
 			case "VolumeSnapshotContent":
-				g.Expect(len(result.vscObjects)).To(Equal(tt.expectedLength))
+				g.Expect(len(result.VSCObjects)).To(Equal(tt.expectedLength))
 				if tt.expectedLength > 0 {
-					g.Expect(result.vscObjects[0]).NotTo(BeNil())
+					g.Expect(result.VSCObjects[0]).NotTo(BeNil())
 				}
 			case "VolumeSnapshot":
-				g.Expect(len(result.vsObjects)).To(Equal(tt.expectedLength))
+				g.Expect(len(result.VSObjects)).To(Equal(tt.expectedLength))
 				if tt.expectedLength > 0 {
-					g.Expect(result.vsObjects[0]).NotTo(BeNil())
+					g.Expect(result.VSObjects[0]).NotTo(BeNil())
 				}
 			}
 		})
@@ -6232,15 +3672,15 @@ func TestIsBlackListed(t *testing.T) {
 
 	tests := []struct {
 		name           string
-		blackList      blackList
+		BlackList      BlackList
 		object         any
 		expectedResult bool
 	}{
 		{
 			name: "DataUpload in blacklist, should return true",
-			blackList: blackList{
-				kind: "DataUpload",
-				duObjects: []*veleroapiv2alpha1.DataUpload{
+			BlackList: BlackList{
+				Kind: "DataUpload",
+				DUObjects: []*veleroapiv2alpha1.DataUpload{
 					{
 						ObjectMeta: metav1.ObjectMeta{
 							Name:      "du-1",
@@ -6265,9 +3705,9 @@ func TestIsBlackListed(t *testing.T) {
 		},
 		{
 			name: "DataUpload not in blacklist, should return false",
-			blackList: blackList{
-				kind: "DataUpload",
-				duObjects: []*veleroapiv2alpha1.DataUpload{
+			BlackList: BlackList{
+				Kind: "DataUpload",
+				DUObjects: []*veleroapiv2alpha1.DataUpload{
 					{
 						ObjectMeta: metav1.ObjectMeta{
 							Name:      "du-1",
@@ -6286,9 +3726,9 @@ func TestIsBlackListed(t *testing.T) {
 		},
 		{
 			name: "VolumeSnapshotContent in blacklist, should be blacklisted",
-			blackList: blackList{
-				kind: "VolumeSnapshotContent",
-				vscObjects: []*snapshotv1.VolumeSnapshotContent{
+			BlackList: BlackList{
+				Kind: "VolumeSnapshotContent",
+				VSCObjects: []*snapshotv1.VolumeSnapshotContent{
 					{
 						ObjectMeta: metav1.ObjectMeta{
 							Name: "vsc-1",
@@ -6305,9 +3745,9 @@ func TestIsBlackListed(t *testing.T) {
 		},
 		{
 			name: "VolumeSnapshot in blacklist, should be blacklisted",
-			blackList: blackList{
-				kind: "VolumeSnapshot",
-				vsObjects: []*snapshotv1.VolumeSnapshot{
+			BlackList: BlackList{
+				Kind: "VolumeSnapshot",
+				VSObjects: []*snapshotv1.VolumeSnapshot{
 					{
 						ObjectMeta: metav1.ObjectMeta{
 							Name:      "vs-1",
@@ -6326,9 +3766,9 @@ func TestIsBlackListed(t *testing.T) {
 		},
 		{
 			name: "Wrong kind for object type, should return false",
-			blackList: blackList{
-				kind: "DataUpload",
-				duObjects: []*veleroapiv2alpha1.DataUpload{
+			BlackList: BlackList{
+				Kind: "DataUpload",
+				DUObjects: []*veleroapiv2alpha1.DataUpload{
 					{
 						ObjectMeta: metav1.ObjectMeta{
 							Name:      "du-1",
@@ -6347,18 +3787,18 @@ func TestIsBlackListed(t *testing.T) {
 		},
 		{
 			name: "Unsupported object type, should return false",
-			blackList: blackList{
-				kind:      "DataUpload",
-				duObjects: []*veleroapiv2alpha1.DataUpload{},
+			BlackList: BlackList{
+				Kind:      "DataUpload",
+				DUObjects: []*veleroapiv2alpha1.DataUpload{},
 			},
 			object:         "not-a-kubernetes-object",
 			expectedResult: false,
 		},
 		{
 			name: "Empty blacklist, should not be blacklisted",
-			blackList: blackList{
-				kind:      "DataUpload",
-				duObjects: []*veleroapiv2alpha1.DataUpload{},
+			BlackList: BlackList{
+				Kind:      "DataUpload",
+				DUObjects: []*veleroapiv2alpha1.DataUpload{},
 			},
 			object: &veleroapiv2alpha1.DataUpload{
 				ObjectMeta: metav1.ObjectMeta{
@@ -6370,9 +3810,9 @@ func TestIsBlackListed(t *testing.T) {
 		},
 		{
 			name: "Different namespace, same name, should not be blacklisted",
-			blackList: blackList{
-				kind: "DataUpload",
-				duObjects: []*veleroapiv2alpha1.DataUpload{
+			BlackList: BlackList{
+				Kind: "DataUpload",
+				DUObjects: []*veleroapiv2alpha1.DataUpload{
 					{
 						ObjectMeta: metav1.ObjectMeta{
 							Name:      "du-1",
@@ -6391,9 +3831,9 @@ func TestIsBlackListed(t *testing.T) {
 		},
 		{
 			name: "Different name, same namespace, should not be blacklisted",
-			blackList: blackList{
-				kind: "DataUpload",
-				duObjects: []*veleroapiv2alpha1.DataUpload{
+			BlackList: BlackList{
+				Kind: "DataUpload",
+				DUObjects: []*veleroapiv2alpha1.DataUpload{
 					{
 						ObjectMeta: metav1.ObjectMeta{
 							Name:      "du-1",
@@ -6412,9 +3852,9 @@ func TestIsBlackListed(t *testing.T) {
 		},
 		{
 			name: "VolumeSnapshot empty namespace, name match, should be blacklisted",
-			blackList: blackList{
-				kind: "VolumeSnapshot",
-				vsObjects: []*snapshotv1.VolumeSnapshot{
+			BlackList: BlackList{
+				Kind: "VolumeSnapshot",
+				VSObjects: []*snapshotv1.VolumeSnapshot{
 					{
 						ObjectMeta: metav1.ObjectMeta{
 							Name: "vs-1",
@@ -6431,9 +3871,9 @@ func TestIsBlackListed(t *testing.T) {
 		},
 		{
 			name: "volumeSnapshotContent empty namespace, name match, should be blacklisted",
-			blackList: blackList{
-				kind: "VolumeSnapshotContent",
-				vscObjects: []*snapshotv1.VolumeSnapshotContent{
+			BlackList: BlackList{
+				Kind: "VolumeSnapshotContent",
+				VSCObjects: []*snapshotv1.VolumeSnapshotContent{
 					{
 						ObjectMeta: metav1.ObjectMeta{
 							Name: "vsc-1",
@@ -6455,16 +3895,16 @@ func TestIsBlackListed(t *testing.T) {
 			g := NewWithT(t)
 			log := logrus.New()
 
-			result := tt.blackList.IsBlackListed(tt.object, log)
+			result := tt.BlackList.IsBlackListed(tt.object, log)
 			g.Expect(result).To(Equal(tt.expectedResult))
 		})
 	}
 }
 
-func dummyDUBlacklist() blackList {
-	return blackList{
-		kind: "DataUpload",
-		duObjects: []*veleroapiv2alpha1.DataUpload{
+func dummyDUBlacklist() BlackList {
+	return BlackList{
+		Kind: "DataUpload",
+		DUObjects: []*veleroapiv2alpha1.DataUpload{
 			{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "blacklisted-du",
@@ -6499,10 +3939,10 @@ func dummyDUBlacklist() blackList {
 	}
 }
 
-func dummyVSCBlacklist() blackList {
-	return blackList{
-		kind: "VolumeSnapshotContent",
-		vscObjects: []*snapshotv1.VolumeSnapshotContent{
+func dummyVSCBlacklist() BlackList {
+	return BlackList{
+		Kind: "VolumeSnapshotContent",
+		VSCObjects: []*snapshotv1.VolumeSnapshotContent{
 			{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "blacklisted-vsc",
@@ -6532,10 +3972,10 @@ func dummyVSCBlacklist() blackList {
 	}
 }
 
-func dummyVSBlacklist() blackList {
-	return blackList{
-		kind: "VolumeSnapshot",
-		vsObjects: []*snapshotv1.VolumeSnapshot{
+func dummyVSBlacklist() BlackList {
+	return BlackList{
+		Kind: "VolumeSnapshot",
+		VSObjects: []*snapshotv1.VolumeSnapshot{
 			{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "blacklisted-vs",
@@ -6549,5 +3989,110 @@ func dummyVSBlacklist() blackList {
 				},
 			},
 		},
+	}
+}
+
+func TestAllObjectsCompleted(t *testing.T) {
+	tests := []struct {
+		name     string
+		status   map[string]bool
+		expected bool
+	}{
+		{
+			name: "All objects completed - single object",
+			status: map[string]bool{
+				"object1": true,
+			},
+			expected: true,
+		},
+		{
+			name: "All objects completed - multiple objects",
+			status: map[string]bool{
+				"object1": true,
+				"object2": true,
+				"object3": true,
+			},
+			expected: true,
+		},
+		{
+			name: "One object not completed",
+			status: map[string]bool{
+				"object1": true,
+				"object2": false,
+				"object3": true,
+			},
+			expected: false,
+		},
+		{
+			name: "All objects not completed",
+			status: map[string]bool{
+				"object1": false,
+				"object2": false,
+				"object3": false,
+			},
+			expected: false,
+		},
+		{
+			name:     "Empty status map",
+			status:   map[string]bool{},
+			expected: true,
+		},
+		{
+			name: "Mixed completion status",
+			status: map[string]bool{
+				"object1": true,
+				"object2": false,
+				"object3": true,
+				"object4": false,
+			},
+			expected: false,
+		},
+		{
+			name: "Single object not completed",
+			status: map[string]bool{
+				"object1": false,
+			},
+			expected: false,
+		},
+		{
+			name: "Large number of completed objects",
+			status: map[string]bool{
+				"object1":  true,
+				"object2":  true,
+				"object3":  true,
+				"object4":  true,
+				"object5":  true,
+				"object6":  true,
+				"object7":  true,
+				"object8":  true,
+				"object9":  true,
+				"object10": true,
+			},
+			expected: true,
+		},
+		{
+			name: "Large number of objects with one incomplete",
+			status: map[string]bool{
+				"object1":  true,
+				"object2":  true,
+				"object3":  true,
+				"object4":  true,
+				"object5":  false, // This one is not completed
+				"object6":  true,
+				"object7":  true,
+				"object8":  true,
+				"object9":  true,
+				"object10": true,
+			},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+			result := AllObjectsCompleted(tt.status)
+			g.Expect(result).To(Equal(tt.expected))
+		})
 	}
 }

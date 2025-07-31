@@ -45,7 +45,6 @@ type BackupPlugin struct {
 	duFinished        bool
 	hcPaused          bool
 	npPaused          bool
-
 	*plugtypes.BackupOptions
 }
 
@@ -174,6 +173,7 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 				validator.HA = false
 			}
 		}
+
 	}
 
 	kind := item.GetObjectKind().GroupVersionKind().Kind
@@ -202,7 +202,10 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 			if err := common.UpdateHostedCluster(ctx, p.client, p.log, "true", backup.Spec.IncludedNamespaces); err != nil {
 				return nil, nil, fmt.Errorf("error updating HostedClusters: %v", err)
 			}
-			p.npPaused = true
+			p.hcPaused = true
+			if validator, ok := p.validator.(*validation.BackupPluginValidator); ok {
+				validator.HCPaused = ptr.To(true)
+			}
 		}
 
 		// Updating NodePools
@@ -211,6 +214,9 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 				return nil, nil, fmt.Errorf("error updating NodePools: %v", err)
 			}
 			p.npPaused = true
+			if validator, ok := p.validator.(*validation.BackupPluginValidator); ok {
+				validator.NPaused = ptr.To(true)
+			}
 		}
 
 		if kind == common.HostedClusterKind {
