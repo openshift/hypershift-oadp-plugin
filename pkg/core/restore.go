@@ -30,6 +30,7 @@ type RestorePlugin struct {
 	config    map[string]string
 	validator validation.RestoreValidator
 	fsBackup  bool
+	namespace string
 
 	*plugtypes.RestoreOptions
 }
@@ -91,6 +92,7 @@ func NewRestorePlugin(logger logrus.FieldLogger) (*RestorePlugin, error) {
 		fsBackup:  false,
 		config:    pluginConfig.Data,
 		validator: validator,
+		namespace: ns,
 	}
 
 	if rp.RestoreOptions, err = rp.validator.ValidatePluginConfig(rp.config); err != nil {
@@ -129,7 +131,7 @@ func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*v
 	err := p.client.Get(
 		ctx,
 		types.NamespacedName{
-			Namespace: input.Restore.Namespace,
+			Namespace: p.namespace,
 			Name:      input.Restore.Spec.BackupName,
 		},
 		backup,
