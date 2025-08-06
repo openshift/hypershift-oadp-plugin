@@ -15,8 +15,8 @@ const (
 	PluginConfigMapName string = "hypershift-oadp-plugin-config"
 
 	// Default values for the backup plugin.
-	defaultDataUploadTimeout    time.Duration = 30 // Minutes
-	defaultDataUploadCheckPace  time.Duration = 10 // Seconds
+	defaultPVBackupTimeout      time.Duration = 30 * time.Minute
+	defaultPVBackupCheckPace    time.Duration = 10 * time.Second
 	defaultWaitForPausedTimeout time.Duration = 2 * time.Minute
 	defaultWaitForTimeout       time.Duration = 5 * time.Minute
 
