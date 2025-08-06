@@ -30,7 +30,6 @@ type RestorePlugin struct {
 	config    map[string]string
 	validator validation.RestoreValidator
 	fsBackup  bool
-	namespace string
 
 	*plugtypes.RestoreOptions
 }
@@ -92,7 +91,6 @@ func NewRestorePlugin(logger logrus.FieldLogger) (*RestorePlugin, error) {
 		fsBackup:  false,
 		config:    pluginConfig.Data,
 		validator: validator,
-		namespace: ns,
 	}
 
 	if rp.RestoreOptions, err = rp.validator.ValidatePluginConfig(rp.config); err != nil {
@@ -131,7 +129,7 @@ func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*v
 	err := p.client.Get(
 		ctx,
 		types.NamespacedName{
-			Namespace: p.namespace,
+			Namespace: input.Restore.Namespace,
 			Name:      input.Restore.Spec.BackupName,
 		},
 		backup,
@@ -142,16 +140,16 @@ func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*v
 		return nil, fmt.Errorf("fail to get backup for restore: %s", err.Error())
 	}
 
-	// if the backup is nil or the included namespaces are nil, return early
-	if backup.Spec.IncludedNamespaces == nil {
-		p.log.Error("IncludedNamespaces from backup object is nil")
-		return nil, fmt.Errorf("included namespaces from backup object is nil")
-	}
-
 	// if the backup is not a hypershift backup, return early
 	if returnEarly := common.ShouldEndPluginExecution(ctx, backup, p.client, p.log); returnEarly {
 		p.log.Info("Skipping hypershift plugin execution - not a hypershift backup")
 		return velero.NewRestoreItemActionExecuteOutput(input.Item), nil
+	}
+
+	// if the backup is nil or the included namespaces are nil, return early
+	if backup.Spec.IncludedNamespaces == nil {
+		p.log.Error("IncludedNamespaces from backup object is nil")
+		return nil, fmt.Errorf("included namespaces from backup object is nil")
 	}
 
 	kind := input.Item.GetObjectKind().GroupVersionKind().Kind
