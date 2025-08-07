@@ -146,7 +146,7 @@ func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*v
 		return velero.NewRestoreItemActionExecuteOutput(input.Item), nil
 	}
 
-	// if the backup is nil or the included namespaces are nil, return early
+	// if the IncludedNamespaces field is nil, return error
 	if backup.Spec.IncludedNamespaces == nil {
 		p.log.Error("IncludedNamespaces from backup object is nil")
 		return nil, fmt.Errorf("included namespaces from backup object is nil")
