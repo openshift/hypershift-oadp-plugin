@@ -6,7 +6,7 @@ toolchain go1.23.6
 
 require (
 	github.com/kubernetes-csi/external-snapshotter/client/v8 v8.2.0
-	github.com/onsi/gomega v1.35.1
+	github.com/onsi/gomega v1.38.0
 	github.com/openshift/hive/apis v0.0.0-20241220022629-3f49f26197ff
 	github.com/openshift/hypershift/api v0.0.0-20250108163049-830af0531d12
 	github.com/sirupsen/logrus v1.9.3
@@ -22,7 +22,7 @@ require (
 	github.com/evanphx/json-patch/v5 v5.9.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.7.0 // indirect
 	github.com/google/gnostic-models v0.6.8 // indirect
-	github.com/google/go-cmp v0.6.0 // indirect
+	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/klauspost/compress v1.17.11 // indirect
 	github.com/kubernetes-csi/external-snapshotter/client/v7 v7.0.0 // indirect
@@ -67,15 +67,15 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/spf13/cobra v1.8.1 // indirect
 	github.com/spf13/pflag v1.0.6-0.20210604193023-d5e0c0615ace // indirect
-	golang.org/x/net v0.38.0 // indirect
+	golang.org/x/net v0.41.0 // indirect
 	golang.org/x/oauth2 v0.27.0 // indirect
-	golang.org/x/sys v0.31.0 // indirect
-	golang.org/x/term v0.30.0 // indirect
-	golang.org/x/text v0.23.0 // indirect
+	golang.org/x/sys v0.33.0 // indirect
+	golang.org/x/term v0.32.0 // indirect
+	golang.org/x/text v0.26.0 // indirect
 	golang.org/x/time v0.9.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250115164207-1a7da9e5054f // indirect
 	google.golang.org/grpc v1.69.4 // indirect
-	google.golang.org/protobuf v1.36.3 // indirect
+	google.golang.org/protobuf v1.36.6 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	k8s.io/apimachinery v0.32.3
