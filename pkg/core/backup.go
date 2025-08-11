@@ -198,7 +198,7 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 
 	case common.MainKinds[kind]:
 		// Updating HostedClusters
-		if !p.hcPaused {
+		if !p.hcPaused && (!p.pvBackupFinished || !p.duFinished) {
 			if err := common.UpdateHostedCluster(ctx, p.client, p.log, "true", backup.Spec.IncludedNamespaces); err != nil {
 				return nil, nil, fmt.Errorf("error updating HostedClusters: %v", err)
 			}
@@ -209,7 +209,7 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 		}
 
 		// Updating NodePools
-		if !p.npPaused {
+		if !p.npPaused && (!p.pvBackupFinished || !p.duFinished) {
 			if err := common.UpdateNodepools(ctx, p.client, p.log, "true", backup.Spec.IncludedNamespaces); err != nil {
 				return nil, nil, fmt.Errorf("error updating NodePools: %v", err)
 			}

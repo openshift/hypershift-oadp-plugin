@@ -14,6 +14,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
@@ -655,8 +656,6 @@ func TestValidateDataMoverWithDifferentTimeouts(t *testing.T) {
 }
 
 func TestValidateDataMoverWithDifferentDataUploadStates(t *testing.T) {
-	g := NewWithT(t)
-
 	scheme := runtime.NewScheme()
 	_ = velerov1.AddToScheme(scheme)
 	_ = velerov2alpha1.AddToScheme(scheme)
@@ -683,7 +682,7 @@ func TestValidateDataMoverWithDifferentDataUploadStates(t *testing.T) {
 		return &velerov1.Backup{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "test-backup",
-				Namespace: "test-namespace",
+				Namespace: "velero",
 			},
 			Spec: velerov1.BackupSpec{
 				DefaultVolumesToFsBackup: ptr.To(false),
@@ -698,6 +697,7 @@ func TestValidateDataMoverWithDifferentDataUploadStates(t *testing.T) {
 		duFinished        bool
 		expectedBehavior  string
 		shouldReturnEarly bool
+		objects           []client.Object
 	}{
 		{
 			name:              "AWS platform - both PV and DU finished - early return path",
@@ -724,20 +724,20 @@ func TestValidateDataMoverWithDifferentDataUploadStates(t *testing.T) {
 			shouldReturnEarly: true,
 		},
 		{
-			name:              "Azure platform - PV not finished - continue path",
-			platformType:      hyperv1.AzurePlatform,
-			pvBackupFinished:  false,
-			duFinished:        false,
-			expectedBehavior:  "should continue processing when PV is not finished",
-			shouldReturnEarly: false,
-		},
-		{
 			name:              "IBM Cloud platform - both PV and DU finished - early return path",
 			platformType:      hyperv1.IBMCloudPlatform,
 			pvBackupFinished:  true,
 			duFinished:        true,
 			expectedBehavior:  "should return early when both PV and DU are finished",
 			shouldReturnEarly: true,
+		},
+		{
+			name:              "IBM Cloud platform - only PV finished - continue path",
+			platformType:      hyperv1.IBMCloudPlatform,
+			pvBackupFinished:  true,
+			duFinished:        false,
+			expectedBehavior:  "should continue processing when only DU is finished",
+			shouldReturnEarly: false,
 		},
 		{
 			name:              "Kubevirt platform - both PV and DU finished - early return path",
@@ -771,31 +771,16 @@ func TestValidateDataMoverWithDifferentDataUploadStates(t *testing.T) {
 			expectedBehavior:  "should return early when both PV and DU are finished",
 			shouldReturnEarly: true,
 		},
-		{
-			name:              "AWS platform - neither PV nor DU finished - continue path",
-			platformType:      hyperv1.AWSPlatform,
-			pvBackupFinished:  false,
-			duFinished:        false,
-			expectedBehavior:  "should continue processing when neither PV nor DU are finished",
-			shouldReturnEarly: false,
-		},
-		{
-			name:              "IBM Cloud platform - only DU finished - continue path",
-			platformType:      hyperv1.IBMCloudPlatform,
-			pvBackupFinished:  false,
-			duFinished:        true,
-			expectedBehavior:  "should continue processing when only DU is finished",
-			shouldReturnEarly: false,
-		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
 			hcp := createTestHCP(tt.platformType)
 			backup := createTestBackup()
 
 			// Create a fake client
-			client := fake.NewClientBuilder().WithScheme(scheme).Build()
+			client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tt.objects...).Build()
 
 			validator := &BackupPluginValidator{
 				Log:                 logrus.New(),

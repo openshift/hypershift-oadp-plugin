@@ -128,6 +128,9 @@ func (pv *BackupPluginValidator) ValidateDataMover(ctx context.Context, hcp *hyp
 			return fmt.Errorf("error reconciling standard data mover: %s", err.Error())
 		}
 
+		*pvBackupFinished = *pv.PVBackupFinished
+		*duFinished = *pv.DUFinished
+
 		return nil
 	case hyperv1.AzurePlatform:
 		if *pv.PVBackupFinished {
@@ -138,6 +141,8 @@ func (pv *BackupPluginValidator) ValidateDataMover(ctx context.Context, hcp *hyp
 		if err := pv.reconcileAzureDataMover(ctx, hcp); err != nil {
 			return fmt.Errorf("error reconciling Azure data mover: %s", err.Error())
 		}
+
+		*pvBackupFinished = *pv.PVBackupFinished
 
 		return nil
 	case hyperv1.IBMCloudPlatform:
@@ -151,6 +156,9 @@ func (pv *BackupPluginValidator) ValidateDataMover(ctx context.Context, hcp *hyp
 			return fmt.Errorf("error reconciling standard data mover: %s", err.Error())
 		}
 
+		*pvBackupFinished = *pv.PVBackupFinished
+		*duFinished = *pv.DUFinished
+
 		return nil
 	case hyperv1.KubevirtPlatform:
 		if *pv.PVBackupFinished && *pv.DUFinished {
@@ -162,6 +170,9 @@ func (pv *BackupPluginValidator) ValidateDataMover(ctx context.Context, hcp *hyp
 		if err := pv.reconcileStandardDataMover(ctx, hcp); err != nil {
 			return fmt.Errorf("error reconciling standard data mover: %s", err.Error())
 		}
+
+		*pvBackupFinished = *pv.PVBackupFinished
+		*duFinished = *pv.DUFinished
 
 		return nil
 	case hyperv1.OpenStackPlatform:
@@ -175,6 +186,9 @@ func (pv *BackupPluginValidator) ValidateDataMover(ctx context.Context, hcp *hyp
 			return fmt.Errorf("error reconciling standard data mover: %s", err.Error())
 		}
 
+		*pvBackupFinished = *pv.PVBackupFinished
+		*duFinished = *pv.DUFinished
+
 		return nil
 	case hyperv1.AgentPlatform, hyperv1.NonePlatform:
 		if *pv.PVBackupFinished && *pv.DUFinished {
@@ -186,6 +200,9 @@ func (pv *BackupPluginValidator) ValidateDataMover(ctx context.Context, hcp *hyp
 		if err := pv.reconcileStandardDataMover(ctx, hcp); err != nil {
 			return fmt.Errorf("error reconciling standard data mover: %s", err.Error())
 		}
+
+		*pvBackupFinished = *pv.PVBackupFinished
+		*duFinished = *pv.DUFinished
 
 		return nil
 	default:
