@@ -20,6 +20,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -38,8 +39,12 @@ type BackupPlugin struct {
 
 	// uploadTimeout is the time in minutes to wait for the data upload to finish.
 	dataUploadTimeout time.Duration
-	finished          bool
-
+	pvBackupStarted   bool
+	pvBackupFinished  bool
+	duStarted         bool
+	duFinished        bool
+	hcPaused          bool
+	npPaused          bool
 	*plugtypes.BackupOptions
 }
 
@@ -76,18 +81,22 @@ func NewBackupPlugin(logger logrus.FieldLogger) (*BackupPlugin, error) {
 		logger.Infof("configuration for hypershift OADP plugin not found")
 	}
 
-	validator := &validation.BackupPluginValidator{}
-	if l, ok := logger.(*logrus.Logger); ok {
-		validator.Log = l
-	} else {
-		validator.Log = logrus.New()
+	validator := &validation.BackupPluginValidator{
+		Log:                 logger,
+		Client:              client,
+		HA:                  false,
+		DataUploadTimeout:   0,
+		DataUploadCheckPace: 0,
+		PVBackupStarted:     ptr.To(false),
+		PVBackupFinished:    ptr.To(false),
+		DUStarted:           ptr.To(false),
+		DUFinished:          ptr.To(false),
 	}
 
 	bp := &BackupPlugin{
 		log:       logger,
 		client:    client,
 		config:    pluginConfig.Data,
-		finished:  false,
 		ctx:       ctx,
 		validator: validator,
 	}
@@ -96,16 +105,10 @@ func NewBackupPlugin(logger logrus.FieldLogger) (*BackupPlugin, error) {
 		return nil, fmt.Errorf("error validating plugin configuration: %s", err.Error())
 	}
 
-	// Set the log level to pluginVerbosityLevel if set, keep debug level if not set
-	if bp.BackupOptions.PluginVerbosityLevel != "" {
-		parsedLevel, err := logrus.ParseLevel(bp.BackupOptions.PluginVerbosityLevel)
-		if err != nil {
-			return nil, fmt.Errorf("error parsing pluginVerbosityLevel: %s", err.Error())
-		}
-		logger.Infof("pluginVerbosityLevel set to %s", parsedLevel)
-		if l, ok := logger.(*logrus.Logger); ok {
-			l.SetLevel(parsedLevel)
-		}
+	// Set the timeouts for the validator
+	if validator, ok := bp.validator.(*validation.BackupPluginValidator); ok {
+		validator.DataUploadTimeout = bp.DataUploadTimeout
+		validator.DataUploadCheckPace = bp.DataUploadCheckPace
 	}
 
 	bp.log.Infof("Backup plugin initialized with log level: %s", logrus.GetLevel())
@@ -161,9 +164,16 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 
 		if p.hcp.Spec.ControllerAvailabilityPolicy == hyperv1.HighlyAvailable {
 			p.ha = true
+			if validator, ok := p.validator.(*validation.BackupPluginValidator); ok {
+				validator.HA = true
+			}
 		} else {
 			p.ha = false
+			if validator, ok := p.validator.(*validation.BackupPluginValidator); ok {
+				validator.HA = false
+			}
 		}
+
 	}
 
 	kind := item.GetObjectKind().GroupVersionKind().Kind
@@ -182,24 +192,32 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 			return nil, nil, fmt.Errorf("error converting item to HostedControlPlane: %v", err)
 		}
 
-		if err := p.validator.ValidatePlatformConfig(hcp); err != nil {
+		if err := p.validator.ValidatePlatformConfig(hcp, backup); err != nil {
 			return nil, nil, fmt.Errorf("error checking platform configuration: %v", err)
 		}
 
 	case common.MainKinds[kind]:
 		// Updating HostedClusters
-		if err := common.UpdateHostedCluster(ctx, p.client, p.log, "true", backup.Spec.IncludedNamespaces); err != nil {
-			return nil, nil, fmt.Errorf("error updating HostedClusters: %v", err)
+		if !p.hcPaused && (!p.pvBackupFinished || !p.duFinished) {
+			if err := common.UpdateHostedCluster(ctx, p.client, p.log, "true", backup.Spec.IncludedNamespaces); err != nil {
+				return nil, nil, fmt.Errorf("error updating HostedClusters: %v", err)
+			}
+			p.hcPaused = true
+			if validator, ok := p.validator.(*validation.BackupPluginValidator); ok {
+				validator.HCPaused = ptr.To(true)
+			}
 		}
 
 		// Updating NodePools
-		if err := common.UpdateNodepools(ctx, p.client, p.log, "true", backup.Spec.IncludedNamespaces); err != nil {
-			return nil, nil, fmt.Errorf("error updating NodePools: %v", err)
+		if !p.npPaused && (!p.pvBackupFinished || !p.duFinished) {
+			if err := common.UpdateNodepools(ctx, p.client, p.log, "true", backup.Spec.IncludedNamespaces); err != nil {
+				return nil, nil, fmt.Errorf("error updating NodePools: %v", err)
+			}
+			p.npPaused = true
+			if validator, ok := p.validator.(*validation.BackupPluginValidator); ok {
+				validator.NPaused = ptr.To(true)
+			}
 		}
-
-		defer func() {
-			p.pvTriggered = true
-		}()
 
 		if kind == common.HostedClusterKind {
 			metadata, err := meta.Accessor(item)
@@ -208,6 +226,17 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 			}
 			common.AddAnnotation(metadata, common.HostedClusterRestoredFromBackupAnnotation, "")
 			p.log.Infof("Added restore annotation to HostedCluster %s", metadata.GetName())
+		}
+
+		if kind == "Pod" {
+			metadata, err := meta.Accessor(item)
+			if err != nil {
+				return nil, nil, fmt.Errorf("error getting metadata accessor: %v", err)
+			}
+
+			if strings.Contains(metadata.GetName(), "etcd-") {
+				common.AddLabel(metadata, common.FSBackupLabelName, "true")
+			}
 		}
 
 	case kind == common.ClusterDeploymentKind:
@@ -229,51 +258,56 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 	}
 
 	if (backup.Spec.DefaultVolumesToFsBackup != nil && !*backup.Spec.DefaultVolumesToFsBackup) || backup.Spec.DefaultVolumesToFsBackup == nil {
-		if !p.finished {
-			var err error
-			p.log.Debug("DataUpload not finished yet")
-			if p.pvTriggered {
-				if p.finished, err = common.WaitForDataUpload(ctx, p.client, p.log, backup, p.dataUploadTimeout, p.DataUploadCheckPace); err != nil {
-					return nil, nil, err
-				}
-			}
+		p.log.Debug("Validating DataMover")
+		if err := p.validator.ValidateDataMover(ctx, p.hcp, backup, &p.pvBackupFinished, &p.duFinished); err != nil {
+			return nil, nil, fmt.Errorf("error validating DataMover: %v", err)
 		}
+
 	} else {
 		p.log.Debug("checking PodVolumeBackup")
-		if kind == "Pod" {
-			metadata, err := meta.Accessor(item)
-			if err != nil {
-				return nil, nil, fmt.Errorf("error getting metadata accessor: %v", err)
-			}
+		switch {
+		case !p.pvBackupStarted:
+			var err error
 
-			if strings.Contains(metadata.GetName(), "etcd-") {
-				common.AddLabel(metadata, common.FSBackupLabelName, "true")
-			}
-		}
-
-		if p.pvTriggered {
-			result, err := common.WaitForPodVolumeBackup(ctx, p.client, p.log, backup, p.dataUploadTimeout, p.DataUploadCheckPace, p.ha)
+			p.log.Debug("Checking if PodVolumeBackup exists")
+			p.pvBackupStarted, p.pvBackupFinished, err = common.CheckPodVolumeBackup(ctx, p.client, p.log, backup, p.ha)
 			if err != nil {
 				return nil, nil, err
 			}
+		// If the PodVolumeBackup is started, we need to wait for it to be completed, if not, continue with the backup
+		// This is a security measure to avoid deadlocks in the backup process, when the plugin waits for the PodVolumeBackup
+		// to be completed but the PodVolumeBackup is not started yet.
+		case p.pvBackupStarted && !p.pvBackupFinished:
+			var err error
 
-			if result {
-				p.finished = result
-
+			p.log.Debug("PodVolumeBackup exists, waiting for it to be completed")
+			p.pvBackupFinished, err = common.WaitForPodVolumeBackup(ctx, p.client, p.log, backup, p.dataUploadTimeout, p.DataUploadCheckPace, p.ha)
+			if err != nil {
+				return nil, nil, err
 			}
 		}
 	}
 
-	if p.finished && !p.Migration {
-		p.log.Debug("Volume backup is done, updating HC and NPs")
+	if (p.pvBackupFinished || p.duFinished) && (p.npPaused || p.hcPaused) && !p.Migration {
+		p.log.Info("Volume backup is done, updating HC and NPs")
 		// updating NodePools
 		if err := common.UpdateNodepools(ctx, p.client, p.log, "false", backup.Spec.IncludedNamespaces); err != nil {
 			return nil, nil, fmt.Errorf("error updating NodePools: %v", err)
 		}
+		p.npPaused = false
 
 		// updating HostedClusters
 		if err := common.UpdateHostedCluster(ctx, p.client, p.log, "false", backup.Spec.IncludedNamespaces); err != nil {
 			return nil, nil, fmt.Errorf("error updating HostedClusters: %v", err)
+		}
+		p.hcPaused = false
+	}
+
+	if backup.Status.Progress.ItemsBackedUp == (backup.Status.Progress.TotalItems - 10) {
+		p.log.Info("Backup is almost done, updating progress")
+		p.pvBackupFinished = true
+		if p.hcp.Spec.Platform.Type != hyperv1.AzurePlatform {
+			p.duFinished = true
 		}
 	}
 
