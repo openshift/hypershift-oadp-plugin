@@ -91,6 +91,8 @@ func NewBackupPlugin(logger logrus.FieldLogger) (*BackupPlugin, error) {
 		PVBackupFinished:    ptr.To(false),
 		DUStarted:           ptr.To(false),
 		DUFinished:          ptr.To(false),
+		NPaused:             ptr.To(false),
+		HCPaused:            ptr.To(false),
 	}
 
 	bp := &BackupPlugin{
