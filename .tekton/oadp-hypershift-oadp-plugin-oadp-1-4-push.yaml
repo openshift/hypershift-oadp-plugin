@@ -7,13 +7,13 @@ metadata:
     build.appstudio.redhat.com/target_branch: '{{target_branch}}'
     pipelinesascode.tekton.dev/cancel-in-progress: "false"
     pipelinesascode.tekton.dev/max-keep-runs: "3"
-    pipelinesascode.tekton.dev/on-cel-expression: event == "push" && target_branch == "oadp-1.5"
+    pipelinesascode.tekton.dev/on-cel-expression: event == "push" && target_branch == "oadp-1.4"
   creationTimestamp:
   labels:
-    appstudio.openshift.io/application: oadp-1-5
-    appstudio.openshift.io/component: oadp-hypershift-oadp-plugin-oadp-1-5
+    appstudio.openshift.io/application: oadp-1-4
+    appstudio.openshift.io/component: oadp-hypershift-oadp-plugin-oadp-1-4
     pipelines.appstudio.openshift.io/type: build
-  name: oadp-hypershift-oadp-plugin-oadp-1-5-on-push
+  name: oadp-hypershift-oadp-plugin-oadp-1-4-on-push
   namespace: ocp-art-tenant
 spec:
   params:
@@ -22,7 +22,7 @@ spec:
   - name: revision
     value: '{{revision}}'
   - name: output-image
-    value: quay.io/redhat-user-workloads/ocp-art-tenant/oadp-hypershift-oadp-plugin-oadp-1-5:{{revision}}
+    value: quay.io/redhat-user-workloads/ocp-art-tenant/oadp-hypershift-oadp-plugin-oadp-1-4:{{revision}}
   - name: build-platforms
     value:
     - linux/arm64
@@ -32,29 +32,15 @@ spec:
   - name: dockerfile
     value: Dockerfile.oadp
   - name: hermetic
-    value: "true"
+    value: 'true'
   - name: prefetch-input
     value: '[{"type": "gomod", "path": "."}, {"type": "rpm", "path": "hack/build/"}]'
   pipelineSpec:
     description: |
       This pipeline is ideal for building multi-arch container images from a Containerfile while maintaining trust after pipeline customization.
 
-      _Uses `buildah` to create a multi-platform container image leveraging [trusted artifacts](https://konflux-ci.dev/architecture/ADR/0036-trusted-artifacts.html). It also optionally creates a source image and runs some build-time tests. This pipeline requires that the [multi platform controller](https://github.com/konflux-ci/multi-platform-controller) is deployed and configured on your Konflux instance. Information is shared between tasks using OCI artifacts instead of PVCs. EC will pass the [`trusted_task.trusted`](https://enterprisecontract.dev/docs/ec-policies/release_policy.html#trusted_task__trusted) policy as long as all data used to build the artifact is generated from trusted tasks.
+      _Uses `buildah` to create a multi-platform container image leveraging [trusted artifacts](https://konflux-ci.dev/architecture/ADR/0036-trusted-artifacts.html). It also optionally creates a source image and runs some build-time tests. This pipeline requires that the [multi platform controller](https://github.com/konflux-ci/multi-platform-controller) is deployed and configured on your Konflux instance. Information is shared between tasks using OCI artifacts instead of PVCs. EC will pass the [`trusted_task.trusted`](https://conforma.dev/docs/policy/packages/release_trusted_task.html#trusted_task__trusted) policy as long as all data used to build the artifact is generated from trusted tasks.
       This pipeline is pushed as a Tekton bundle to [quay.io](https://quay.io/repository/konflux-ci/tekton-catalog/pipeline-docker-build-multi-platform-oci-ta?tab=tags)_
-    finally:
-    - name: show-sbom
-      params:
-      - name: IMAGE_URL
-        value: $(tasks.build-image-index.results.IMAGE_URL)
-      taskRef:
-        params:
-        - name: name
-          value: show-sbom
-        - name: bundle
-          value: quay.io/konflux-ci/tekton-catalog/task-show-sbom:0.1@sha256:86c069cac0a669797e8049faa8aa4088e70ff7fcd579d5bdc37626a9e0488a05
-        - name: kind
-          value: task
-        resolver: bundles
     params:
     - description: Source Repository URL
       name: git-url
@@ -93,6 +79,7 @@ spec:
     - default: ""
       description: Image tag expiration time, time values could be something like 1h, 2d, 3w for hours, days, and weeks, respectively.
       name: image-expires-after
+      type: string
     - default: "false"
       description: Build a source image.
       name: build-source-image
@@ -145,7 +132,7 @@ spec:
         - name: name
           value: init
         - name: bundle
-          value: quay.io/konflux-ci/tekton-catalog/task-init:0.2@sha256:1d8221c84f91b923d89de50bf16481ea729e3b68ea04a9a7cbe8485ddbb27ee6
+          value: quay.io/konflux-ci/tekton-catalog/task-init:0.2@sha256:ded314206f09712b2116deb050b774ae7efef9ab243794334c8e616871a3ffa5
         - name: kind
           value: task
         resolver: bundles
@@ -166,7 +153,7 @@ spec:
         - name: name
           value: git-clone-oci-ta
         - name: bundle
-          value: quay.io/konflux-ci/tekton-catalog/task-git-clone-oci-ta:0.1@sha256:d35e5d501cb5f5f88369511f76249857cb5ac30250e1dcf086939321964ff6b9
+          value: quay.io/konflux-ci/tekton-catalog/task-git-clone-oci-ta:0.1@sha256:4a601aeec58a1dd89c271e728fd8f0d84777825b46940c3aec27f15bab3edacf
         - name: kind
           value: task
         resolver: bundles
@@ -180,8 +167,6 @@ spec:
         workspace: git-auth
     - name: prefetch-dependencies
       params:
-      - name: dev-package-managers
-        value: "true"
       - name: input
         value: $(params.prefetch-input)
       - name: SOURCE_ARTIFACT
@@ -197,7 +182,7 @@ spec:
         - name: name
           value: prefetch-dependencies-oci-ta
         - name: bundle
-          value: quay.io/konflux-ci/tekton-catalog/task-prefetch-dependencies-oci-ta:0.2@sha256:092491ac0f6e1009d10c58a1319d1029371bf637cc1293cceba53c6da5314ed1
+          value: quay.io/konflux-ci/tekton-catalog/task-prefetch-dependencies-oci-ta:0.2@sha256:29869c64ff27e964e26a8a7ea2c882a2ed5424210bd0603be45a07e2ebf308cc
         - name: kind
           value: task
         resolver: bundles
@@ -247,14 +232,14 @@ spec:
         - com.redhat.component=oadp-hypershift-velero-plugin-container
         - io.k8s.description=OpenShift API for Data Protection - Hypershift Velero Plugin
         - io.k8s.display-name=OpenShift API for Data Protection Hypershift Velero Plugin
-        - io.openshift.build.commit.branch=oadp-1.5
+        - io.openshift.build.commit.branch=oadp-1.4
         - io.openshift.build.source-location=https://github.com/openshift/hypershift-oadp-plugin
         - io.openshift.tags=migration
         - maintainer=OpenShift API for Data Protection Team <oadp-team@redhat.com>
         - name=oadp/oadp-hypershift-velero-plugin-rhel9
         - summary=OpenShift API for Data Protection - Hypershift Velero Plugin
         - vendor=Red Hat, Inc.
-        - version=1.5.1
+        - version=1.4.6
       runAfter:
       - prefetch-dependencies
       taskRef:
@@ -262,7 +247,7 @@ spec:
         - name: name
           value: buildah-remote-oci-ta
         - name: bundle
-          value: quay.io/konflux-ci/tekton-catalog/task-buildah-remote-oci-ta:0.4@sha256:9e866d4d0489a6ab84ae263db416c9f86d2d6117ef4444f495a0e97388ae3ac0
+          value: quay.io/konflux-ci/tekton-catalog/task-buildah-remote-oci-ta:0.4@sha256:bd1035554521c48412599a0ae7c77a0701070bba22eb5cec524eb0968d5f4223
         - name: kind
           value: task
         resolver: bundles
@@ -291,7 +276,7 @@ spec:
         - name: name
           value: build-image-index
         - name: bundle
-          value: quay.io/konflux-ci/tekton-catalog/task-build-image-index:0.1@sha256:3499772af90aad0d3935629be6d37dd9292195fb629e6f43ec839c7f545a0faa
+          value: quay.io/konflux-ci/tekton-catalog/task-build-image-index:0.1@sha256:3bf6e4e83f911066430041534a69eec51dbd0f52f34a9bf41c6f3a24ec2ffb22
         - name: kind
           value: task
         resolver: bundles
@@ -304,12 +289,12 @@ spec:
       params:
       - name: BINARY_IMAGE
         value: $(tasks.build-image-index.results.IMAGE_URL)
+      - name: BINARY_IMAGE_DIGEST
+        value: $(tasks.build-image-index.results.IMAGE_DIGEST)
       - name: SOURCE_ARTIFACT
         value: $(tasks.prefetch-dependencies.results.SOURCE_ARTIFACT)
       - name: CACHI2_ARTIFACT
         value: $(tasks.prefetch-dependencies.results.CACHI2_ARTIFACT)
-      - name: BINARY_IMAGE_DIGEST
-        value: $(tasks.build-image-index.results.IMAGE_DIGEST)
       runAfter:
       - build-image-index
       taskRef:
@@ -317,7 +302,7 @@ spec:
         - name: name
           value: source-build-oci-ta
         - name: bundle
-          value: quay.io/konflux-ci/tekton-catalog/task-source-build-oci-ta:0.3@sha256:b1eb49583b41872b27356fee20d5f0eb6ff7f5cdeacde7ffb39655f031104728
+          value: quay.io/konflux-ci/tekton-catalog/task-source-build-oci-ta:0.3@sha256:f1c0743939fe246b19e9e268a3b96b22b724096dcf946548c3d60e184136e32f
         - name: kind
           value: task
         resolver: bundles
@@ -343,7 +328,7 @@ spec:
         - name: name
           value: deprecated-image-check
         - name: bundle
-          value: quay.io/konflux-ci/tekton-catalog/task-deprecated-image-check:0.5@sha256:3c8b81fa868e27c6266e7660a4bfb4c822846dcf4304606e71e20893b0d3e515
+          value: quay.io/konflux-ci/tekton-catalog/task-deprecated-image-check:0.5@sha256:1d07d16810c26713f3d875083924d93697900147364360587ccb5a63f2c31012
         - name: kind
           value: task
         resolver: bundles
@@ -365,7 +350,7 @@ spec:
         - name: name
           value: clair-scan
         - name: bundle
-          value: quay.io/konflux-ci/tekton-catalog/task-clair-scan:0.2@sha256:417f44117f8d87a4a62fea6589b5746612ac61640b454dbd88f74892380411f2
+          value: quay.io/konflux-ci/tekton-catalog/task-clair-scan:0.2@sha256:893ffa3ce26b061e21bb4d8db9ef7ed4ddd4044fe7aa5451ef391034da3ff759
         - name: kind
           value: task
         resolver: bundles
@@ -374,7 +359,12 @@ spec:
         operator: in
         values:
         - "false"
-    - name: ecosystem-cert-preflight-checks
+    - matrix:
+        params:
+        - name: platform
+          value:
+          - $(params.build-platforms)
+      name: ecosystem-cert-preflight-checks
       params:
       - name: image-url
         value: $(tasks.build-image-index.results.IMAGE_URL)
@@ -385,7 +375,7 @@ spec:
         - name: name
           value: ecosystem-cert-preflight-checks
         - name: bundle
-          value: quay.io/konflux-ci/tekton-catalog/task-ecosystem-cert-preflight-checks:0.2@sha256:f99d2bdb02f13223d494077a2cde31418d09369f33c02134a8e7e5fad2f61eda
+          value: quay.io/konflux-ci/tekton-catalog/task-ecosystem-cert-preflight-checks:0.2@sha256:1f151e00f7fc427654b7b76045a426bb02fe650d192ffe147a304d2184787e38
         - name: kind
           value: task
         resolver: bundles
@@ -420,7 +410,12 @@ spec:
         operator: in
         values:
         - "false"
-    - name: clamav-scan
+    - matrix:
+        params:
+        - name: image-arch
+          value:
+          - $(params.build-platforms)
+      name: clamav-scan
       params:
       - name: image-digest
         value: $(tasks.build-image-index.results.IMAGE_DIGEST)
@@ -433,7 +428,7 @@ spec:
         - name: name
           value: clamav-scan
         - name: bundle
-          value: quay.io/konflux-ci/tekton-catalog/task-clamav-scan:0.2@sha256:7749146f7e4fe530846f1b15c9366178ec9f44776ef1922a60d3e7e2b8c6426b
+          value: quay.io/konflux-ci/tekton-catalog/task-clamav-scan:0.3@sha256:b0bd59748cda4a7abf311e4f448e6c1d00c6b6d8c0ecc1c2eb33e08dc0e0b802
         - name: kind
           value: task
         resolver: bundles
@@ -478,7 +473,7 @@ spec:
         - name: name
           value: sast-coverity-check-oci-ta
         - name: bundle
-          value: quay.io/konflux-ci/tekton-catalog/task-sast-coverity-check-oci-ta:0.3@sha256:f9ca942208dc2e63b479384ccc56a611cc793397ecc837637b5b9f89c2ecbefe
+          value: quay.io/konflux-ci/tekton-catalog/task-sast-coverity-check-oci-ta:0.3@sha256:9c776c82aeaf36539a0aa68764ed285f78530d78207ddb011aaa0a01f9ccb16d
         - name: kind
           value: task
         resolver: bundles
@@ -568,9 +563,9 @@ spec:
         value: $(tasks.build-image-index.results.IMAGE_DIGEST)
       - name: ADDITIONAL_TAGS
         value:
-        - '1.5'
-        - '1.5.1'
-        - 'oadp-1.5'
+        - '1.4'
+        - '1.4.6'
+        - 'oadp-1.4'
         - 'latest'
       runAfter:
       - build-image-index
@@ -579,7 +574,7 @@ spec:
         - name: name
           value: apply-tags
         - name: bundle
-          value: quay.io/konflux-ci/tekton-catalog/task-apply-tags:0.2@sha256:517a51e260c0b59654a9d7b842e1ab07d76bce15ca7ce9c8fd2489a19be6463d
+          value: quay.io/konflux-ci/tekton-catalog/task-apply-tags:0.2@sha256:e0de426d492e195f59c99d2ea1ca0df7bfb8c689f5d1468fe7f70eb8684b8d02
         - name: kind
           value: task
         resolver: bundles
@@ -602,7 +597,7 @@ spec:
         - name: name
           value: push-dockerfile-oci-ta
         - name: bundle
-          value: quay.io/konflux-ci/tekton-catalog/task-push-dockerfile-oci-ta:0.1@sha256:8c75c4a747e635e5f3e12266a3bb6e5d3132bf54e37eaa53d505f89897dd8eca
+          value: quay.io/konflux-ci/tekton-catalog/task-push-dockerfile-oci-ta:0.1@sha256:235ef6e835de8171c07b8a7f8947d0b40bfcff999e1ff3cb6ddd9acc65c48430
         - name: kind
           value: task
         resolver: bundles
@@ -619,7 +614,7 @@ spec:
         - name: name
           value: rpms-signature-scan
         - name: bundle
-          value: quay.io/konflux-ci/tekton-catalog/task-rpms-signature-scan:0.2@sha256:1b6c20ab3dbfb0972803d3ebcb2fa72642e59400c77bd66dfd82028bdd09e120
+          value: quay.io/konflux-ci/konflux-vanguard/task-rpms-signature-scan:0.2@sha256:e127e0e0a5aab1364b560436594fe7ed67abcd5f8d6dd3ef14ac1f35cf81078c
         - name: kind
           value: task
         resolver: bundles
@@ -656,7 +651,7 @@ spec:
     - name: netrc
       optional: true
   taskRunTemplate:
-    serviceAccountName: build-pipeline-oadp-hypershift-oadp-plugin-oadp-1-5
+    serviceAccountName: build-pipeline-oadp-hypershift-oadp-plugin-oadp-1-4
   workspaces:
   - name: git-auth
     secret:
