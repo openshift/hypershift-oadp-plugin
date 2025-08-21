@@ -80,8 +80,8 @@ func GetConfig() (*rest.Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	cfg.QPS = 100
-	cfg.Burst = 100
+	cfg.QPS = 200
+	cfg.Burst = 300
 	return cfg, nil
 }
 
@@ -475,7 +475,7 @@ func WaitForPausedPropagated(ctx context.Context, c crclient.Client, log logrus.
 		}
 		log.Infof("waiting for HCP to set PausedUntil to %s", paused)
 
-		if hcp.Spec.PausedUntil != nil {
+		if hcp.Spec.PausedUntil != nil && *hcp.Spec.PausedUntil == paused {
 			log.Debug("HostedControlPlane is paused")
 			return true, nil
 		}
@@ -510,12 +510,13 @@ func UpdateHostedCluster(ctx context.Context, c crclient.Client, log logrus.Fiel
 	}
 
 	for _, hc := range hostedClusters.Items {
-		// Create a retry loop with exponential backoff
+		// Create a retry loop with improved backoff for better conflict resolution
 		backoff := wait.Backoff{
-			Steps:    5,
-			Duration: 1 * time.Second,
+			Steps:    10,                     // Increased from 5 to 10
+			Duration: 500 * time.Millisecond, // Reduced initial duration for faster retries
 			Factor:   2.0,
 			Jitter:   0.1,
+			Cap:      30 * time.Second, // Cap maximum wait time to 30 seconds
 		}
 
 		err := wait.ExponentialBackoff(backoff, func() (bool, error) {
@@ -542,6 +543,10 @@ func UpdateHostedCluster(ctx context.Context, c crclient.Client, log logrus.Fiel
 				if err := WaitForPausedPropagated(ctx, c, log, currentHC, defaultWaitForPausedTimeout, paused); err != nil {
 					return false, err
 				}
+
+				log.Infof("Successfully set HostedCluster %s PausedUntil to %s", currentHC.Name, paused)
+			} else {
+				log.Debugf("HostedCluster %s already has PausedUntil set to %s, no update needed", currentHC.Name, paused)
 			}
 
 			return true, nil
@@ -572,12 +577,13 @@ func UpdateNodepools(ctx context.Context, c crclient.Client, log logrus.FieldLog
 	}
 
 	for _, np := range nodepools.Items {
-		// Create a retry loop with exponential backoff
+		// Create a retry loop with improved backoff for better conflict resolution
 		backoff := wait.Backoff{
-			Steps:    5,
-			Duration: 1 * time.Second,
+			Steps:    10,                     // Increased from 5 to 10
+			Duration: 500 * time.Millisecond, // Reduced initial duration for faster retries
 			Factor:   2.0,
 			Jitter:   0.1,
+			Cap:      30 * time.Second, // Cap maximum wait time to 30 seconds
 		}
 
 		err := wait.ExponentialBackoff(backoff, func() (bool, error) {
@@ -592,11 +598,15 @@ func UpdateNodepools(ctx context.Context, c crclient.Client, log logrus.FieldLog
 				currentNP.Spec.PausedUntil = ptr.To(paused)
 				if err := c.Update(ctx, currentNP); err != nil {
 					if apierrors.IsConflict(err) {
-						log.Infof("Conflict detected pausing the NodePool %s, retrying...", currentNP.Name)
+						log.Infof("Conflict detected setting PauseUntil to %s in NodePool %s, retrying...", paused, currentNP.Name)
 						return false, nil
 					}
 					return false, err
 				}
+
+				log.Infof("Successfully set NodePool %s PausedUntil to %s", currentNP.Name, paused)
+			} else {
+				log.Debugf("NodePool %s already has PausedUntil set to %s, no update needed", np.Name, paused)
 			}
 
 			return true, nil
