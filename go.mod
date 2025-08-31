@@ -34,7 +34,7 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	golang.org/x/exp v0.0.0-20240213143201-ec583247a57a // indirect
 	gomodules.xyz/jsonpatch/v2 v2.4.0 // indirect
-	gopkg.in/evanphx/json-patch.v4 v4.12.0 // indirect
+	gopkg.in/evanphx/json-patch.v5 v5.9.11 // indirect
 )
 
 require (
