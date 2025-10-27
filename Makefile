@@ -24,25 +24,27 @@ GO=GO111MODULE=on GOWORK=off GOFLAGS=-mod=vendor go
 
 .PHONY: install-goreleaser
 install-goreleaser:
- 	## Latest version of goreleaser v1. V2 requires go 1.24+
-	@echo "Installing goreleaser..."
-	@GOFLAGS= go install github.com/goreleaser/goreleaser@v1.26.2
+ 	## Using goreleaser v2 compatible with go 1.24
+	@echo "Installing goreleaser v2..."
+	@mkdir -p ./bin
+	@GOBIN=$(PWD)/bin GOFLAGS= go install github.com/goreleaser/goreleaser/v2@latest
 	@echo "Goreleaser installed successfully!"
 
 .PHONY: local
 local: verify install-goreleaser build-dirs
-	goreleaser build --snapshot --clean
+	./bin/goreleaser build --snapshot --clean
 	@mkdir -p dist/$(BIN)_$(VERSION)
-	@mv dist/$(BIN)_*/* dist/$(BIN)_$(VERSION)/
-	@rm -rf dist/$(BIN)_darwin_* dist/$(BIN)_linux_*
+	@find dist/default_*/ -name "$(BIN)-*" -exec cp {} dist/$(BIN)_$(VERSION)/ \;
+	@echo "Binaries copied to dist/$(BIN)_$(VERSION)/"
+	@ls -la dist/$(BIN)_$(VERSION)/
 
 .PHONY: release
 release: verify install-goreleaser
-	goreleaser release --clean
+	./bin/goreleaser release --clean
 
 .PHONY: release-local
 release-local: verify install-goreleaser build-dirs
-	GORELEASER_CURRENT_TAG=$(VERSION) goreleaser build --clean
+	GORELEASER_CURRENT_TAG=$(VERSION) ./bin/goreleaser build --clean
 
 .PHONY: tests
 test:
@@ -56,8 +58,23 @@ cover:
 deps:
 	$(GO) mod tidy && $(GO) mod vendor
 
+.PHONY: update-deps
+update-deps:
+	@echo "Running dependency update script..."
+	$(GO) run scripts/update-dependencies.go
+
 .PHONY: verify
-verify: verify-modules test
+verify: verify-modules test verify-goreleaser
+
+.PHONY: verify-goreleaser
+verify-goreleaser: install-goreleaser
+	@echo "Verifying GoReleaser CI configuration..."
+	./bin/goreleaser check --config .goreleaser.ci.yaml
+
+.PHONY: verify-goreleaser-dev
+verify-goreleaser-dev: install-goreleaser
+	@echo "Verifying GoReleaser development configuration..."
+	./bin/goreleaser check
 
 .PHONY: docker-build
 docker-build:
@@ -82,4 +99,4 @@ build-dirs:
 .PHONY: clean
 clean:
 	@echo "cleaning"
-	rm -rf _output dist
+	rm -rf _output dist bin

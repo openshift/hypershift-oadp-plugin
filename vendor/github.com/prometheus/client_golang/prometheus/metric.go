@@ -242,7 +242,7 @@ func NewMetricWithExemplars(m Metric, exemplars ...Exemplar) (Metric, error) {
 	)
 	for i, e := range exemplars {
 		ts := e.Timestamp
-		if ts == (time.Time{}) {
+		if ts.IsZero() {
 			ts = now
 		}
 		exs[i], err = newExemplar(e.Value, ts, e.Labels)
