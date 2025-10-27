@@ -1,7 +1,12 @@
-# GoReleaser v2 configuration
+# GoReleaser v2 configuration for CI environments
+# This configuration is optimized for CI builds without full Git history
 version: 2
 
 project_name: hypershift-oadp-plugin
+
+# Git configuration for CI environments
+git:
+  tag_sort: -version:refname
 
 before:
   hooks:
@@ -38,22 +43,14 @@ checksum:
   name_template: 'checksums.txt'
   algorithm: sha256
 
+# Skip changelog generation in CI to avoid Git history dependencies
 changelog:
-  sort: asc
-  filters:
-    exclude:
-      - '^docs:'
-      - '^test:'
-      - '^ci:'
+  disable: true
 
+# Configure snapshot mode for CI builds
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot"
+
+# Skip release creation in CI
 release:
-  draft: true
-  mode: replace
-  header: |
-    ## HyperShift OADP Plugin {{ .Version }}
-
-    This is a release of the HyperShift OADP Plugin.
-  footer: |
-    ## Thanks!
-
-    Thanks to all contributors who helped with this release!
+  disable: true

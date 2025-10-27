@@ -6,7 +6,7 @@ require (
 	github.com/kubernetes-csi/external-snapshotter/client/v8 v8.2.0
 	github.com/onsi/gomega v1.38.0
 	github.com/openshift/hive/apis v0.0.0-20241220022629-3f49f26197ff
-	github.com/openshift/hypershift/api v0.0.0-20251024225833-7a63e46b0d15
+	github.com/openshift/hypershift/api v0.0.0-20251027193323-9e76b0a736a8
 	github.com/sirupsen/logrus v1.9.3
 	github.com/vmware-tanzu/velero v1.14.0
 	k8s.io/api v0.32.3
