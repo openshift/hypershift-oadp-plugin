@@ -168,7 +168,7 @@ github.com/openshift/hive/apis/hive/v1/openstack
 github.com/openshift/hive/apis/hive/v1/ovirt
 github.com/openshift/hive/apis/hive/v1/vsphere
 github.com/openshift/hive/apis/scheme
-# github.com/openshift/hypershift/api v0.0.0-20251028230725-05a2fcdd598f
+# github.com/openshift/hypershift/api v0.0.0-20251030142908-9ecb32c35861
 ## explicit; go 1.24.0
 github.com/openshift/hypershift/api/hypershift/v1beta1
 github.com/openshift/hypershift/api/ibmcapi
