@@ -1,0 +1,56 @@
+# GoReleaser v2 configuration for CI environments
+# This configuration is optimized for CI builds without full Git history
+version: 2
+
+project_name: hypershift-oadp-plugin
+
+# Git configuration for CI environments
+git:
+  tag_sort: -version:refname
+
+before:
+  hooks:
+    - go mod tidy
+    - go mod vendor
+
+builds:
+  - id: default
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    binary: hypershift-oadp-plugin-{{ .Os }}-{{ .Arch }}
+    main: ./main.go
+    ldflags:
+      - -s -w -extldflags "-static"
+      - -X github.com/openshift/hypershift-oadp-plugin/pkg/version.Version={{.Version}}
+      - -X github.com/openshift/hypershift-oadp-plugin/pkg/version.Commit={{.Commit}}
+      - -X github.com/openshift/hypershift-oadp-plugin/pkg/version.Date={{.Date}}
+
+archives:
+  - id: default
+    name_template: "{{ .ProjectName }}_{{ .Version }}"
+    files:
+      - LICENSE
+      - README.md
+      - none*
+
+checksum:
+  name_template: 'checksums.txt'
+  algorithm: sha256
+
+# Skip changelog generation in CI to avoid Git history dependencies
+changelog:
+  disable: true
+
+# Configure snapshot mode for CI builds
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot"
+
+# Skip release creation in CI
+release:
+  disable: true

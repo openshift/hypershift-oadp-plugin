@@ -1,3 +1,6 @@
+# GoReleaser v2 configuration
+version: 2
+
 project_name: hypershift-oadp-plugin
 
 before:
@@ -6,7 +9,8 @@ before:
     - go mod vendor
 
 builds:
-  - env:
+  - id: default
+    env:
       - CGO_ENABLED=0
     goos:
       - linux
@@ -23,7 +27,8 @@ builds:
       - -X github.com/openshift/hypershift-oadp-plugin/pkg/version.Date={{.Date}}
 
 archives:
-  - name_template: "{{ .ProjectName }}_{{ .Version }}"
+  - id: default
+    name_template: "{{ .ProjectName }}_{{ .Version }}"
     files:
       - LICENSE
       - README.md
