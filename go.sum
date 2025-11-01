@@ -208,8 +208,8 @@ github.com/openshift/custom-resource-status v1.1.3-0.20220503160415-f2fdb4999d87
 github.com/openshift/custom-resource-status v1.1.3-0.20220503160415-f2fdb4999d87/go.mod h1:DB/Mf2oTeiAmVVX1gN+NEqweonAPY0TKUwADizj8+ZA=
 github.com/openshift/hive/apis v0.0.0-20241220022629-3f49f26197ff h1:6C1z4xMAruyeiTFGqahxNDpI1cXPCjpaFeIeIodty08=
 github.com/openshift/hive/apis v0.0.0-20241220022629-3f49f26197ff/go.mod h1:1vBNCcWNpQyFCz83PWYT/lHUFJ9ost2t5FijHElh6gQ=
-github.com/openshift/hypershift/api v0.0.0-20251030142908-9ecb32c35861 h1:8exG9Mr7+RaZGcN4iDj4QIm8G3Q75Mkel09yYvWfXP4=
-github.com/openshift/hypershift/api v0.0.0-20251030142908-9ecb32c35861/go.mod h1:lgs9qSzYJJ2jLrDPNBBeVgsmIe9IKkE9TqJdumUqW3M=
+github.com/openshift/hypershift/api v0.0.0-20251101021033-7916f3f968a8 h1:c6Sj0HcQMQjXHWHm0CTFp8SwUmCAI4D2LU1HJOUOMoI=
+github.com/openshift/hypershift/api v0.0.0-20251101021033-7916f3f968a8/go.mod h1:lgs9qSzYJJ2jLrDPNBBeVgsmIe9IKkE9TqJdumUqW3M=
 github.com/openshift/velero v0.10.2-0.20250514165055-8fbcf3a8da11 h1:/BjkW8HljIX96clCuv/V+PzShD3coVcNilCXd/Axlfo=
 github.com/openshift/velero v0.10.2-0.20250514165055-8fbcf3a8da11/go.mod h1:+wInt9pLqlRiUZAWsO5eSxLZK9Q3jSV9MFaUrBfvGN0=
 github.com/pkg/errors v0.9.1 h1:FEBLx1zS214owpjy7qsBeixbURkuhQAwrK5UwLGTwt4=
