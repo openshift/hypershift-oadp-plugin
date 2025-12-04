@@ -555,25 +555,19 @@ func updateHypershiftResource(
 				needsUpdate = currentPausedUntil != nil
 			} else {
 				// For pause: we need to set pausedUntil to the paused value
-				needsUpdate = (currentPausedUntil == nil && paused != "") || (currentPausedUntil != nil && *currentPausedUntil != paused)
+				needsUpdate = currentPausedUntil == nil || *currentPausedUntil != paused
 			}
 
 			if needsUpdate {
-				if paused == "" {
+				switch paused {
+				case "":
 					log.Infof("setting PauseUntil to nil (unpause) in %s %s", resourceType, current.GetName())
-					// Update PausedUntil field to nil for unpause
 					pausedUntilSetter(current, nil)
-				} else {
-					log.Infof("setting PauseUntil to %s in %s %s", paused, resourceType, current.GetName())
-					// Update PausedUntil field
-					pausedUntilSetter(current, ptr.To(paused))
-				}
-
-				// Add or remove audit annotations atomically with PausedUntil update
-				if paused == "true" {
-					addPauseAuditAnnotations(current)
-				} else if paused == "" {
 					removePauseAuditAnnotations(current)
+				case "true":
+					log.Infof("setting PauseUntil to %s in %s %s", paused, resourceType, current.GetName())
+					pausedUntilSetter(current, ptr.To(paused))
+					addPauseAuditAnnotations(current)
 				}
 
 				// Perform the atomic update
@@ -799,10 +793,9 @@ func GetHCPNamespace(name, namespace string) string {
 // ShouldEndPluginExecution checks if the plugin should end execution by verifying if the required
 // Hypershift resources (HostedControlPlane and HostedCluster) exist in the cluster.
 // Returns true if the plugin should end execution (i.e., if this is not a Hypershift cluster).
-func ShouldEndPluginExecution(ctx context.Context, backup *veleroapiv1.Backup, c crclient.Client, log logrus.FieldLogger) bool {
+func ShouldEndPluginExecution(ctx context.Context, backup *veleroapiv1.Backup, c crclient.Client, log logrus.FieldLogger) (bool, error) {
 	if len(backup.Spec.IncludedNamespaces) == 0 {
-		log.Debug("No namespaces provided")
-		return true
+		return true, fmt.Errorf("no namespaces provided")
 	}
 
 	// Check for both short and full resource names
@@ -810,21 +803,20 @@ func ShouldEndPluginExecution(ctx context.Context, backup *veleroapiv1.Backup, c
 		if strings.Contains(resource, "hostedcluster") ||
 			strings.Contains(resource, "hostedcontrolplane") ||
 			strings.Contains(resource, "nodepool") {
-			return false
+			return false, nil
 		}
 	}
 
 	exists, err := CRDExists(ctx, "hostedcontrolplanes.hypershift.openshift.io", c)
 	if err != nil {
-		log.Debugf("Error checking for HostedControlPlane CRD: %v", err)
-		return true
+		return true, fmt.Errorf("error checking for HostedControlPlane CRD: %v", err)
 	}
 
 	if exists {
-		return false
+		return false, nil
 	}
 
-	return true
+	return true, fmt.Errorf("no HostedControlPlane CRD found")
 }
 
 func CRDExists(ctx context.Context, crdName string, c crclient.Client) (bool, error) {

@@ -164,8 +164,8 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 	p.log.Debug("Entering Hypershift backup plugin")
 	ctx := context.Context(p.ctx)
 
-	if returnEarly := common.ShouldEndPluginExecution(ctx, backup, p.client, p.log); returnEarly {
-		p.log.Info("Skipping hypershift plugin execution - not a hypershift backup")
+	if returnEarly, err := common.ShouldEndPluginExecution(ctx, backup, p.client, p.log); returnEarly {
+		p.log.Infof("Skipping hypershift plugin execution - not a hypershift backup: %v", err)
 		return item, nil, nil
 	}
 
@@ -294,48 +294,42 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 				progressPercent, backup.Status.Progress.ItemsBackedUp, backup.Status.Progress.TotalItems, p.hcPaused, p.npPaused, backup.Status.Phase)
 		}
 
-		switch {
-		// PAUSE when progress > 0% and < 65% and BOTH not already paused
-		case progressPercent > 0.0 && progressPercent <= 65.0:
-			if !p.hcPaused && !p.npPaused {
-				p.log.Infof("Backup progress %.1f%% - executing PAUSE logic", progressPercent)
+		switch backup.Status.Phase {
+		case velerov1.BackupPhaseFinalizingPartiallyFailed,
+			velerov1.BackupPhaseFailed,
+			velerov1.BackupPhasePartiallyFailed,
+			velerov1.BackupPhaseFailedValidation:
 
-				// Pause HostedClusters
-				p.log.Info("Pausing HostedClusters with audit annotations...")
-				if err := common.UpdateHostedCluster(ctx, p.client, p.log, "true", backup.Spec.IncludedNamespaces); err != nil {
-					return nil, nil, fmt.Errorf("error pausing HostedClusters: %v", err)
+			p.log.Infof("WARNING: Backup status is %s forcing UNPAUSE logic", backup.Status.Phase)
+			if p.hcPaused || p.npPaused {
+				if err := p.unPauseAll(ctx, backup); err != nil {
+					p.log.Errorf("error unpausing HostedClusters/NodePools: %v", err)
+					return item, nil, nil
 				}
-				p.hcPaused = true
-				p.log.Info("Successfully paused HostedClusters with audit annotations")
-
-				// Pause NodePools
-				p.log.Info("Pausing NodePools with audit annotations...")
-				if err := common.UpdateNodepools(ctx, p.client, p.log, "true", backup.Spec.IncludedNamespaces); err != nil {
-					return nil, nil, fmt.Errorf("error pausing NodePools: %v", err)
-				}
-				p.npPaused = true
-				p.log.Info("Successfully paused NodePools with audit annotations")
-
 			}
 
-		// UNPAUSE when progress > 90% and BOTH are paused
-		case progressPercent > 90.0:
-			// Check the HC/NP pause state from Kubernetes
+			return item, nil, nil
+		}
 
-			if p.hcPaused && p.npPaused {
+		switch {
+		// PAUSE when progress > 0% and <= 65%
+		case progressPercent > 0.0 && progressPercent <= 65.0:
+			if !p.hcPaused || !p.npPaused {
+				p.log.Infof("Backup progress %.1f%% - executing PAUSE logic", progressPercent)
+				if err := p.pauseAll(ctx, backup); err != nil {
+					p.log.Errorf("error pausing HostedClusters/NodePools: %v", err)
+					return item, nil, nil
+				}
+			}
+
+		// UNPAUSE when progress > 85%
+		case progressPercent > 85.0:
+			if p.hcPaused || p.npPaused {
 				p.log.Infof("Backup progress %.1f%% - executing UNPAUSE logic", progressPercent)
-
-				// Unpause HostedClusters
-				if err := common.UpdateHostedCluster(ctx, p.client, p.log, "", backup.Spec.IncludedNamespaces); err != nil {
-					return nil, nil, fmt.Errorf("error unpausing HostedClusters: %v", err)
+				if err := p.unPauseAll(ctx, backup); err != nil {
+					p.log.Errorf("error unpausing HostedClusters/NodePools: %v", err)
+					return item, nil, nil
 				}
-				p.hcPaused = false
-
-				// Unpause NodePools
-				if err := common.UpdateNodepools(ctx, p.client, p.log, "", backup.Spec.IncludedNamespaces); err != nil {
-					return nil, nil, fmt.Errorf("error unpausing NodePools: %v", err)
-				}
-				p.npPaused = false
 			}
 		}
 	}
@@ -344,22 +338,54 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 	// Always attempt to unpause HostedClusters and NodePools regardless of internal state
 	// This is our "safety net" to ensure resources are always unpaused at backup completion
 	if backup.Status.Progress.TotalItems > 0 && backup.Status.Progress.ItemsBackedUp == backup.Status.Progress.TotalItems {
-		p.log.Info("Processing final object - ensuring all resources are unpaused")
-
-		// Unpause HostedClusters
-		p.log.Info("LAST MILE: Unpausing HostedClusters and removing audit annotations...")
-		if err := common.UpdateHostedCluster(ctx, p.client, p.log, "", backup.Spec.IncludedNamespaces); err != nil {
-			p.log.Errorf("LAST MILE: Error unpausing HostedClusters: %v", err)
-		}
-
-		// Unpause NodePools
-		p.log.Info("LAST MILE: Unpausing NodePools and removing audit annotations...")
-		if err := common.UpdateNodepools(ctx, p.client, p.log, "", backup.Spec.IncludedNamespaces); err != nil {
-			p.log.Errorf("LAST MILE: Error unpausing NodePools: %v", err)
+		p.log.Infof("Processing final object - ensuring all resources are unpaused")
+		p.log.Infof("LAST MILE: Unpausing HostedClusters/NodePools and removing audit annotations...")
+		if err := p.unPauseAll(ctx, backup); err != nil {
+			p.log.Errorf("LAST MILE: Error unpausing HostedClusters/NodePools: %v", err)
+			return item, nil, nil
 		}
 
 		p.log.Info("LAST MILE: Cleanup completed - all resources should be unpaused")
+		return item, nil, nil
 	}
 
 	return item, nil, nil
+}
+
+func (p *BackupPlugin) pauseAll(ctx context.Context, backup *velerov1.Backup) error {
+	// Pause HostedClusters if not already paused
+	p.log.Info("Pausing HostedClusters with audit annotations...")
+	if err := common.UpdateHostedCluster(ctx, p.client, p.log, "true", backup.Spec.IncludedNamespaces); err != nil {
+		return fmt.Errorf("error pausing HostedClusters: %v", err)
+	}
+
+	p.hcPaused = true
+
+	// Pause NodePools if not already paused
+	p.log.Info("Pausing NodePools with audit annotations...")
+	if err := common.UpdateNodepools(ctx, p.client, p.log, "true", backup.Spec.IncludedNamespaces); err != nil {
+		return fmt.Errorf("error pausing NodePools: %v", err)
+	}
+
+	p.npPaused = true
+
+	return nil
+}
+
+func (p *BackupPlugin) unPauseAll(ctx context.Context, backup *velerov1.Backup) error {
+	// Unpause HostedClusters if currently paused
+	p.log.Info("Unpausing HostedClusters with audit annotations...")
+	if err := common.UpdateHostedCluster(ctx, p.client, p.log, "", backup.Spec.IncludedNamespaces); err != nil {
+		return fmt.Errorf("error unpausing HostedClusters: %v", err)
+	}
+	p.hcPaused = false
+
+	// Unpause NodePools if currently paused
+	p.log.Info("Unpausing NodePools with audit annotations...")
+	if err := common.UpdateNodepools(ctx, p.client, p.log, "", backup.Spec.IncludedNamespaces); err != nil {
+		return fmt.Errorf("error unpausing NodePools: %v", err)
+	}
+	p.npPaused = false
+
+	return nil
 }
