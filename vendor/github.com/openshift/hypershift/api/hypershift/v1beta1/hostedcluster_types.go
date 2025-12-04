@@ -50,6 +50,10 @@ const (
 	// KonnectivityAgentImageAnnotation is a temporary annotation that allows the specification of the konnectivity agent image.
 	// This will be removed when Konnectivity is added to the Openshift release payload
 	KonnectivityAgentImageAnnotation = "hypershift.openshift.io/konnectivity-agent-image"
+	// NodePoolHAProxyImageAnnotation can be set on a NodePool to override the HAProxy image
+	// used for worker node API server proxy. This takes precedence over the environment
+	// variable IMAGE_SHARED_INGRESS_HAPROXY and the default shared ingress image.
+	NodePoolHAProxyImageAnnotation = "hypershift.openshift.io/haproxy-image"
 	// ControlPlaneOperatorImageAnnotation is an annotation that allows the specification of the control plane operator image.
 	// This is used for development and e2e workflows
 	ControlPlaneOperatorImageAnnotation = "hypershift.openshift.io/control-plane-operator-image"
@@ -125,6 +129,10 @@ const (
 	// ClusterAPIOpenStackProviderImage overrides the CAPI OpenStack provider image to use for
 	// a HostedControlPlane.
 	ClusterAPIOpenStackProviderImage = "hypershift.openshift.io/capi-provider-openstack-image"
+
+	// ClusterAPIGCPProviderImage overrides the CAPI GCP provider image to use for
+	// a HostedControlPlane.
+	ClusterAPIGCPProviderImage = "hypershift.openshift.io/capi-provider-gcp-image"
 
 	// OpenStackResourceControllerImage overrides the ORC image to use for a HostedControlPlane.
 	OpenStackResourceControllerImage = "hypershift.openshift.io/orc-image"
@@ -289,6 +297,32 @@ const (
 	// control plane load balancers in the AWS platform.
 	AWSLoadBalancerTargetNodesAnnotation = "hypershift.openshift.io/aws-load-balancer-target-node-labels"
 
+	// AWSLoadBalancerHealthProbeModeAnnotation allows overriding the health probe mode for AWS load balancers.
+	// Valid values are "Shared" or "ServiceNodePort".
+	// When set to "Shared", all services on the cluster that use a LoadBalancer share a single health probe (default).
+	// When set to "ServiceNodePort", each service gets its own dedicated health probe.
+	AWSLoadBalancerHealthProbeModeAnnotation = "hypershift.openshift.io/aws-load-balancer-health-probe-mode"
+
+	// SharedLoadBalancerHealthProbePathAnnotation allows overriding the health probe path for shared load balancers.
+	// This annotation applies to both AWS and Azure platforms.
+	// For AWS, this annotation only takes effect when aws-load-balancer-health-probe-mode is set to "Shared".
+	// For Azure, this annotation only takes effect when azure-load-balancer-health-probe-mode is set to "shared".
+	// The default value is "/healthz".
+	SharedLoadBalancerHealthProbePathAnnotation = "hypershift.openshift.io/shared-load-balancer-health-probe-path"
+
+	// SharedLoadBalancerHealthProbePortAnnotation allows overriding the health probe port for shared load balancers.
+	// This annotation applies to both AWS and Azure platforms.
+	// For AWS, this annotation only takes effect when aws-load-balancer-health-probe-mode is set to "Shared".
+	// For Azure, this annotation only takes effect when azure-load-balancer-health-probe-mode is set to "shared".
+	// The value must be a valid port number (1-65535). The default value is 10256.
+	SharedLoadBalancerHealthProbePortAnnotation = "hypershift.openshift.io/shared-load-balancer-health-probe-port"
+
+	// AzureLoadBalancerHealthProbeModeAnnotation allows overriding the health probe mode for Azure load balancers.
+	// Valid values are "shared" or "servicenodeport".
+	// When set to "shared", all services on the cluster that use a LoadBalancer share a single health probe (default).
+	// When set to "servicenodeport", each service gets its own dedicated health probe.
+	AzureLoadBalancerHealthProbeModeAnnotation = "hypershift.openshift.io/azure-load-balancer-health-probe-mode"
+
 	// DisableClusterAutoscalerAnnotation allows disabling the cluster autoscaler for a hosted cluster.
 	// This annotation is only set by the hypershift-operator on HosterControlPlanes.
 	// It is not set by the end-user.
@@ -325,6 +359,14 @@ const (
 	// of workers associated with the HostedCluster. The value should be the desired size label.
 	ClusterSizeOverrideAnnotation = "hypershift.openshift.io/cluster-size-override"
 
+	// ResourceBasedControlPlaneAutoscalingAnnotation, if "true", enables setting the size label of a cluster based on actual Kube API server
+	// resource usage as opposed to node count of the cluster. It only takes effect if size tagging is enabled.
+	ResourceBasedControlPlaneAutoscalingAnnotation = "hypershift.openshift.io/resource-based-cp-auto-scaling"
+
+	// RecommendedClusterSizeAnnotation is the annotation used by the control plane autoscaler to recommend a size
+	// for the hosted cluster.
+	RecommendedClusterSizeAnnotation = "hypershift.openshift.io/recommended-cluster-size"
+
 	// KubeAPIServerVerbosityLevelAnnotation allows specifying the log verbosity of kube-apiserver.
 	KubeAPIServerVerbosityLevelAnnotation = "hypershift.openshift.io/kube-apiserver-verbosity-level"
 
@@ -354,6 +396,13 @@ const (
 
 	// KubeAPIServerGoAwayChance allows the --goaway-chance parameter of the kube-apiserver to be overridden from its default of 0
 	KubeAPIServerGoAwayChance = "hypershift.openshift.io/kube-apiserver-goaway-chance"
+
+	// KubeAPIServerServiceAccountTokenMaxExpiration allows setting the maximum expiration duration
+	// for service account tokens issued by the kube-apiserver. This is useful during service account
+	// signing key rotation to enforce a limited token lifetime, ensuring tokens are re-issued with
+	// the new signing key. The value must be a valid Go duration string (e.g., "24h", "168h", "720h").
+	// Minimum value is 600s (10 minutes) per Kubernetes requirements.
+	KubeAPIServerServiceAccountTokenMaxExpiration = "hypershift.openshift.io/kube-apiserver-service-account-token-max-expiration"
 
 	// AWSMachinePublicIPs, if set to "true", results in an AWS machine template that creates machines with public IPs
 	// WARNING: This option is for development and testing purposes only
@@ -1942,6 +1991,12 @@ type OperatorConfiguration struct {
 	//
 	// +optional
 	ClusterNetworkOperator *ClusterNetworkOperatorSpec `json:"clusterNetworkOperator,omitempty"`
+
+	// ingressOperator specifies the configuration for the Ingress Operator in the hosted cluster.
+	// This allows configuring how the default ingress controller endpoints are published.
+	//
+	// +optional
+	IngressOperator *IngressOperatorSpec `json:"ingressOperator,omitempty"`
 }
 
 // +genclient

@@ -141,8 +141,8 @@ func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*v
 	}
 
 	// if the backup is not a hypershift backup, return early
-	if returnEarly := common.ShouldEndPluginExecution(ctx, backup, p.client, p.log); returnEarly {
-		p.log.Info("Skipping hypershift plugin execution - not a hypershift backup")
+	if returnEarly, err := common.ShouldEndPluginExecution(ctx, backup, p.client, p.log); returnEarly {
+		p.log.Infof("Skipping hypershift plugin execution - not a hypershift backup: %v", err)
 		return velero.NewRestoreItemActionExecuteOutput(input.Item), nil
 	}
 
