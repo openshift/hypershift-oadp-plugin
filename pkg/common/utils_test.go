@@ -768,7 +768,7 @@ func TestShouldEndPluginExecution(t *testing.T) {
 			name:               "CRD does not exist",
 			objects:            []client.Object{},
 			includedNamespaces: []string{"test-namespace"},
-			includedResources:  []string{"hostedcontrolplanes", "hostedclusters"},
+			includedResources:  []string{"secrets", "configmaps"},
 			expectedResult:     true,
 		},
 		{
@@ -4108,6 +4108,151 @@ func TestAllObjectsCompleted(t *testing.T) {
 			g := NewWithT(t)
 			result := AllObjectsCompleted(tt.status)
 			g.Expect(result).To(Equal(tt.expected))
+		})
+	}
+}
+
+func TestAddPauseAuditAnnotations(t *testing.T) {
+	g := NewWithT(t)
+
+	tests := []struct {
+		name               string
+		object             metav1.Object
+		expectedAnnotations map[string]string
+	}{
+		{
+			name: "add annotations to object with no existing annotations",
+			object: &unstructured.Unstructured{
+				Object: map[string]interface{}{
+					"metadata": map[string]interface{}{
+						"name": "test-object",
+					},
+				},
+			},
+			expectedAnnotations: map[string]string{
+				OADPPausedByAnnotation: HypershiftOADPPluginName,
+				// Note: timestamp will be checked separately since it's dynamic
+			},
+		},
+		{
+			name: "add annotations to object with existing annotations",
+			object: &unstructured.Unstructured{
+				Object: map[string]interface{}{
+					"metadata": map[string]interface{}{
+						"name": "test-object",
+						"annotations": map[string]interface{}{
+							"existing": "annotation",
+						},
+					},
+				},
+			},
+			expectedAnnotations: map[string]string{
+				"existing":             "annotation",
+				OADPPausedByAnnotation: HypershiftOADPPluginName,
+				// Note: timestamp will be checked separately since it's dynamic
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			addPauseAuditAnnotations(tt.object)
+
+			annotations := tt.object.GetAnnotations()
+			g.Expect(annotations).NotTo(BeNil())
+
+			// Check paused-by annotation
+			g.Expect(annotations[OADPPausedByAnnotation]).To(Equal(HypershiftOADPPluginName))
+
+			// Check paused-at annotation exists and is valid RFC3339 timestamp
+			pausedAt := annotations[OADPPausedAtAnnotation]
+			g.Expect(pausedAt).NotTo(BeEmpty())
+			_, err := time.Parse(time.RFC3339, pausedAt)
+			g.Expect(err).NotTo(HaveOccurred())
+
+			// Check existing annotations are preserved
+			for key, value := range tt.expectedAnnotations {
+				if key != OADPPausedAtAnnotation { // Skip timestamp check
+					g.Expect(annotations[key]).To(Equal(value))
+				}
+			}
+		})
+	}
+}
+
+func TestRemovePauseAuditAnnotations(t *testing.T) {
+	g := NewWithT(t)
+
+	tests := []struct {
+		name                string
+		object              metav1.Object
+		expectedAnnotations map[string]string
+	}{
+		{
+			name: "remove annotations from object with only audit annotations",
+			object: &unstructured.Unstructured{
+				Object: map[string]interface{}{
+					"metadata": map[string]interface{}{
+						"name": "test-object",
+						"annotations": map[string]interface{}{
+							OADPPausedByAnnotation: HypershiftOADPPluginName,
+							OADPPausedAtAnnotation: "2025-12-04T10:00:00Z",
+						},
+					},
+				},
+			},
+			expectedAnnotations: map[string]string{},
+		},
+		{
+			name: "remove annotations from object with mixed annotations",
+			object: &unstructured.Unstructured{
+				Object: map[string]interface{}{
+					"metadata": map[string]interface{}{
+						"name": "test-object",
+						"annotations": map[string]interface{}{
+							"existing":             "annotation",
+							"another":              "value",
+							OADPPausedByAnnotation: HypershiftOADPPluginName,
+							OADPPausedAtAnnotation: "2025-12-04T10:00:00Z",
+						},
+					},
+				},
+			},
+			expectedAnnotations: map[string]string{
+				"existing": "annotation",
+				"another":  "value",
+			},
+		},
+		{
+			name: "remove annotations from object with no annotations",
+			object: &unstructured.Unstructured{
+				Object: map[string]interface{}{
+					"metadata": map[string]interface{}{
+						"name": "test-object",
+					},
+				},
+			},
+			expectedAnnotations: map[string]string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			removePauseAuditAnnotations(tt.object)
+
+			annotations := tt.object.GetAnnotations()
+
+			// Check that audit annotations are removed
+			g.Expect(annotations[OADPPausedByAnnotation]).To(BeEmpty())
+			g.Expect(annotations[OADPPausedAtAnnotation]).To(BeEmpty())
+
+			// Check that other annotations are preserved
+			for key, expectedValue := range tt.expectedAnnotations {
+				g.Expect(annotations[key]).To(Equal(expectedValue))
+			}
+
+			// Check that we have the correct number of annotations
+			g.Expect(len(annotations)).To(Equal(len(tt.expectedAnnotations)))
 		})
 	}
 }

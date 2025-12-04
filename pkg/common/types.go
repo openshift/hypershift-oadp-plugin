@@ -26,6 +26,11 @@ const (
 	// Integration with Hypershift, more info here: https://github.com/openshift/hypershift/pull/6195
 	HostedClusterRestoredFromBackupAnnotation string = "hypershift.openshift.io/restored-from-backup"
 
+	// OADP Plugin audit annotations for pause operations
+	OADPPausedByAnnotation   string = "oadp.openshift.io/paused-by"
+	OADPPausedAtAnnotation   string = "oadp.openshift.io/paused-at"
+	HypershiftOADPPluginName string = "hypershift-oadp-plugin"
+
 	// hypershift/cluster-api kinds
 	HostedClusterKind         string = "HostedCluster"
 	HostedControlPlaneKind    string = "HostedControlPlane"
