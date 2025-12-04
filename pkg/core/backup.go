@@ -3,7 +3,6 @@ package core
 import (
 	"context"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 
@@ -32,7 +31,6 @@ type BackupPlugin struct {
 	client       crclient.Client
 	config       map[string]string
 	validator    validation.BackupValidator
-	pvTriggered  bool
 	hcp          *hyperv1.HostedControlPlane
 	hcpNamespace string
 	ha           bool
@@ -45,6 +43,10 @@ type BackupPlugin struct {
 	duFinished        bool
 	hcPaused          bool
 	npPaused          bool
+
+	// Progress logging throttling
+	lastLoggedProgress float64
+	lastLogTime        time.Time
 	*plugtypes.BackupOptions
 }
 
@@ -125,23 +127,36 @@ func (p *BackupPlugin) Name() string {
 	return "HCPBackupPlugin"
 }
 
-// AppliesTo returns information about which resources this action should be invoked for.
-// The IncludedResources and ExcludedResources slices can include both resources
-// and resources with group names. These work: "ingresses", "ingresses.extensions".
-// A BackupPlugin's Execute function will only be invoked on items that match the returned
-// selector. A zero-valued ResourceSelector matches all resources.
 func (p *BackupPlugin) AppliesTo() (velero.ResourceSelector, error) {
-	return velero.ResourceSelector{
-		IncludedResources: slices.Concat(
-			plugtypes.BackupCommonResources,
-			plugtypes.BackupAWSResources,
-			plugtypes.BackupAzureResources,
-			plugtypes.BackupIBMPowerVSResources,
-			plugtypes.BackupOpenStackResources,
-			plugtypes.BackupKubevirtResources,
-			plugtypes.BackupAgentResources,
-		),
-	}, nil
+	return velero.ResourceSelector{}, nil
+}
+
+// shouldLogProgress determines if we should log progress based on throttling rules
+func (p *BackupPlugin) shouldLogProgress(currentProgress float64) bool {
+	now := time.Now()
+
+	// Always log if it's the first time
+	if p.lastLogTime.IsZero() {
+		p.lastLoggedProgress = currentProgress
+		p.lastLogTime = now
+		return true
+	}
+
+	// Log if progress changed by 5% or more
+	if currentProgress-p.lastLoggedProgress >= 5.0 {
+		p.lastLoggedProgress = currentProgress
+		p.lastLogTime = now
+		return true
+	}
+
+	// Log if 30 seconds have passed since last log
+	if now.Sub(p.lastLogTime) >= 30*time.Second {
+		p.lastLoggedProgress = currentProgress
+		p.lastLogTime = now
+		return true
+	}
+
+	return false
 }
 
 // Execute allows the ItemAction to perform arbitrary logic with the item being backed up,
@@ -150,6 +165,7 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 	ctx := context.Context(p.ctx)
 
 	if returnEarly := common.ShouldEndPluginExecution(ctx, backup, p.client, p.log); returnEarly {
+		p.log.Info("Skipping hypershift plugin execution - not a hypershift backup")
 		return item, nil, nil
 	}
 
@@ -175,7 +191,6 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 				validator.HA = false
 			}
 		}
-
 	}
 
 	kind := item.GetObjectKind().GroupVersionKind().Kind
@@ -198,39 +213,17 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 			return nil, nil, fmt.Errorf("error checking platform configuration: %v", err)
 		}
 
-	case common.MainKinds[kind]:
-		// Updating HostedClusters
-		if !p.hcPaused && (!p.pvBackupFinished || !p.duFinished) {
-			if err := common.UpdateHostedCluster(ctx, p.client, p.log, "true", backup.Spec.IncludedNamespaces); err != nil {
-				return nil, nil, fmt.Errorf("error updating HostedClusters: %v", err)
-			}
-			p.hcPaused = true
-			if validator, ok := p.validator.(*validation.BackupPluginValidator); ok {
-				validator.HCPaused = ptr.To(true)
-			}
+	case kind == common.HostedClusterKind:
+		metadata, err := meta.Accessor(item)
+		if err != nil {
+			return nil, nil, fmt.Errorf("error getting metadata accessor: %v", err)
 		}
+		common.AddAnnotation(metadata, common.HostedClusterRestoredFromBackupAnnotation, "")
+		p.log.Infof("Added restore annotation to HostedCluster %s", metadata.GetName())
 
-		// Updating NodePools
-		if !p.npPaused && (!p.pvBackupFinished || !p.duFinished) {
-			if err := common.UpdateNodepools(ctx, p.client, p.log, "true", backup.Spec.IncludedNamespaces); err != nil {
-				return nil, nil, fmt.Errorf("error updating NodePools: %v", err)
-			}
-			p.npPaused = true
-			if validator, ok := p.validator.(*validation.BackupPluginValidator); ok {
-				validator.NPaused = ptr.To(true)
-			}
-		}
-
-		if kind == common.HostedClusterKind {
-			metadata, err := meta.Accessor(item)
-			if err != nil {
-				return nil, nil, fmt.Errorf("error getting metadata accessor: %v", err)
-			}
-			common.AddAnnotation(metadata, common.HostedClusterRestoredFromBackupAnnotation, "")
-			p.log.Infof("Added restore annotation to HostedCluster %s", metadata.GetName())
-		}
-
-		if kind == "Pod" {
+	case kind == "Pod":
+		// In case of FSBackup, we need to add the label to the pod
+		if backup.Spec.DefaultVolumesToFsBackup != nil && !*backup.Spec.DefaultVolumesToFsBackup {
 			metadata, err := meta.Accessor(item)
 			if err != nil {
 				return nil, nil, fmt.Errorf("error getting metadata accessor: %v", err)
@@ -241,8 +234,9 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 			}
 		}
 
+	// Agent requirements
 	case kind == common.ClusterDeploymentKind:
-		if p.Migration && p.hcp.Spec.Platform.Type == hyperv1.AgentPlatform {
+		if p.hcp.Spec.Platform.Type == hyperv1.AgentPlatform {
 			if err := agent.MigrationTasks(ctx, item, p.client, p.log, p.config, backup); err != nil {
 				return nil, nil, fmt.Errorf("error performing migration tasks for agent platform: %v", err)
 			}
@@ -290,27 +284,81 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 		}
 	}
 
-	if (p.pvBackupFinished || p.duFinished) && (p.npPaused || p.hcPaused) && !p.Migration {
-		p.log.Info("Volume backup is done, updating HC and NPs")
-		// updating NodePools
-		if err := common.UpdateNodepools(ctx, p.client, p.log, "false", backup.Spec.IncludedNamespaces); err != nil {
-			return nil, nil, fmt.Errorf("error updating NodePools: %v", err)
-		}
-		p.npPaused = false
+	// PAUSE/UNPAUSE LOGIC based on backup progress percentage
+	if backup.Status.Progress.TotalItems > 0 {
+		progressPercent := float64(backup.Status.Progress.ItemsBackedUp) / float64(backup.Status.Progress.TotalItems) * 100
 
-		// updating HostedClusters
-		if err := common.UpdateHostedCluster(ctx, p.client, p.log, "false", backup.Spec.IncludedNamespaces); err != nil {
-			return nil, nil, fmt.Errorf("error updating HostedClusters: %v", err)
+		// Throttled progress logging - only log every 5% or 30 seconds
+		if p.shouldLogProgress(progressPercent) {
+			p.log.Infof("Progress check - %.1f%% complete (Items: %d/%d), hcPaused: %v, npPaused: %v, backup.Status.Phase: %s",
+				progressPercent, backup.Status.Progress.ItemsBackedUp, backup.Status.Progress.TotalItems, p.hcPaused, p.npPaused, backup.Status.Phase)
 		}
-		p.hcPaused = false
+
+		switch {
+		// PAUSE when progress > 0% and < 65% and BOTH not already paused
+		case progressPercent > 0.0 && progressPercent <= 65.0:
+			if !p.hcPaused && !p.npPaused {
+				p.log.Infof("Backup progress %.1f%% - executing PAUSE logic", progressPercent)
+
+				// Pause HostedClusters
+				p.log.Info("Pausing HostedClusters with audit annotations...")
+				if err := common.UpdateHostedCluster(ctx, p.client, p.log, "true", backup.Spec.IncludedNamespaces); err != nil {
+					return nil, nil, fmt.Errorf("error pausing HostedClusters: %v", err)
+				}
+				p.hcPaused = true
+				p.log.Info("Successfully paused HostedClusters with audit annotations")
+
+				// Pause NodePools
+				p.log.Info("Pausing NodePools with audit annotations...")
+				if err := common.UpdateNodepools(ctx, p.client, p.log, "true", backup.Spec.IncludedNamespaces); err != nil {
+					return nil, nil, fmt.Errorf("error pausing NodePools: %v", err)
+				}
+				p.npPaused = true
+				p.log.Info("Successfully paused NodePools with audit annotations")
+
+			}
+
+		// UNPAUSE when progress > 90% and BOTH are paused
+		case progressPercent > 90.0:
+			// Check the HC/NP pause state from Kubernetes
+
+			if p.hcPaused && p.npPaused {
+				p.log.Infof("Backup progress %.1f%% - executing UNPAUSE logic", progressPercent)
+
+				// Unpause HostedClusters
+				if err := common.UpdateHostedCluster(ctx, p.client, p.log, "", backup.Spec.IncludedNamespaces); err != nil {
+					return nil, nil, fmt.Errorf("error unpausing HostedClusters: %v", err)
+				}
+				p.hcPaused = false
+
+				// Unpause NodePools
+				if err := common.UpdateNodepools(ctx, p.client, p.log, "", backup.Spec.IncludedNamespaces); err != nil {
+					return nil, nil, fmt.Errorf("error unpausing NodePools: %v", err)
+				}
+				p.npPaused = false
+			}
+		}
 	}
 
-	if backup.Status.Progress.ItemsBackedUp == (backup.Status.Progress.TotalItems - 10) {
-		p.log.Info("Backup is almost done, updating progress")
-		p.pvBackupFinished = true
-		if p.hcp.Spec.Platform.Type != hyperv1.AzurePlatform {
-			p.duFinished = true
+	// LAST MILE CLEANUP - Check if this is the last object being processed
+	// Always attempt to unpause HostedClusters and NodePools regardless of internal state
+	// This is our "safety net" to ensure resources are always unpaused at backup completion
+	if backup.Status.Progress.TotalItems > 0 && backup.Status.Progress.ItemsBackedUp == backup.Status.Progress.TotalItems {
+		p.log.Info("Processing final object - ensuring all resources are unpaused")
+
+		// Unpause HostedClusters
+		p.log.Info("LAST MILE: Unpausing HostedClusters and removing audit annotations...")
+		if err := common.UpdateHostedCluster(ctx, p.client, p.log, "", backup.Spec.IncludedNamespaces); err != nil {
+			p.log.Errorf("LAST MILE: Error unpausing HostedClusters: %v", err)
 		}
+
+		// Unpause NodePools
+		p.log.Info("LAST MILE: Unpausing NodePools and removing audit annotations...")
+		if err := common.UpdateNodepools(ctx, p.client, p.log, "", backup.Spec.IncludedNamespaces); err != nil {
+			p.log.Errorf("LAST MILE: Error unpausing NodePools: %v", err)
+		}
+
+		p.log.Info("LAST MILE: Cleanup completed - all resources should be unpaused")
 	}
 
 	return item, nil, nil
