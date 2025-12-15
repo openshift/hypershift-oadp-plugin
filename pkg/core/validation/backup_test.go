@@ -678,8 +678,8 @@ func TestValidateDataMoverWithDifferentDataUploadStates(t *testing.T) {
 	}
 
 	// Helper function to create a test backup
-	createTestBackup := func() *velerov1.Backup {
-		return &velerov1.Backup{
+	createTestBackup := func(snapshotMoveData *bool) *velerov1.Backup {
+		backup := &velerov1.Backup{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "test-backup",
 				Namespace: "velero",
@@ -688,6 +688,10 @@ func TestValidateDataMoverWithDifferentDataUploadStates(t *testing.T) {
 				DefaultVolumesToFsBackup: ptr.To(false),
 			},
 		}
+		if snapshotMoveData != nil {
+			backup.Spec.SnapshotMoveData = snapshotMoveData
+		}
+		return backup
 	}
 
 	tests := []struct {
@@ -695,6 +699,7 @@ func TestValidateDataMoverWithDifferentDataUploadStates(t *testing.T) {
 		platformType      hyperv1.PlatformType
 		pvBackupFinished  bool
 		duFinished        bool
+		snapshotMoveData  *bool
 		expectedBehavior  string
 		shouldReturnEarly bool
 		objects           []client.Object
@@ -704,6 +709,7 @@ func TestValidateDataMoverWithDifferentDataUploadStates(t *testing.T) {
 			platformType:      hyperv1.AWSPlatform,
 			pvBackupFinished:  true,
 			duFinished:        true,
+			snapshotMoveData:  ptr.To(true),
 			expectedBehavior:  "should return early when both PV and DU are finished",
 			shouldReturnEarly: true,
 		},
@@ -711,7 +717,8 @@ func TestValidateDataMoverWithDifferentDataUploadStates(t *testing.T) {
 			name:              "AWS platform - only PV finished - continue path",
 			platformType:      hyperv1.AWSPlatform,
 			pvBackupFinished:  true,
-			duFinished:        false,
+			duFinished:        true, // When snapshotMoveData is nil, code sets DUFinished=true
+			snapshotMoveData:  nil,  // No SnapshotMoveData configured
 			expectedBehavior:  "should continue processing when only PV is finished",
 			shouldReturnEarly: false,
 		},
@@ -720,6 +727,7 @@ func TestValidateDataMoverWithDifferentDataUploadStates(t *testing.T) {
 			platformType:      hyperv1.AzurePlatform,
 			pvBackupFinished:  true,
 			duFinished:        false,
+			snapshotMoveData:  nil, // Azure doesn't use DataUpload
 			expectedBehavior:  "should return early when PV is finished (Azure only needs PV)",
 			shouldReturnEarly: true,
 		},
@@ -728,6 +736,7 @@ func TestValidateDataMoverWithDifferentDataUploadStates(t *testing.T) {
 			platformType:      hyperv1.IBMCloudPlatform,
 			pvBackupFinished:  true,
 			duFinished:        true,
+			snapshotMoveData:  ptr.To(true),
 			expectedBehavior:  "should return early when both PV and DU are finished",
 			shouldReturnEarly: true,
 		},
@@ -735,7 +744,8 @@ func TestValidateDataMoverWithDifferentDataUploadStates(t *testing.T) {
 			name:              "IBM Cloud platform - only PV finished - continue path",
 			platformType:      hyperv1.IBMCloudPlatform,
 			pvBackupFinished:  true,
-			duFinished:        false,
+			duFinished:        true, // When snapshotMoveData is nil, code sets DUFinished=true
+			snapshotMoveData:  nil,  // No SnapshotMoveData configured
 			expectedBehavior:  "should continue processing when only DU is finished",
 			shouldReturnEarly: false,
 		},
@@ -744,6 +754,7 @@ func TestValidateDataMoverWithDifferentDataUploadStates(t *testing.T) {
 			platformType:      hyperv1.KubevirtPlatform,
 			pvBackupFinished:  true,
 			duFinished:        true,
+			snapshotMoveData:  ptr.To(true),
 			expectedBehavior:  "should return early when both PV and DU are finished",
 			shouldReturnEarly: true,
 		},
@@ -752,6 +763,7 @@ func TestValidateDataMoverWithDifferentDataUploadStates(t *testing.T) {
 			platformType:      hyperv1.OpenStackPlatform,
 			pvBackupFinished:  true,
 			duFinished:        true,
+			snapshotMoveData:  ptr.To(true),
 			expectedBehavior:  "should return early when both PV and DU are finished",
 			shouldReturnEarly: true,
 		},
@@ -760,6 +772,7 @@ func TestValidateDataMoverWithDifferentDataUploadStates(t *testing.T) {
 			platformType:      hyperv1.AgentPlatform,
 			pvBackupFinished:  true,
 			duFinished:        true,
+			snapshotMoveData:  ptr.To(true),
 			expectedBehavior:  "should return early when both PV and DU are finished",
 			shouldReturnEarly: true,
 		},
@@ -768,6 +781,7 @@ func TestValidateDataMoverWithDifferentDataUploadStates(t *testing.T) {
 			platformType:      hyperv1.NonePlatform,
 			pvBackupFinished:  true,
 			duFinished:        true,
+			snapshotMoveData:  ptr.To(true),
 			expectedBehavior:  "should return early when both PV and DU are finished",
 			shouldReturnEarly: true,
 		},
@@ -777,7 +791,7 @@ func TestValidateDataMoverWithDifferentDataUploadStates(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			g := NewWithT(t)
 			hcp := createTestHCP(tt.platformType)
-			backup := createTestBackup()
+			backup := createTestBackup(tt.snapshotMoveData)
 
 			// Create a fake client
 			client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tt.objects...).Build()
