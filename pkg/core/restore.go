@@ -141,8 +141,8 @@ func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*v
 	}
 
 	// if the backup is not a hypershift backup, return early
-	if returnEarly := common.ShouldEndPluginExecution(ctx, backup, p.client, p.log); returnEarly {
-		p.log.Info("Skipping hypershift plugin execution - not a hypershift backup")
+	if returnEarly, err := common.ShouldEndPluginExecution(ctx, backup, p.client, p.log); returnEarly {
+		p.log.Infof("Skipping hypershift plugin execution - not a hypershift backup: %v", err)
 		return velero.NewRestoreItemActionExecuteOutput(input.Item), nil
 	}
 
@@ -177,12 +177,12 @@ func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*v
 
 	case common.MainKinds[kind]:
 		// updating NodePools
-		if err := common.UpdateNodepools(ctx, p.client, p.log, "false", input.Restore.Spec.IncludedNamespaces); err != nil {
+		if err := common.UpdateNodepools(ctx, p.client, p.log, "", input.Restore.Spec.IncludedNamespaces); err != nil {
 			return nil, fmt.Errorf("error updating NodePools: %v", err)
 		}
 
 		// updating HostedClusters
-		if err := common.UpdateHostedCluster(ctx, p.client, p.log, "false", input.Restore.Spec.IncludedNamespaces); err != nil {
+		if err := common.UpdateHostedCluster(ctx, p.client, p.log, "", input.Restore.Spec.IncludedNamespaces); err != nil {
 			return nil, fmt.Errorf("error updating HostedClusters: %v", err)
 		}
 

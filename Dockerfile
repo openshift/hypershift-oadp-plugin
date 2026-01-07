@@ -12,12 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM registry.ci.openshift.org/openshift/release:rhel-9-release-golang-1.23-openshift-4.19 AS build
+FROM registry.ci.openshift.org/openshift/release:rhel-9-release-golang-1.24-openshift-4.20 AS build
 WORKDIR /go/src/github.com/openshift/hypershift-oadp-plugin
 COPY . .
 RUN CGO_ENABLED=0 go build -o /go/bin/hypershift-oadp-plugin .
 
-FROM registry.access.redhat.com/ubi9-minimal 
+FROM registry.access.redhat.com/ubi9-minimal
 RUN mkdir /plugins
 COPY --from=build /go/bin/hypershift-oadp-plugin /plugins/
 USER 65532:65532

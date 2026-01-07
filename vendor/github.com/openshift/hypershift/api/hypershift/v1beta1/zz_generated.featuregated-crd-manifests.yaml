@@ -48,8 +48,7 @@ controlplanecomponents.hypershift.openshift.io:
   CRDName: controlplanecomponents.hypershift.openshift.io
   Capability: ""
   Category: ""
-  FeatureGates:
-  - ControlPlaneV2
+  FeatureGates: []
   FilenameOperatorName: ""
   FilenameOperatorOrdering: ""
   FilenameRunLevel: ""
@@ -84,8 +83,46 @@ controlplanecomponents.hypershift.openshift.io:
   ShortNames:
   - cpc
   - cpcs
+  TopLevelFeatureGates: []
+  Version: v1beta1
+
+gcpprivateserviceconnects.hypershift.openshift.io:
+  Annotations: {}
+  ApprovedPRNumber: ""
+  CRDName: gcpprivateserviceconnects.hypershift.openshift.io
+  Capability: ""
+  Category: ""
+  FeatureGates:
+  - GCPPlatform
+  FilenameOperatorName: ""
+  FilenameOperatorOrdering: ""
+  FilenameRunLevel: ""
+  GroupName: hypershift.openshift.io
+  HasStatus: true
+  KindName: GCPPrivateServiceConnect
+  Labels: {}
+  PluralName: gcpprivateserviceconnects
+  PrinterColumns:
+  - description: Name of the Service Attachment
+    jsonPath: .status.serviceAttachmentName
+    name: Service Attachment
+    type: string
+  - description: IP address of the PSC endpoint
+    jsonPath: .status.endpointIP
+    name: Endpoint IP
+    type: string
+  - description: PSC endpoint availability status
+    jsonPath: .status.conditions[?(@.type=="GCPEndpointAvailable")].status
+    name: Available
+    type: string
+  - jsonPath: .metadata.creationTimestamp
+    name: Age
+    type: date
+  Scope: Namespaced
+  ShortNames:
+  - gcppsc
   TopLevelFeatureGates:
-  - ControlPlaneV2
+  - GCPPlatform
   Version: v1beta1
 
 hostedclusters.hypershift.openshift.io:
@@ -95,13 +132,18 @@ hostedclusters.hypershift.openshift.io:
   Capability: ""
   Category: ""
   FeatureGates:
-  - AROHCPManagedIdentities
   - AutoNodeKarpenter
+  - ClusterVersionOperatorConfiguration
   - DynamicResourceAllocation
   - ExternalOIDC
-  - HCPPodsLabels
+  - ExternalOIDCWithUIDAndExtraClaimMappings
+  - GCPPlatform
+  - ImageStreamImportMode
+  - IngressControllerLBSubnetsAWS
+  - KMSEncryptionProvider
   - NetworkDiagnosticsConfig
   - OpenStack
+  - SetEIPForNLBIngressController
   FilenameOperatorName: ""
   FilenameOperatorOrdering: ""
   FilenameRunLevel: ""
@@ -149,12 +191,18 @@ hostedcontrolplanes.hypershift.openshift.io:
   Capability: ""
   Category: cluster-api
   FeatureGates:
-  - AROHCPManagedIdentities
   - AutoNodeKarpenter
+  - ClusterVersionOperatorConfiguration
   - DynamicResourceAllocation
   - ExternalOIDC
+  - ExternalOIDCWithUIDAndExtraClaimMappings
+  - GCPPlatform
+  - ImageStreamImportMode
+  - IngressControllerLBSubnetsAWS
+  - KMSEncryptionProvider
   - NetworkDiagnosticsConfig
   - OpenStack
+  - SetEIPForNLBIngressController
   FilenameOperatorName: ""
   FilenameOperatorOrdering: ""
   FilenameRunLevel: ""

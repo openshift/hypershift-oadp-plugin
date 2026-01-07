@@ -151,6 +151,17 @@ const (
 	// A failure here indicates that the input is invalid, or permissions are missing to use the encryption key.
 	ValidAzureKMSConfig ConditionType = "ValidAzureKMSConfig"
 
+	// ValidGCPCredentials indicates if GCP credentials are valid and operational
+	// for the HostedCluster. This includes service account authentication and
+	// proper IAM permissions for CAPG controllers.
+	// A failure here may require external user intervention to resolve.
+	ValidGCPCredentials ConditionType = "ValidGCPCredentials"
+
+	// ValidGCPWorkloadIdentity indicates if GCP Workload Identity Federation
+	// is properly configured and operational for the cluster.
+	// A failure here may require external user intervention to resolve.
+	ValidGCPWorkloadIdentity ConditionType = "ValidGCPWorkloadIdentity"
+
 	// AWSDefaultSecurityGroupCreated indicates whether the default security group
 	// for AWS workers has been created.
 	// A failure here indicates that NodePools without a security group will be
@@ -189,6 +200,21 @@ const (
 	ClusterSizeTransitionPending = "ClusterSizeTransitionPending"
 	// ClusterSizeTransitionRequired exposes the next t-shirt size that the cluster will transition to.
 	ClusterSizeTransitionRequired = "ClusterSizeTransitionRequired"
+
+	// HostedClusterRestoredFromBackup indicates that the HostedCluster was restored from backup.
+	// This condition is set to true when the HostedCluster is restored from backup and the recovery process is complete.
+	// This condition is used to track the status of the recovery process and to determine if the HostedCluster
+	// is ready to be used after restoration.
+	HostedClusterRestoredFromBackup ConditionType = "HostedClusterRestoredFromBackup"
+
+	// DataPlaneConnectionAvailable indicates whether the control plane has a successful
+	// network connection to the data plane components.
+	// **True** means the control plane can successfully reach the data plane nodes.
+	// **False** means there are network connection issues preventing the control plane from reaching the data plane.
+	// A failure here suggests potential issues such as: network policy restrictions,
+	// firewall rules, missing data plane nodes, or problems with infrastructure
+	// components like the konnectivity-agent workload.
+	DataPlaneConnectionAvailable ConditionType = "DataPlaneConnectionAvailable"
 )
 
 // Reasons.
@@ -241,6 +267,18 @@ const (
 	KubeVirtSuboptimalMTUReason = "KubeVirtSuboptimalMTUDetected"
 
 	KubeVirtNodesLiveMigratableReason = "KubeVirtNodesNotLiveMigratable"
+
+	RecoveryFinishedReason = "RecoveryFinished"
+
+	ReconcileErrorReason = "ReconcileError"
+
+	CloudResourcesCleanupSkippedReason = "CloudResourcesCleanupSkipped"
+
+	DataPlaneConnectionNoKonnectivityAgentPodsNotFoundReason = "KonnectivityAgentPodsNotFound"
+
+	DataPlaneConnectionLogsAccessFailedReason = "LogsAccessFailed"
+
+	DataPlaneConnectionNoWorkerNodesAvailableReason = "NoWorkerNodesAvailable"
 )
 
 // Messages.
