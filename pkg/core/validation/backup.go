@@ -30,6 +30,7 @@ type BackupPluginValidator struct {
 	Client              crclient.Client
 	Backup              *velerov1.Backup
 	HA                  bool
+	DataMover           bool
 	DataUploadTimeout   time.Duration
 	DataUploadCheckPace time.Duration
 	PVBackupStarted     *bool
@@ -124,7 +125,8 @@ func (pv *BackupPluginValidator) ValidateDataMover(ctx context.Context, hcp *hyp
 			return nil
 		}
 
-		if err := pv.reconcileStandardDataMover(ctx, hcp); err != nil {
+		// Check if SnapshotMoveData is configured before dereferencing
+		if err := pv.reconcileStandardDataMover(ctx, hcp, backup.Spec.SnapshotMoveData); err != nil {
 			return fmt.Errorf("error reconciling standard data mover: %s", err.Error())
 		}
 
@@ -152,7 +154,7 @@ func (pv *BackupPluginValidator) ValidateDataMover(ctx context.Context, hcp *hyp
 			return nil
 		}
 
-		if err := pv.reconcileStandardDataMover(ctx, hcp); err != nil {
+		if err := pv.reconcileStandardDataMover(ctx, hcp, backup.Spec.SnapshotMoveData); err != nil {
 			return fmt.Errorf("error reconciling standard data mover: %s", err.Error())
 		}
 
@@ -167,7 +169,7 @@ func (pv *BackupPluginValidator) ValidateDataMover(ctx context.Context, hcp *hyp
 			return nil
 		}
 
-		if err := pv.reconcileStandardDataMover(ctx, hcp); err != nil {
+		if err := pv.reconcileStandardDataMover(ctx, hcp, backup.Spec.SnapshotMoveData); err != nil {
 			return fmt.Errorf("error reconciling standard data mover: %s", err.Error())
 		}
 
@@ -182,7 +184,7 @@ func (pv *BackupPluginValidator) ValidateDataMover(ctx context.Context, hcp *hyp
 			return nil
 		}
 
-		if err := pv.reconcileStandardDataMover(ctx, hcp); err != nil {
+		if err := pv.reconcileStandardDataMover(ctx, hcp, backup.Spec.SnapshotMoveData); err != nil {
 			return fmt.Errorf("error reconciling standard data mover: %s", err.Error())
 		}
 
@@ -197,7 +199,7 @@ func (pv *BackupPluginValidator) ValidateDataMover(ctx context.Context, hcp *hyp
 			return nil
 		}
 
-		if err := pv.reconcileStandardDataMover(ctx, hcp); err != nil {
+		if err := pv.reconcileStandardDataMover(ctx, hcp, backup.Spec.SnapshotMoveData); err != nil {
 			return fmt.Errorf("error reconciling standard data mover: %s", err.Error())
 		}
 
@@ -249,10 +251,9 @@ func (p *BackupPluginValidator) checkAgentPlatform(hcp *hyperv1.HostedControlPla
 }
 
 // This datamover reconciles the VSC, VS and DataUpload
-func (p *BackupPluginValidator) reconcileStandardDataMover(ctx context.Context, hcp *hyperv1.HostedControlPlane) error {
+func (p *BackupPluginValidator) reconcileStandardDataMover(ctx context.Context, hcp *hyperv1.HostedControlPlane, dataMover *bool) error {
 	var (
-		err  error
-		done bool
+		err error
 	)
 
 	// Initialize the blacklists
@@ -285,38 +286,26 @@ func (p *BackupPluginValidator) reconcileStandardDataMover(ctx context.Context, 
 		if (len(common.VSCStatus) == 3 && common.AllObjectsCompleted(common.VSCStatus)) && (len(common.VSStatus) == 3 && common.AllObjectsCompleted(common.VSStatus)) {
 			p.Log.Debugf("VSC and VS are completed for backup %s", p.Backup.Name)
 			*p.PVBackupFinished = true
-			done = true
 		}
 	} else {
 		p.Log.Debugf("HA is disabled for backup %s", p.Backup.Name)
 		*p.PVBackupFinished = true
-		done = true
 	}
 
-	if done && *p.NPaused {
-		if err := common.UpdateNodepools(ctx, p.Client, p.Log, "false", p.Backup.Spec.IncludedNamespaces); err != nil {
-			return fmt.Errorf("error updating NodePools: %v", err)
+	if dataMover != nil && *dataMover {
+		if duFinished, err = common.ReconcileDataUpload(ctx, p.Client, p.Log, p.Backup, p.DataUploadTimeout, p.DataUploadCheckPace, p.DUStarted, p.DUFinished, &duBlackList); err != nil {
+			return fmt.Errorf("error reconciling data upload: %s", err.Error())
 		}
-		*p.NPaused = false
-	}
 
-	if done && *p.HCPaused {
-		// updating HostedClusters
-		if err := common.UpdateHostedCluster(ctx, p.Client, p.Log, "false", p.Backup.Spec.IncludedNamespaces); err != nil {
-			return fmt.Errorf("error updating HostedClusters: %v", err)
+		if !duFinished {
+			return nil
 		}
-	}
 
-	if duFinished, err = common.ReconcileDataUpload(ctx, p.Client, p.Log, p.Backup, p.DataUploadTimeout, p.DataUploadCheckPace, p.DUStarted, p.DUFinished, &duBlackList); err != nil {
-		return fmt.Errorf("error reconciling data upload: %s", err.Error())
-	}
-
-	if !duFinished {
-		return nil
-	}
-
-	if p.HA {
-		if len(common.DUStatus) == 3 && common.AllObjectsCompleted(common.DUStatus) {
+		if p.HA {
+			if len(common.DUStatus) == 3 && common.AllObjectsCompleted(common.DUStatus) {
+				*p.DUFinished = true
+			}
+		} else {
 			*p.DUFinished = true
 		}
 	} else {

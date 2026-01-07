@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"time"
 
@@ -475,9 +474,18 @@ func WaitForPausedPropagated(ctx context.Context, c crclient.Client, log logrus.
 		}
 		log.Infof("waiting for HCP to set PausedUntil to %s", paused)
 
-		if hcp.Spec.PausedUntil != nil && *hcp.Spec.PausedUntil == paused {
-			log.Debug("HostedControlPlane is paused")
-			return true, nil
+		// For unpause (paused == ""), we expect PausedUntil to be nil
+		// For pause (paused != ""), we expect PausedUntil to equal paused
+		if paused == "" {
+			if hcp.Spec.PausedUntil == nil {
+				log.Debug("HostedControlPlane is unpaused (PausedUntil is nil)")
+				return true, nil
+			}
+		} else {
+			if hcp.Spec.PausedUntil != nil && *hcp.Spec.PausedUntil == paused {
+				log.Debug("HostedControlPlane is paused")
+				return true, nil
+			}
 		}
 
 		return false, nil
@@ -491,25 +499,38 @@ func WaitForPausedPropagated(ctx context.Context, c crclient.Client, log logrus.
 	return err
 }
 
-// UpdateHostedCluster updates the HostedCluster's necessary fields in the specified namespaces.
-func UpdateHostedCluster(ctx context.Context, c crclient.Client, log logrus.FieldLogger, paused string, namespaces []string) error {
-	log.Debug("listing HostedClusters")
-	hostedClusters := &hyperv1.HostedClusterList{
-		Items: []hyperv1.HostedCluster{},
-	}
+// updateHypershiftResource updates Hypershift resources (HostedCluster or NodePool) with pause functionality and audit annotations.
+// This unified function handles both resource types and includes atomic annotation updates.
+func updateHypershiftResource(
+	ctx context.Context,
+	c crclient.Client,
+	log logrus.FieldLogger,
+	paused string,
+	namespaces []string,
+	resourceType string,
+	listObjFactory func() crclient.ObjectList,
+	itemsExtractor func(crclient.ObjectList) []crclient.Object,
+	pausedUntilGetter func(crclient.Object) *string,
+	pausedUntilSetter func(crclient.Object, *string),
+	postUpdateHook func(context.Context, crclient.Client, logrus.FieldLogger, crclient.Object, time.Duration, string) error,
+) error {
+	// Get the appropriate list object
+	listObj := listObjFactory()
 
+	// Search through namespaces for resources
+	var items []crclient.Object
 	for _, ns := range namespaces {
-		if err := c.List(ctx, hostedClusters, crclient.InNamespace(ns)); err != nil {
-			return fmt.Errorf("failed to list HostedClusters in namespace %s: %w", ns, err)
+		if err := c.List(ctx, listObj, crclient.InNamespace(ns)); err != nil {
+			return fmt.Errorf("failed to list %s in namespace %s: %w", resourceType, ns, err)
 		}
 
-		if len(hostedClusters.Items) > 0 {
-			log.Debug("found HostedClusters in namespace %s", ns)
+		items = itemsExtractor(listObj)
+		if len(items) > 0 {
+			log.Debugf("found %s in namespace %s", resourceType, ns)
 			break
 		}
 	}
-
-	for _, hc := range hostedClusters.Items {
+	for _, item := range items {
 		// Create a retry loop with improved backoff for better conflict resolution
 		backoff := wait.Backoff{
 			Steps:    10,                     // Increased from 5 to 10
@@ -520,104 +541,143 @@ func UpdateHostedCluster(ctx context.Context, c crclient.Client, log logrus.Fiel
 		}
 
 		err := wait.ExponentialBackoff(backoff, func() (bool, error) {
-			// Get the latest version of the HostedCluster
-			currentHC := &hyperv1.HostedCluster{}
-			if err := c.Get(ctx, types.NamespacedName{Name: hc.Name, Namespace: hc.Namespace}, currentHC); err != nil {
+			// Get the latest version of the resource
+			current := item.DeepCopyObject().(crclient.Object)
+			if err := c.Get(ctx, crclient.ObjectKeyFromObject(item), current); err != nil {
 				return false, err
 			}
 
-			// Update PausedUntil if needed
-			if currentHC.Spec.PausedUntil == nil || *currentHC.Spec.PausedUntil != paused {
-				log.Infof("setting PauseUntil to %s in HostedCluster %s", paused, currentHC.Name)
-				currentHC.Spec.PausedUntil = ptr.To(paused)
-				if err := c.Update(ctx, currentHC); err != nil {
+			// Check if update is needed
+			currentPausedUntil := pausedUntilGetter(current)
+			var needsUpdate bool
+			if paused == "" {
+				// For unpause: we need to set pausedUntil to nil, so update needed if it's currently not nil
+				needsUpdate = currentPausedUntil != nil
+			} else {
+				// For pause: we need to set pausedUntil to the paused value
+				needsUpdate = currentPausedUntil == nil || *currentPausedUntil != paused
+			}
+
+			if needsUpdate {
+				switch paused {
+				case "":
+					log.Infof("setting PauseUntil to nil (unpause) in %s %s", resourceType, current.GetName())
+					pausedUntilSetter(current, nil)
+					removePauseAuditAnnotations(current)
+				case "true":
+					log.Infof("setting PauseUntil to %s in %s %s", paused, resourceType, current.GetName())
+					pausedUntilSetter(current, ptr.To(paused))
+					addPauseAuditAnnotations(current)
+				}
+
+				// Perform the atomic update
+				if err := c.Update(ctx, current); err != nil {
 					if apierrors.IsConflict(err) {
-						log.Infof("Conflict detected pausing the HostedCluster %s, retrying...", currentHC.Name)
+						log.Infof("Conflict detected updating %s %s, retrying...", resourceType, current.GetName())
 						return false, nil
 					}
 					return false, err
 				}
 
-				// Checking the hc Object to validate the propagation of the PausedUntil field
-				log.Debug("checking paused state propagation")
-				if err := WaitForPausedPropagated(ctx, c, log, currentHC, defaultWaitForPausedTimeout, paused); err != nil {
-					return false, err
+				// Call post-update hook if provided (for HostedCluster propagation validation)
+				if postUpdateHook != nil {
+					if err := postUpdateHook(ctx, c, log, current, defaultWaitForPausedTimeout, paused); err != nil {
+						return false, err
+					}
 				}
 
-				log.Infof("Successfully set HostedCluster %s PausedUntil to %s", currentHC.Name, paused)
+				log.Infof("Successfully set %s %s PausedUntil to %s", resourceType, current.GetName(), paused)
 			} else {
-				log.Debugf("HostedCluster %s already has PausedUntil set to %s, no update needed", currentHC.Name, paused)
+				log.Debugf("%s %s already has PausedUntil set to %s, no update needed", resourceType, current.GetName(), paused)
 			}
 
 			return true, nil
 		})
 
 		if err != nil {
-			return fmt.Errorf("failed to update HostedCluster %s after retries: %w", hc.Name, err)
+			return fmt.Errorf("failed to update %s %s after retries: %w", resourceType, item.GetName(), err)
 		}
 	}
 
 	return nil
 }
 
+// UpdateHostedCluster updates the HostedCluster's necessary fields in the specified namespaces.
+func UpdateHostedCluster(ctx context.Context, c crclient.Client, log logrus.FieldLogger, paused string, namespaces []string) error {
+	return updateHypershiftResource(
+		ctx, c, log, paused, namespaces, "HostedCluster",
+
+		// listObjFactory - creates a new HostedClusterList
+		func() crclient.ObjectList {
+			return &hyperv1.HostedClusterList{Items: []hyperv1.HostedCluster{}}
+		},
+
+		// itemsExtractor - extracts HostedCluster items as crclient.Object slice
+		func(list crclient.ObjectList) []crclient.Object {
+			hcList := list.(*hyperv1.HostedClusterList)
+			items := make([]crclient.Object, len(hcList.Items))
+			for i := range hcList.Items {
+				items[i] = &hcList.Items[i]
+			}
+			return items
+		},
+
+		// pausedUntilGetter - gets PausedUntil from HostedCluster
+		func(obj crclient.Object) *string {
+			hc := obj.(*hyperv1.HostedCluster)
+			return hc.Spec.PausedUntil
+		},
+
+		// pausedUntilSetter - sets PausedUntil on HostedCluster
+		func(obj crclient.Object, paused *string) {
+			hc := obj.(*hyperv1.HostedCluster)
+			hc.Spec.PausedUntil = paused
+		},
+
+		// postUpdateHook - validates propagation for HostedClusters
+		func(ctx context.Context, c crclient.Client, log logrus.FieldLogger, obj crclient.Object, timeout time.Duration, paused string) error {
+			hc := obj.(*hyperv1.HostedCluster)
+			log.Debug("checking paused state propagation")
+			return WaitForPausedPropagated(ctx, c, log, hc, timeout, paused)
+		},
+	)
+}
+
 // UpdateNodepools updates the NodePool's necessary fields in the specified namespaces.
 func UpdateNodepools(ctx context.Context, c crclient.Client, log logrus.FieldLogger, paused string, namespaces []string) error {
-	log.Debug("listing NodePools, checking namespaces to inspect")
-	nodepools := &hyperv1.NodePoolList{}
+	return updateHypershiftResource(
+		ctx, c, log, paused, namespaces, "NodePool",
 
-	for _, ns := range namespaces {
-		if err := c.List(ctx, nodepools, crclient.InNamespace(ns)); err != nil {
-			return fmt.Errorf("failed to list NodePools in namespace %s: %w", ns, err)
-		}
+		// listObjFactory - creates a new NodePoolList
+		func() crclient.ObjectList {
+			return &hyperv1.NodePoolList{}
+		},
 
-		if len(nodepools.Items) > 0 {
-			log.Debug("found NodePools in namespace %s", ns)
-			break
-		}
-	}
-
-	for _, np := range nodepools.Items {
-		// Create a retry loop with improved backoff for better conflict resolution
-		backoff := wait.Backoff{
-			Steps:    10,                     // Increased from 5 to 10
-			Duration: 500 * time.Millisecond, // Reduced initial duration for faster retries
-			Factor:   2.0,
-			Jitter:   0.1,
-			Cap:      30 * time.Second, // Cap maximum wait time to 30 seconds
-		}
-
-		err := wait.ExponentialBackoff(backoff, func() (bool, error) {
-			// Get the latest version of the NodePool
-			currentNP := &hyperv1.NodePool{}
-			if err := c.Get(ctx, types.NamespacedName{Name: np.Name, Namespace: np.Namespace}, currentNP); err != nil {
-				return false, err
+		// itemsExtractor - extracts NodePool items as crclient.Object slice
+		func(list crclient.ObjectList) []crclient.Object {
+			npList := list.(*hyperv1.NodePoolList)
+			items := make([]crclient.Object, len(npList.Items))
+			for i := range npList.Items {
+				items[i] = &npList.Items[i]
 			}
+			return items
+		},
 
-			if currentNP.Spec.PausedUntil == nil || *currentNP.Spec.PausedUntil != paused {
-				log.Infof("%s setting PauseUntil to %s in NodePool: %s", paused, currentNP.Name)
-				currentNP.Spec.PausedUntil = ptr.To(paused)
-				if err := c.Update(ctx, currentNP); err != nil {
-					if apierrors.IsConflict(err) {
-						log.Infof("Conflict detected setting PauseUntil to %s in NodePool %s, retrying...", paused, currentNP.Name)
-						return false, nil
-					}
-					return false, err
-				}
+		// pausedUntilGetter - gets PausedUntil from NodePool
+		func(obj crclient.Object) *string {
+			np := obj.(*hyperv1.NodePool)
+			return np.Spec.PausedUntil
+		},
 
-				log.Infof("Successfully set NodePool %s PausedUntil to %s", currentNP.Name, paused)
-			} else {
-				log.Debugf("NodePool %s already has PausedUntil set to %s, no update needed", np.Name, paused)
-			}
+		// pausedUntilSetter - sets PausedUntil on NodePool
+		func(obj crclient.Object, paused *string) {
+			np := obj.(*hyperv1.NodePool)
+			np.Spec.PausedUntil = paused
+		},
 
-			return true, nil
-		})
-
-		if err != nil {
-			return fmt.Errorf("failed to update NodePool %s after retries: %w", np.Name, err)
-		}
-	}
-
-	return nil
+		// postUpdateHook - NodePools don't need propagation validation
+		nil,
+	)
 }
 
 // GetCurrentNamespace reads the namespace from the Kubernetes service account
@@ -665,6 +725,21 @@ func RemoveAnnotation(metadata metav1.Object, key string) {
 	}
 	delete(annotations, key)
 	metadata.SetAnnotations(annotations)
+}
+
+// addPauseAuditAnnotations adds OADP audit annotations when pausing a resource.
+// It adds both the paused-by and paused-at annotations atomically.
+func addPauseAuditAnnotations(obj metav1.Object) {
+	timestamp := time.Now().Format(time.RFC3339)
+	AddAnnotation(obj, OADPPausedByAnnotation, HypershiftOADPPluginName)
+	AddAnnotation(obj, OADPPausedAtAnnotation, timestamp)
+}
+
+// removePauseAuditAnnotations removes OADP audit annotations when unpausing a resource.
+// It removes both the paused-by and paused-at annotations.
+func removePauseAuditAnnotations(obj metav1.Object) {
+	RemoveAnnotation(obj, OADPPausedByAnnotation)
+	RemoveAnnotation(obj, OADPPausedAtAnnotation)
 }
 
 // AddLabel adds a label with the specified key and value to the given metadata object.
@@ -718,30 +793,30 @@ func GetHCPNamespace(name, namespace string) string {
 // ShouldEndPluginExecution checks if the plugin should end execution by verifying if the required
 // Hypershift resources (HostedControlPlane and HostedCluster) exist in the cluster.
 // Returns true if the plugin should end execution (i.e., if this is not a Hypershift cluster).
-func ShouldEndPluginExecution(ctx context.Context, backup *veleroapiv1.Backup, c crclient.Client, log logrus.FieldLogger) bool {
+func ShouldEndPluginExecution(ctx context.Context, backup *veleroapiv1.Backup, c crclient.Client, log logrus.FieldLogger) (bool, error) {
 	if len(backup.Spec.IncludedNamespaces) == 0 {
-		log.Debug("No namespaces provided")
-		return true
+		return true, fmt.Errorf("no namespaces provided")
 	}
 
-	if slices.Contains(backup.Spec.IncludedResources, "hostedcluster") || slices.Contains(backup.Spec.IncludedResources, "hostedcontrolplane") {
-		log.Debug("Hypershift resources found")
-		return false
+	// Check for both short and full resource names
+	for _, resource := range backup.Spec.IncludedResources {
+		if strings.Contains(resource, "hostedcluster") ||
+			strings.Contains(resource, "hostedcontrolplane") ||
+			strings.Contains(resource, "nodepool") {
+			return false, nil
+		}
 	}
 
 	exists, err := CRDExists(ctx, "hostedcontrolplanes.hypershift.openshift.io", c)
 	if err != nil {
-		log.Debugf("Error checking for HostedControlPlane CRD: %v", err)
-		return true
+		return true, fmt.Errorf("error checking for HostedControlPlane CRD: %v", err)
 	}
 
 	if exists {
-		log.Debug("HostedControlPlane CRD found")
-		return false
+		return false, nil
 	}
 
-	log.Debug("No Hypershift CRDs resources found")
-	return true
+	return true, fmt.Errorf("no HostedControlPlane CRD found")
 }
 
 func CRDExists(ctx context.Context, crdName string, c crclient.Client) (bool, error) {

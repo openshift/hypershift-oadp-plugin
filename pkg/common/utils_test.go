@@ -132,6 +132,72 @@ func TestManagePauseHostedCluster(t *testing.T) {
 			hcList:     &hyperv1.HostedClusterList{},
 			expectErr:  false,
 		},
+		{
+			name:       "Unpause HostedCluster",
+			namespaces: []string{"test-namespace"},
+			paused:     "",
+			hcList: &hyperv1.HostedClusterList{
+				Items: []hyperv1.HostedCluster{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "test-hc",
+							Namespace: "test-namespace",
+						},
+						Spec: hyperv1.HostedClusterSpec{
+							PausedUntil: ptr.To("true"),
+						},
+					},
+				},
+			},
+			expectErr: false,
+		},
+		{
+			name:       "Unpause already unpaused HostedCluster",
+			namespaces: []string{"test-namespace"},
+			paused:     "",
+			hcList: &hyperv1.HostedClusterList{
+				Items: []hyperv1.HostedCluster{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "test-hc",
+							Namespace: "test-namespace",
+						},
+						Spec: hyperv1.HostedClusterSpec{
+							PausedUntil: nil,
+						},
+					},
+				},
+			},
+			expectErr: false,
+		},
+		{
+			name:       "Mixed state - multiple HostedClusters with different pause states",
+			namespaces: []string{"test-namespace"},
+			paused:     "true",
+			hcList: &hyperv1.HostedClusterList{
+				Items: []hyperv1.HostedCluster{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "test-hc-1",
+							Namespace: "test-namespace",
+						},
+						Spec: hyperv1.HostedClusterSpec{
+							PausedUntil: nil, // Not paused
+						},
+					},
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "test-hc-2",
+							Namespace: "test-namespace",
+						},
+						Spec: hyperv1.HostedClusterSpec{
+							PausedUntil: ptr.To("true"), // Already paused
+						},
+					},
+				},
+			},
+			expectErr: false,
+		},
 	}
 
 	scheme := runtime.NewScheme()
@@ -152,7 +218,13 @@ func TestManagePauseHostedCluster(t *testing.T) {
 					updatedHC := &hyperv1.HostedCluster{}
 					err := client.Get(context.TODO(), types.NamespacedName{Name: hc.Name, Namespace: hc.Namespace}, updatedHC)
 					g.Expect(err).NotTo(HaveOccurred())
-					g.Expect(updatedHC.Spec.PausedUntil).To(Equal(ptr.To(tt.paused)))
+
+					// Verify pause state correctly - empty string means unpause (nil)
+					if tt.paused == "" {
+						g.Expect(updatedHC.Spec.PausedUntil).To(BeNil())
+					} else {
+						g.Expect(updatedHC.Spec.PausedUntil).To(Equal(ptr.To(tt.paused)))
+					}
 					g.Expect(updatedHC.Annotations[HostedClusterRestoredFromBackupAnnotation]).To(BeEmpty())
 				}
 			}
@@ -217,6 +289,75 @@ func TestManagePauseNodepools(t *testing.T) {
 			npList:     &hyperv1.NodePoolList{},
 			expectErr:  false,
 		},
+		{
+			name:       "Unpause NodePool",
+			namespaces: []string{"test-namespace"},
+			paused:     "",
+			header:     "TestHeader",
+			npList: &hyperv1.NodePoolList{
+				Items: []hyperv1.NodePool{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "test-np",
+							Namespace: "test-namespace",
+						},
+						Spec: hyperv1.NodePoolSpec{
+							PausedUntil: ptr.To("true"),
+						},
+					},
+				},
+			},
+			expectErr: false,
+		},
+		{
+			name:       "Unpause already unpaused NodePool",
+			namespaces: []string{"test-namespace"},
+			paused:     "",
+			header:     "TestHeader",
+			npList: &hyperv1.NodePoolList{
+				Items: []hyperv1.NodePool{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "test-np",
+							Namespace: "test-namespace",
+						},
+						Spec: hyperv1.NodePoolSpec{
+							PausedUntil: nil,
+						},
+					},
+				},
+			},
+			expectErr: false,
+		},
+		{
+			name:       "Mixed state - multiple NodePools with different pause states",
+			namespaces: []string{"test-namespace"},
+			paused:     "true",
+			header:     "TestHeader",
+			npList: &hyperv1.NodePoolList{
+				Items: []hyperv1.NodePool{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "test-np-1",
+							Namespace: "test-namespace",
+						},
+						Spec: hyperv1.NodePoolSpec{
+							PausedUntil: nil, // Not paused
+						},
+					},
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "test-np-2",
+							Namespace: "test-namespace",
+						},
+						Spec: hyperv1.NodePoolSpec{
+							PausedUntil: ptr.To("true"), // Already paused
+						},
+					},
+				},
+			},
+			expectErr: false,
+		},
 	}
 
 	scheme := runtime.NewScheme()
@@ -237,7 +378,13 @@ func TestManagePauseNodepools(t *testing.T) {
 					updatedNP := &hyperv1.NodePool{}
 					err := client.Get(context.TODO(), types.NamespacedName{Name: np.Name, Namespace: np.Namespace}, updatedNP)
 					g.Expect(err).NotTo(HaveOccurred())
-					g.Expect(updatedNP.Spec.PausedUntil).To(Equal(ptr.To(tt.paused)))
+
+					// Verify pause state correctly - empty string means unpause (nil)
+					if tt.paused == "" {
+						g.Expect(updatedNP.Spec.PausedUntil).To(BeNil())
+					} else {
+						g.Expect(updatedNP.Spec.PausedUntil).To(Equal(ptr.To(tt.paused)))
+					}
 				}
 			}
 		})
@@ -750,6 +897,7 @@ func TestShouldEndPluginExecution(t *testing.T) {
 		includedNamespaces []string
 		includedResources  []string
 		expectedResult     bool
+		expectError        bool
 	}{
 		{
 			name: "CRD exists",
@@ -763,13 +911,15 @@ func TestShouldEndPluginExecution(t *testing.T) {
 			includedNamespaces: []string{"test-namespace"},
 			includedResources:  []string{"hostedcontrolplanes", "hostedclusters"},
 			expectedResult:     false,
+			expectError:        false,
 		},
 		{
 			name:               "CRD does not exist",
 			objects:            []client.Object{},
 			includedNamespaces: []string{"test-namespace"},
-			includedResources:  []string{"hostedcontrolplanes", "hostedclusters"},
+			includedResources:  []string{"secrets", "configmaps"},
 			expectedResult:     true,
+			expectError:        true,
 		},
 		{
 			name:               "No namespaces provided",
@@ -777,6 +927,7 @@ func TestShouldEndPluginExecution(t *testing.T) {
 			includedNamespaces: []string{},
 			includedResources:  []string{"hostedcontrolplanes", "hostedclusters"},
 			expectedResult:     true,
+			expectError:        true,
 		},
 		{
 			name:               "No resources provided",
@@ -784,6 +935,7 @@ func TestShouldEndPluginExecution(t *testing.T) {
 			includedNamespaces: []string{"test-namespace"},
 			includedResources:  []string{},
 			expectedResult:     true,
+			expectError:        true,
 		},
 	}
 
@@ -798,12 +950,17 @@ func TestShouldEndPluginExecution(t *testing.T) {
 			c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tt.objects...).Build()
 			log := logrus.New()
 
-			result := ShouldEndPluginExecution(context.TODO(), &veleroapiv1.Backup{
+			result, err := ShouldEndPluginExecution(context.TODO(), &veleroapiv1.Backup{
 				Spec: veleroapiv1.BackupSpec{
 					IncludedNamespaces: tt.includedNamespaces,
 					IncludedResources:  tt.includedResources,
 				},
 			}, c, log)
+			if tt.expectError {
+				g.Expect(err).To(HaveOccurred())
+			} else {
+				g.Expect(err).NotTo(HaveOccurred())
+			}
 			g.Expect(result).To(Equal(tt.expectedResult))
 		})
 	}
@@ -4108,6 +4265,151 @@ func TestAllObjectsCompleted(t *testing.T) {
 			g := NewWithT(t)
 			result := AllObjectsCompleted(tt.status)
 			g.Expect(result).To(Equal(tt.expected))
+		})
+	}
+}
+
+func TestAddPauseAuditAnnotations(t *testing.T) {
+	g := NewWithT(t)
+
+	tests := []struct {
+		name                string
+		object              metav1.Object
+		expectedAnnotations map[string]string
+	}{
+		{
+			name: "add annotations to object with no existing annotations",
+			object: &unstructured.Unstructured{
+				Object: map[string]interface{}{
+					"metadata": map[string]interface{}{
+						"name": "test-object",
+					},
+				},
+			},
+			expectedAnnotations: map[string]string{
+				OADPPausedByAnnotation: HypershiftOADPPluginName,
+				// Note: timestamp will be checked separately since it's dynamic
+			},
+		},
+		{
+			name: "add annotations to object with existing annotations",
+			object: &unstructured.Unstructured{
+				Object: map[string]interface{}{
+					"metadata": map[string]interface{}{
+						"name": "test-object",
+						"annotations": map[string]interface{}{
+							"existing": "annotation",
+						},
+					},
+				},
+			},
+			expectedAnnotations: map[string]string{
+				"existing":             "annotation",
+				OADPPausedByAnnotation: HypershiftOADPPluginName,
+				// Note: timestamp will be checked separately since it's dynamic
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			addPauseAuditAnnotations(tt.object)
+
+			annotations := tt.object.GetAnnotations()
+			g.Expect(annotations).NotTo(BeNil())
+
+			// Check paused-by annotation
+			g.Expect(annotations[OADPPausedByAnnotation]).To(Equal(HypershiftOADPPluginName))
+
+			// Check paused-at annotation exists and is valid RFC3339 timestamp
+			pausedAt := annotations[OADPPausedAtAnnotation]
+			g.Expect(pausedAt).NotTo(BeEmpty())
+			_, err := time.Parse(time.RFC3339, pausedAt)
+			g.Expect(err).NotTo(HaveOccurred())
+
+			// Check existing annotations are preserved
+			for key, value := range tt.expectedAnnotations {
+				if key != OADPPausedAtAnnotation { // Skip timestamp check
+					g.Expect(annotations[key]).To(Equal(value))
+				}
+			}
+		})
+	}
+}
+
+func TestRemovePauseAuditAnnotations(t *testing.T) {
+	g := NewWithT(t)
+
+	tests := []struct {
+		name                string
+		object              metav1.Object
+		expectedAnnotations map[string]string
+	}{
+		{
+			name: "remove annotations from object with only audit annotations",
+			object: &unstructured.Unstructured{
+				Object: map[string]interface{}{
+					"metadata": map[string]interface{}{
+						"name": "test-object",
+						"annotations": map[string]interface{}{
+							OADPPausedByAnnotation: HypershiftOADPPluginName,
+							OADPPausedAtAnnotation: "2025-12-04T10:00:00Z",
+						},
+					},
+				},
+			},
+			expectedAnnotations: map[string]string{},
+		},
+		{
+			name: "remove annotations from object with mixed annotations",
+			object: &unstructured.Unstructured{
+				Object: map[string]interface{}{
+					"metadata": map[string]interface{}{
+						"name": "test-object",
+						"annotations": map[string]interface{}{
+							"existing":             "annotation",
+							"another":              "value",
+							OADPPausedByAnnotation: HypershiftOADPPluginName,
+							OADPPausedAtAnnotation: "2025-12-04T10:00:00Z",
+						},
+					},
+				},
+			},
+			expectedAnnotations: map[string]string{
+				"existing": "annotation",
+				"another":  "value",
+			},
+		},
+		{
+			name: "remove annotations from object with no annotations",
+			object: &unstructured.Unstructured{
+				Object: map[string]interface{}{
+					"metadata": map[string]interface{}{
+						"name": "test-object",
+					},
+				},
+			},
+			expectedAnnotations: map[string]string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			removePauseAuditAnnotations(tt.object)
+
+			annotations := tt.object.GetAnnotations()
+
+			// Check that audit annotations are removed
+			g.Expect(annotations[OADPPausedByAnnotation]).To(BeEmpty())
+			g.Expect(annotations[OADPPausedAtAnnotation]).To(BeEmpty())
+
+			// Check that other annotations are preserved
+			for key, expectedValue := range tt.expectedAnnotations {
+				g.Expect(annotations[key]).To(Equal(expectedValue))
+			}
+
+			// Check that we have the correct number of annotations
+			g.Expect(len(annotations)).To(Equal(len(tt.expectedAnnotations)))
 		})
 	}
 }

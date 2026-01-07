@@ -27,6 +27,20 @@ const (
 	IgnitionServerTokenExpirationTimestampAnnotation = "hypershift.openshift.io/ignition-token-expiration-timestamp"
 )
 
+// ImageType specifies the type of image to use for node instances.
+type ImageType string
+
+const (
+	// ImageTypeLinux represents the default image type (Linux/RHCOS).
+	// This is used when ImageType is empty or unspecified.
+	ImageTypeLinux ImageType = "Linux"
+
+	// ImageTypeWindows represents a Windows-based image type.
+	// When set, the controller will automatically populate the AMI field
+	// with a Windows-compatible AMI based on the region and OpenShift version.
+	ImageTypeWindows ImageType = "Windows"
+)
+
 var (
 	// ArchAliases contains the RHCOS release metadata aliases for the different architectures supported as API input.
 	ArchAliases = map[string]string{
@@ -86,6 +100,8 @@ type NodePool struct {
 // +kubebuilder:validation:XValidation:rule="!has(oldSelf.arch) || has(self.arch)", message="Arch is required once set"
 // +kubebuilder:validation:XValidation:rule="self.arch != 'arm64' || has(self.platform.aws) || has(self.platform.azure) || has(self.platform.agent) || self.platform.type == 'None'", message="Setting Arch to arm64 is only supported for AWS, Azure, Agent and None"
 // +kubebuilder:validation:XValidation:rule="!has(self.replicas) || !has(self.autoScaling)", message="Both replicas or autoScaling should not be set"
+// +kubebuilder:validation:XValidation:rule="self.arch != 's390x' || has(self.platform.kubevirt)", message="s390x is only supported on KubeVirt platform"
+// +kubebuilder:validation:XValidation:rule="(has(self.platform.aws) && has(self.platform.aws.imageType) && self.platform.aws.imageType == 'Windows') ? self.arch == 'amd64' : true", message="ImageType 'Windows' requires arch 'amd64' (AWS only)"
 type NodePoolSpec struct {
 	// clusterName is the name of the HostedCluster this NodePool belongs to.
 	// If a HostedCluster with this name doesn't exist, the controller will no-op until it exists.
@@ -211,10 +227,9 @@ type NodePoolSpec struct {
 	// arch is the preferred processor architecture for the NodePool. Different platforms might have different supported architectures.
 	// TODO: This is set as optional to prevent validation from failing due to a limitation on client side validation with open API machinery:
 	//	https://github.com/kubernetes/kubernetes/issues/108768#issuecomment-1253912215
-	// TODO Add s390x to enum validation once the architecture is supported
 	//
 	// +kubebuilder:default:=amd64
-	// +kubebuilder:validation:Enum=arm64;amd64;ppc64le
+	// +kubebuilder:validation:Enum=arm64;amd64;ppc64le;s390x
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf", message="Arch is immutable"
 	// +optional
 	Arch string `json:"arch,omitempty"`

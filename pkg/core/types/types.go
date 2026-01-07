@@ -6,10 +6,13 @@ import (
 
 var (
 	BackupCommonResources = []string{
-		"hostedclusters", "hostedcontrolplanes", "nodepool",
-		"secrets", "configmaps", "persistentvolumes", "persistentvolumeclaims", "pods", "statefulsets", "deployments",
-		"clusters", "machines", "machinedeployments", "machinesets",
+		"hostedclusters", "hostedcluster", "hostedcontrolplanes", "hostedcontrolplane", "nodepools", "nodepool",
+		"secrets", "secret", "configmaps", "configmap", "persistentvolumes", "persistentvolume", "persistentvolumeclaims", "persistentvolumeclaim", "pods", "pod", "statefulsets", "statefulset", "deployments", "deployment",
+		"clusters", "cluster", "machines", "machine", "machinedeployments", "machinedeployment", "machinesets", "machineset",
+		"serviceaccounts", "serviceaccount", "roles", "role", "rolebindings", "rolebinding",
+		"priorityclasses", "priorityclass", "poddisruptionbudgets", "poddisruptionbudget",
 	}
+
 	BackupAWSResources        = []string{"awsmachinepools", "awsmachines", "awsmachinetemplates", "awsmanagedmachinepools", "awsmanagedmachinepooltemplates"}
 	BackupAzureResources      = []string{"azuremachines", "azuremachinetemplates", "azuremanagedmachinepools", "azuremanagedmachinepooltemplates"}
 	BackupIBMPowerVSResources = []string{"ibmpowervsmachines", "ibmpowervsmachinetemplates", "ibmpowervsclusters", "ibmpowervsclustertemplates"}
