@@ -167,6 +167,10 @@ const (
 	// key if specified.
 	ServiceAccountSigningKeySecretKey = "key"
 
+	// ServiceAccountOldPublicKeySecretKey is the name of the secret key that should contain the old service account public
+	// key if specified.
+	ServiceAccountOldPublicKeySecretKey = "old-key.pub"
+
 	// DisableProfilingAnnotation is the annotation that allows disabling profiling for control plane components.
 	// Any components specified in this list will have profiling disabled. Profiling is disabled by default for etcd and konnectivity.
 	// Components this annotation can apply to: kube-scheduler, kube-controller-manager, kube-apiserver.
@@ -328,6 +332,11 @@ const (
 	// It is not set by the end-user.
 	DisableClusterAutoscalerAnnotation = "hypershift.openshift.io/disable-cluster-autoscaler"
 
+	// DisableAWSNodeTerminationHandlerAnnotation allows disabling the AWS Node Termination Handler for a hosted cluster.
+	// This annotation is only set by the hypershift-operator on HostedControlPlanes.
+	// It is not set by the end-user.
+	DisableAWSNodeTerminationHandlerAnnotation = "hypershift.openshift.io/disable-aws-node-termination-handler"
+
 	// AroHCP represents the ARO HCP managed service offering
 	AroHCP = "ARO-HCP"
 
@@ -408,6 +417,12 @@ const (
 	// WARNING: This option is for development and testing purposes only
 	AWSMachinePublicIPs = "hypershift.openshift.io/aws-machine-public-ips"
 
+	// AWSKarpenterDefaultInstanceProfile specifies the default IAM instance profile
+	// for EC2 instances created by Karpenter. This will be set directly on the
+	// EC2NodeClass. The instance profile must already exist in AWS.
+	// This is platform-controlled and bypasses OpenshiftEC2NodeClass.
+	AWSKarpenterDefaultInstanceProfile = "hypershift.openshift.io/aws-karpenter-default-instance-profile"
+
 	// HostedClusterRestoredFromBackupAnnotation is set to true when the HostedCluster is restored from a backup using Hypershift
 	// OADP plugin. This annotation is set by the Hypershift OADP plugin during the Backup/Restore process. The annotation will trigger
 	// a process to check if the different components in the DataPlane are working as expected. Checks:
@@ -430,6 +445,11 @@ const (
 	// SkipKASCertificateConflicSANValidation allows skipping the validation of the KAS certificate SANs so they do not conflict with ServicePublishingStrategy Hostname.
 	// This annotation is useful as a escape hatch, that IBM could use.
 	SkipKASConflicSANValidation = "hypershift.openshift.io/skip-kas-conflict-san-validation"
+
+	// SwiftPodNetworkInstanceAnnotation indicates that Swift networking is enabled for the HostedCluster.
+	// This is used by ARO. The value of this annotation is the name of the Swift pod network instance to be attached to the router pods.
+	// We still support absence of this annotation in ARO to keep CI working until swift is available there.
+	SwiftPodNetworkInstanceAnnotation = "hypershift.openshift.io/swift-pod-network-instance"
 )
 
 // RetentionPolicy defines the policy for handling resources associated with a cluster when the cluster is deleted.
@@ -690,7 +710,10 @@ type HostedClusterSpec struct {
 	// If the reference is set but none of the above requirements are met, the HostedCluster will enter a degraded state.
 	// TODO(alberto): Signal this in a condition.
 	//
-	// +immutable
+	// For key rotation, the secret may optionally contain an "old-key.pub" key whose content is the PEM-encoded
+	// public key of the previous signing key. When present, the kube-apiserver will accept tokens signed by
+	// both the current and previous keys, allowing for graceful key rotation without invalidating existing tokens.
+	//
 	// +optional
 	ServiceAccountSigningKey *corev1.LocalObjectReference `json:"serviceAccountSigningKey,omitempty"`
 
@@ -1041,6 +1064,7 @@ type DNSSpec struct {
 // TODO this is available in vanilla kube from 1.31 API servers and in Openshift from 4.16.
 // TODO(alberto): Use CEL cidr library for all these validation when all management clusters are >= 1.31.
 // +kubebuilder:validation:XValidation:rule="(!has(self.machineNetwork) && self.clusterNetwork.all(c, self.serviceNetwork.all(s, c.cidr != s.cidr)) || (has(self.machineNetwork) && (self.machineNetwork.all(m, self.clusterNetwork.all(c, m.cidr != c.cidr)) && self.machineNetwork.all(m, self.serviceNetwork.all(s, m.cidr != s.cidr)) && self.clusterNetwork.all(c, self.serviceNetwork.all(s, c.cidr != s.cidr)))))",message="CIDR ranges in machineNetwork, clusterNetwork, and serviceNetwork must be unique and non-overlapping"
+// +kubebuilder:validation:XValidation:rule="has(self.allocateNodeCIDRs) && self.allocateNodeCIDRs == 'Enabled' ? self.networkType == 'Other' : true",message="allocateNodeCIDRs can only be set to Enabled when networkType is 'Other'"
 type ClusterNetworking struct {
 	// machineNetwork is the list of IP address pools for machines.
 	// This might be used among other things to generate appropriate networking security groups in some clouds providers.
@@ -1091,6 +1115,17 @@ type ClusterNetworking struct {
 	//
 	// +optional
 	APIServer *APIServerNetworking `json:"apiServer,omitempty"`
+
+	// allocateNodeCIDRs controls whether the kube-controller-manager manages node CIDR allocation.
+	// When using networkType=Other, it is recommended to set this field to "Enabled"
+	// if Flannel is used as the CNI, as it relies on this behavior.
+	// Default is "Disabled".
+	// This field can only be set to "Enabled" when NetworkType is "Other". Setting it to "Enabled"
+	// with any other NetworkType will result in a validation error during cluster creation.
+	//
+	// +optional
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="allocateNodeCIDRs is immutable and cannot be modified once set."
+	AllocateNodeCIDRs *AllocateNodeCIDRsMode `json:"allocateNodeCIDRs,omitempty"`
 }
 
 // MachineNetworkEntry is a single IP address block for node IP blocks.
@@ -1177,6 +1212,18 @@ const (
 
 	// Other specifies an undefined SDN provider
 	Other NetworkType = "Other"
+)
+
+// AllocateNodeCIDRsMode specifies whether the KCM manages node CIDR allocation.
+// +kubebuilder:validation:Enum=Enabled;Disabled
+type AllocateNodeCIDRsMode string
+
+const (
+	// AllocateNodeCIDRsEnabled enables node CIDR allocation by the KCM
+	AllocateNodeCIDRsEnabled AllocateNodeCIDRsMode = "Enabled"
+
+	// AllocateNodeCIDRsDisabled disables node CIDR allocation by the KCM
+	AllocateNodeCIDRsDisabled AllocateNodeCIDRsMode = "Disabled"
 )
 
 // PlatformType is a specific supported infrastructure provider.
