@@ -1,8 +1,6 @@
 module github.com/openshift/hypershift-oadp-plugin
 
-go 1.23.0
-
-toolchain go1.23.6
+go 1.25.0
 
 require (
 	github.com/kubernetes-csi/external-snapshotter/client/v8 v8.2.0
@@ -32,7 +30,7 @@ require (
 	github.com/prometheus/procfs v0.15.1 // indirect
 	github.com/spf13/afero v1.10.0 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
-	golang.org/x/exp v0.0.0-20240213143201-ec583247a57a // indirect
+	golang.org/x/exp v0.0.0-20260218203240-3dfff04db8fa // indirect
 	gomodules.xyz/jsonpatch/v2 v2.4.0 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.12.0 // indirect
 )
