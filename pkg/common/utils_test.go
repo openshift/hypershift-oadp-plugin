@@ -391,6 +391,160 @@ func TestManagePauseNodepools(t *testing.T) {
 	}
 }
 
+func TestLabelSelectorHostedCluster(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = hyperv1.AddToScheme(scheme)
+
+	hcList := &hyperv1.HostedClusterList{
+		Items: []hyperv1.HostedCluster{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "dummy-1",
+					Namespace: "test-namespace",
+					Labels:    map[string]string{"my-label/cluster-name": "dummy-1"},
+				},
+				Spec: hyperv1.HostedClusterSpec{PausedUntil: nil},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "dummy-2",
+					Namespace: "test-namespace",
+					Labels:    map[string]string{"my-label/cluster-name": "dummy-2"},
+				},
+				Spec: hyperv1.HostedClusterSpec{PausedUntil: nil},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "dummy-3",
+					Namespace: "test-namespace",
+				},
+				Spec: hyperv1.HostedClusterSpec{PausedUntil: nil},
+			},
+		},
+	}
+
+	tests := []struct {
+		name          string
+		labelSelector *metav1.LabelSelector
+		expectPaused  map[string]bool // HC name -> should be paused
+	}{
+		{
+			name:          "nil selector pauses all HCs in namespace",
+			labelSelector: nil,
+			expectPaused:  map[string]bool{"dummy-1": true, "dummy-2": true, "dummy-3": true},
+		},
+		{
+			name: "selector filters to single HC",
+			labelSelector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"my-label/cluster-name": "dummy-1"},
+			},
+			expectPaused: map[string]bool{"dummy-1": true, "dummy-2": false, "dummy-3": false},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+
+			freshList := hcList.DeepCopy()
+			client := fake.NewClientBuilder().WithScheme(scheme).WithLists(freshList).Build()
+			log := logrus.New()
+
+			err := UpdateHostedCluster(context.TODO(), client, log, "true", []string{"test-namespace"}, tt.labelSelector)
+			g.Expect(err).NotTo(HaveOccurred())
+
+			for name, shouldBePaused := range tt.expectPaused {
+				hc := &hyperv1.HostedCluster{}
+				err := client.Get(context.TODO(), types.NamespacedName{Name: name, Namespace: "test-namespace"}, hc)
+				g.Expect(err).NotTo(HaveOccurred())
+
+				if shouldBePaused {
+					g.Expect(hc.Spec.PausedUntil).To(Equal(ptr.To("true")), "expected %s to be paused", name)
+				} else {
+					g.Expect(hc.Spec.PausedUntil).To(BeNil(), "expected %s to remain unpaused", name)
+				}
+			}
+		})
+	}
+}
+
+func TestLabelSelectorNodepools(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = hyperv1.AddToScheme(scheme)
+
+	npList := &hyperv1.NodePoolList{
+		Items: []hyperv1.NodePool{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "dummy-1-workers",
+					Namespace: "test-namespace",
+					Labels:    map[string]string{"my-label/cluster-name": "dummy-1"},
+				},
+				Spec: hyperv1.NodePoolSpec{PausedUntil: nil},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "dummy-2-workers",
+					Namespace: "test-namespace",
+					Labels:    map[string]string{"my-label/cluster-name": "dummy-2"},
+				},
+				Spec: hyperv1.NodePoolSpec{PausedUntil: nil},
+			},
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "dummy-3-workers",
+					Namespace: "test-namespace",
+				},
+				Spec: hyperv1.NodePoolSpec{PausedUntil: nil},
+			},
+		},
+	}
+
+	tests := []struct {
+		name          string
+		labelSelector *metav1.LabelSelector
+		expectPaused  map[string]bool
+	}{
+		{
+			name:          "nil selector pauses all NPs in namespace",
+			labelSelector: nil,
+			expectPaused:  map[string]bool{"dummy-1-workers": true, "dummy-2-workers": true, "dummy-3-workers": true},
+		},
+		{
+			name: "selector filters to single NP",
+			labelSelector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{"my-label/cluster-name": "dummy-1"},
+			},
+			expectPaused: map[string]bool{"dummy-1-workers": true, "dummy-2-workers": false, "dummy-3-workers": false},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+
+			freshList := npList.DeepCopy()
+			client := fake.NewClientBuilder().WithScheme(scheme).WithLists(freshList).Build()
+			log := logrus.New()
+
+			err := UpdateNodepools(context.TODO(), client, log, "true", []string{"test-namespace"}, tt.labelSelector)
+			g.Expect(err).NotTo(HaveOccurred())
+
+			for name, shouldBePaused := range tt.expectPaused {
+				np := &hyperv1.NodePool{}
+				err := client.Get(context.TODO(), types.NamespacedName{Name: name, Namespace: "test-namespace"}, np)
+				g.Expect(err).NotTo(HaveOccurred())
+
+				if shouldBePaused {
+					g.Expect(np.Spec.PausedUntil).To(Equal(ptr.To("true")), "expected %s to be paused", name)
+				} else {
+					g.Expect(np.Spec.PausedUntil).To(BeNil(), "expected %s to remain unpaused", name)
+				}
+			}
+		})
+	}
+}
+
 func TestWaitForPausedPropagated(t *testing.T) {
 	waitForPausedTimeout := 1 * time.Second
 
