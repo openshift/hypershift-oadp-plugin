@@ -355,7 +355,7 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 func (p *BackupPlugin) pauseAll(ctx context.Context, backup *velerov1.Backup) error {
 	// Pause HostedClusters if not already paused
 	p.log.Info("Pausing HostedClusters with audit annotations...")
-	if err := common.UpdateHostedCluster(ctx, p.client, p.log, "true", backup.Spec.IncludedNamespaces); err != nil {
+	if err := common.UpdateHostedCluster(ctx, p.client, p.log, "true", backup.Spec.IncludedNamespaces, backup.Spec.LabelSelector); err != nil {
 		return fmt.Errorf("error pausing HostedClusters: %v", err)
 	}
 
@@ -363,7 +363,7 @@ func (p *BackupPlugin) pauseAll(ctx context.Context, backup *velerov1.Backup) er
 
 	// Pause NodePools if not already paused
 	p.log.Info("Pausing NodePools with audit annotations...")
-	if err := common.UpdateNodepools(ctx, p.client, p.log, "true", backup.Spec.IncludedNamespaces); err != nil {
+	if err := common.UpdateNodepools(ctx, p.client, p.log, "true", backup.Spec.IncludedNamespaces, backup.Spec.LabelSelector); err != nil {
 		return fmt.Errorf("error pausing NodePools: %v", err)
 	}
 
@@ -375,14 +375,14 @@ func (p *BackupPlugin) pauseAll(ctx context.Context, backup *velerov1.Backup) er
 func (p *BackupPlugin) unPauseAll(ctx context.Context, backup *velerov1.Backup) error {
 	// Unpause HostedClusters if currently paused
 	p.log.Info("Unpausing HostedClusters with audit annotations...")
-	if err := common.UpdateHostedCluster(ctx, p.client, p.log, "", backup.Spec.IncludedNamespaces); err != nil {
+	if err := common.UpdateHostedCluster(ctx, p.client, p.log, "", backup.Spec.IncludedNamespaces, backup.Spec.LabelSelector); err != nil {
 		return fmt.Errorf("error unpausing HostedClusters: %v", err)
 	}
 	p.hcPaused = false
 
 	// Unpause NodePools if currently paused
 	p.log.Info("Unpausing NodePools with audit annotations...")
-	if err := common.UpdateNodepools(ctx, p.client, p.log, "", backup.Spec.IncludedNamespaces); err != nil {
+	if err := common.UpdateNodepools(ctx, p.client, p.log, "", backup.Spec.IncludedNamespaces, backup.Spec.LabelSelector); err != nil {
 		return fmt.Errorf("error unpausing NodePools: %v", err)
 	}
 	p.npPaused = false

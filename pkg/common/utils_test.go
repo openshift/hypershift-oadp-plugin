@@ -209,7 +209,7 @@ func TestManagePauseHostedCluster(t *testing.T) {
 			client := fake.NewClientBuilder().WithScheme(scheme).WithLists(tt.hcList).Build()
 			log := logrus.New()
 
-			err := UpdateHostedCluster(context.TODO(), client, log, tt.paused, tt.namespaces)
+			err := UpdateHostedCluster(context.TODO(), client, log, tt.paused, tt.namespaces, nil)
 			if tt.expectErr {
 				g.Expect(err).To(HaveOccurred())
 			} else {
@@ -369,7 +369,7 @@ func TestManagePauseNodepools(t *testing.T) {
 			client := fake.NewClientBuilder().WithScheme(scheme).WithLists(tt.npList).Build()
 			log := logrus.New()
 
-			err := UpdateNodepools(context.TODO(), client, log, tt.paused, tt.namespaces)
+			err := UpdateNodepools(context.TODO(), client, log, tt.paused, tt.namespaces, nil)
 			if tt.expectErr {
 				g.Expect(err).To(HaveOccurred())
 			} else {

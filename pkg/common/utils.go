@@ -507,6 +507,7 @@ func updateHypershiftResource(
 	log logrus.FieldLogger,
 	paused string,
 	namespaces []string,
+	labelSelector *metav1.LabelSelector,
 	resourceType string,
 	listObjFactory func() crclient.ObjectList,
 	itemsExtractor func(crclient.ObjectList) []crclient.Object,
@@ -517,10 +518,25 @@ func updateHypershiftResource(
 	// Get the appropriate list object
 	listObj := listObjFactory()
 
+	// Build list options: always filter by namespace, optionally by label selector
+	var selectorOpt crclient.MatchingLabelsSelector
+	if labelSelector != nil {
+		selector, err := metav1.LabelSelectorAsSelector(labelSelector)
+		if err != nil {
+			return fmt.Errorf("failed to parse labelSelector: %w", err)
+		}
+		selectorOpt = crclient.MatchingLabelsSelector{Selector: selector}
+		log.Infof("filtering %s with labelSelector: %s", resourceType, selector.String())
+	}
+
 	// Search through namespaces for resources
 	var items []crclient.Object
 	for _, ns := range namespaces {
-		if err := c.List(ctx, listObj, crclient.InNamespace(ns)); err != nil {
+		listOpts := []crclient.ListOption{crclient.InNamespace(ns)}
+		if labelSelector != nil {
+			listOpts = append(listOpts, selectorOpt)
+		}
+		if err := c.List(ctx, listObj, listOpts...); err != nil {
 			return fmt.Errorf("failed to list %s in namespace %s: %w", resourceType, ns, err)
 		}
 
@@ -603,9 +619,10 @@ func updateHypershiftResource(
 }
 
 // UpdateHostedCluster updates the HostedCluster's necessary fields in the specified namespaces.
-func UpdateHostedCluster(ctx context.Context, c crclient.Client, log logrus.FieldLogger, paused string, namespaces []string) error {
+// If labelSelector is non-nil, only resources matching the selector will be affected.
+func UpdateHostedCluster(ctx context.Context, c crclient.Client, log logrus.FieldLogger, paused string, namespaces []string, labelSelector *metav1.LabelSelector) error {
 	return updateHypershiftResource(
-		ctx, c, log, paused, namespaces, "HostedCluster",
+		ctx, c, log, paused, namespaces, labelSelector, "HostedCluster",
 
 		// listObjFactory - creates a new HostedClusterList
 		func() crclient.ObjectList {
@@ -644,9 +661,10 @@ func UpdateHostedCluster(ctx context.Context, c crclient.Client, log logrus.Fiel
 }
 
 // UpdateNodepools updates the NodePool's necessary fields in the specified namespaces.
-func UpdateNodepools(ctx context.Context, c crclient.Client, log logrus.FieldLogger, paused string, namespaces []string) error {
+// If labelSelector is non-nil, only resources matching the selector will be affected.
+func UpdateNodepools(ctx context.Context, c crclient.Client, log logrus.FieldLogger, paused string, namespaces []string, labelSelector *metav1.LabelSelector) error {
 	return updateHypershiftResource(
-		ctx, c, log, paused, namespaces, "NodePool",
+		ctx, c, log, paused, namespaces, labelSelector, "NodePool",
 
 		// listObjFactory - creates a new NodePoolList
 		func() crclient.ObjectList {

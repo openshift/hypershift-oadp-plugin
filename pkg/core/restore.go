@@ -177,12 +177,12 @@ func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*v
 
 	case common.MainKinds[kind]:
 		// updating NodePools
-		if err := common.UpdateNodepools(ctx, p.client, p.log, "", input.Restore.Spec.IncludedNamespaces); err != nil {
+		if err := common.UpdateNodepools(ctx, p.client, p.log, "", input.Restore.Spec.IncludedNamespaces, input.Restore.Spec.LabelSelector); err != nil {
 			return nil, fmt.Errorf("error updating NodePools: %v", err)
 		}
 
 		// updating HostedClusters
-		if err := common.UpdateHostedCluster(ctx, p.client, p.log, "", input.Restore.Spec.IncludedNamespaces); err != nil {
+		if err := common.UpdateHostedCluster(ctx, p.client, p.log, "", input.Restore.Spec.IncludedNamespaces, input.Restore.Spec.LabelSelector); err != nil {
 			return nil, fmt.Errorf("error updating HostedClusters: %v", err)
 		}
 
