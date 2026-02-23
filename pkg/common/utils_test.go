@@ -209,7 +209,8 @@ func TestManagePauseHostedCluster(t *testing.T) {
 			client := fake.NewClientBuilder().WithScheme(scheme).WithLists(tt.hcList).Build()
 			log := logrus.New()
 
-			err := UpdateHostedCluster(context.TODO(), client, log, tt.paused, tt.namespaces, nil)
+			filter, _ := NewResourceFilter(nil, nil)
+			err := UpdateHostedCluster(context.TODO(), client, log, tt.paused, tt.namespaces, filter)
 			if tt.expectErr {
 				g.Expect(err).To(HaveOccurred())
 			} else {
@@ -369,7 +370,8 @@ func TestManagePauseNodepools(t *testing.T) {
 			client := fake.NewClientBuilder().WithScheme(scheme).WithLists(tt.npList).Build()
 			log := logrus.New()
 
-			err := UpdateNodepools(context.TODO(), client, log, tt.paused, tt.namespaces, nil)
+			filter, _ := NewResourceFilter(nil, nil)
+			err := UpdateNodepools(context.TODO(), client, log, tt.paused, tt.namespaces, filter)
 			if tt.expectErr {
 				g.Expect(err).To(HaveOccurred())
 			} else {
@@ -450,7 +452,8 @@ func TestLabelSelectorHostedCluster(t *testing.T) {
 			client := fake.NewClientBuilder().WithScheme(scheme).WithLists(freshList).Build()
 			log := logrus.New()
 
-			err := UpdateHostedCluster(context.TODO(), client, log, "true", []string{"test-namespace"}, tt.labelSelector)
+			filter, _ := NewResourceFilter(tt.labelSelector, nil)
+			err := UpdateHostedCluster(context.TODO(), client, log, "true", []string{"test-namespace"}, filter)
 			g.Expect(err).NotTo(HaveOccurred())
 
 			for name, shouldBePaused := range tt.expectPaused {
@@ -527,7 +530,8 @@ func TestLabelSelectorNodepools(t *testing.T) {
 			client := fake.NewClientBuilder().WithScheme(scheme).WithLists(freshList).Build()
 			log := logrus.New()
 
-			err := UpdateNodepools(context.TODO(), client, log, "true", []string{"test-namespace"}, tt.labelSelector)
+			filter, _ := NewResourceFilter(tt.labelSelector, nil)
+			err := UpdateNodepools(context.TODO(), client, log, "true", []string{"test-namespace"}, filter)
 			g.Expect(err).NotTo(HaveOccurred())
 
 			for name, shouldBePaused := range tt.expectPaused {
