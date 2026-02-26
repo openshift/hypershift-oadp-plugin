@@ -534,6 +534,9 @@ func NewResourceFilter(labelSelector *metav1.LabelSelector, orLabelSelectors []*
 // With orLabelSelectors the resource must match at least one (OR).
 // No selectors means match everything.
 func (f *ResourceFilter) Matches(labels map[string]string) bool {
+	if f == nil {
+		return true // nil filter matches everything
+	}
 	if len(f.selectors) == 0 {
 		return true
 	}
