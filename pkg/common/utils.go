@@ -20,6 +20,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8slabels "k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -499,6 +500,57 @@ func WaitForPausedPropagated(ctx context.Context, c crclient.Client, log logrus.
 	return err
 }
 
+// ResourceFilter determines which resources to pause/unpause.
+// Mirrors Velero's labelSelector / orLabelSelectors semantics:
+//   - labelSelector: a single AND selector
+//   - orLabelSelectors: multiple selectors OR'd together
+//   - both nil: match everything (no filtering)
+type ResourceFilter struct {
+	selectors []k8slabels.Selector
+}
+
+// NewResourceFilter compiles Velero's label selector fields into a reusable filter.
+func NewResourceFilter(labelSelector *metav1.LabelSelector, orLabelSelectors []*metav1.LabelSelector) (*ResourceFilter, error) {
+	var sources []*metav1.LabelSelector
+	if labelSelector != nil {
+		sources = []*metav1.LabelSelector{labelSelector}
+	} else {
+		sources = orLabelSelectors
+	}
+
+	selectors := make([]k8slabels.Selector, 0, len(sources))
+	for _, ls := range sources {
+		sel, err := metav1.LabelSelectorAsSelector(ls)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse labelSelector: %w", err)
+		}
+		selectors = append(selectors, sel)
+	}
+	return &ResourceFilter{selectors: selectors}, nil
+}
+
+// Matches returns true if the resource should be included.
+// With a single labelSelector all conditions must match (AND).
+// With orLabelSelectors the resource must match at least one (OR).
+// No selectors means match everything.
+func (f *ResourceFilter) Matches(labels map[string]string) bool {
+	if f == nil {
+		return true // nil filter matches everything
+	}
+	if len(f.selectors) == 0 {
+		return true
+	}
+	set := k8slabels.Set(labels)
+	for _, sel := range f.selectors {
+		if sel.Matches(set) {
+			return true
+		}
+	}
+	return false
+}
+
+
+
 // updateHypershiftResource updates Hypershift resources (HostedCluster or NodePool) with pause functionality and audit annotations.
 // This unified function handles both resource types and includes atomic annotation updates.
 func updateHypershiftResource(
@@ -507,6 +559,7 @@ func updateHypershiftResource(
 	log logrus.FieldLogger,
 	paused string,
 	namespaces []string,
+	filter *ResourceFilter,
 	resourceType string,
 	listObjFactory func() crclient.ObjectList,
 	itemsExtractor func(crclient.ObjectList) []crclient.Object,
@@ -514,19 +567,22 @@ func updateHypershiftResource(
 	pausedUntilSetter func(crclient.Object, *string),
 	postUpdateHook func(context.Context, crclient.Client, logrus.FieldLogger, crclient.Object, time.Duration, string) error,
 ) error {
-	// Get the appropriate list object
 	listObj := listObjFactory()
 
-	// Search through namespaces for resources
+	// Search through namespaces for resources, applying client-side label filtering
 	var items []crclient.Object
 	for _, ns := range namespaces {
 		if err := c.List(ctx, listObj, crclient.InNamespace(ns)); err != nil {
 			return fmt.Errorf("failed to list %s in namespace %s: %w", resourceType, ns, err)
 		}
 
-		items = itemsExtractor(listObj)
+		for _, item := range itemsExtractor(listObj) {
+			if filter.Matches(item.GetLabels()) {
+				items = append(items, item)
+			}
+		}
 		if len(items) > 0 {
-			log.Debugf("found %s in namespace %s", resourceType, ns)
+			log.Debugf("found %d matching %s in namespace %s", len(items), resourceType, ns)
 			break
 		}
 	}
@@ -603,9 +659,9 @@ func updateHypershiftResource(
 }
 
 // UpdateHostedCluster updates the HostedCluster's necessary fields in the specified namespaces.
-func UpdateHostedCluster(ctx context.Context, c crclient.Client, log logrus.FieldLogger, paused string, namespaces []string) error {
+func UpdateHostedCluster(ctx context.Context, c crclient.Client, log logrus.FieldLogger, paused string, namespaces []string, filter *ResourceFilter) error {
 	return updateHypershiftResource(
-		ctx, c, log, paused, namespaces, "HostedCluster",
+		ctx, c, log, paused, namespaces, filter, "HostedCluster",
 
 		// listObjFactory - creates a new HostedClusterList
 		func() crclient.ObjectList {
@@ -644,9 +700,9 @@ func UpdateHostedCluster(ctx context.Context, c crclient.Client, log logrus.Fiel
 }
 
 // UpdateNodepools updates the NodePool's necessary fields in the specified namespaces.
-func UpdateNodepools(ctx context.Context, c crclient.Client, log logrus.FieldLogger, paused string, namespaces []string) error {
+func UpdateNodepools(ctx context.Context, c crclient.Client, log logrus.FieldLogger, paused string, namespaces []string, filter *ResourceFilter) error {
 	return updateHypershiftResource(
-		ctx, c, log, paused, namespaces, "NodePool",
+		ctx, c, log, paused, namespaces, filter, "NodePool",
 
 		// listObjFactory - creates a new NodePoolList
 		func() crclient.ObjectList {
