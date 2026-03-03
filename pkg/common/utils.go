@@ -290,7 +290,10 @@ func CheckVolumeSnapshot(ctx context.Context, c crclient.Client, log logrus.Fiel
 	for _, vs := range volumeSnapshotSlice.Items {
 		object := &snapshotv1.VolumeSnapshot{}
 		if err := c.Get(ctx, types.NamespacedName{Name: vs.Name, Namespace: vs.Namespace}, object); err != nil {
-			return started, finished, fmt.Errorf("failed to get volumeSnapshot: %w", err)
+			if !apierrors.IsNotFound(err) {
+				return started, finished, fmt.Errorf("failed to get volumeSnapshot: %w", err)
+			}
+			continue
 		}
 
 		if object.Labels[veleroapiv1.BackupNameLabel] == backup.Name && (object.Status != nil && object.Status.ReadyToUse != nil) {
