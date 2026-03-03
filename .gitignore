@@ -35,3 +35,6 @@ bin/
 
 # SNYK CLI cache data
 .dccache
+
+# AI
+.work/
