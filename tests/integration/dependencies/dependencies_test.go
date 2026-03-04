@@ -20,10 +20,24 @@ var watchedDependencies = []string{
 	// "github.com/example/module",
 }
 
+// getTargetBranch returns the upstream branch to check dependencies against.
+// It reads the DEPS_UPSTREAM_BRANCH environment variable, defaulting to "main".
+func getTargetBranch() string {
+	branch := os.Getenv("DEPS_UPSTREAM_BRANCH")
+	if branch == "" {
+		branch = "main"
+	}
+	return branch
+}
+
 // TestWatchedDependenciesAreUpToDate validates that all watched dependencies
-// are up-to-date with the latest versions available from their respective main branches.
+// are up-to-date with the latest versions available from the target upstream branch.
+// The target branch is controlled by the DEPS_UPSTREAM_BRANCH environment variable (default: "main").
 // This helps prevent scheme-related issues and compatibility problems.
 func TestWatchedDependenciesAreUpToDate(t *testing.T) {
+	targetBranch := getTargetBranch()
+	t.Logf("Checking dependencies against upstream branch: %s", targetBranch)
+
 	// Track overall test result
 	allDependenciesUpToDate := true
 	var failureMessages []string
@@ -40,10 +54,10 @@ func TestWatchedDependenciesAreUpToDate(t *testing.T) {
 
 			t.Logf("Current %s version: %s", module, currentVersion)
 
-			// Get the latest available version from main branch using go list
+			// Get the latest available version from the target branch using go list
 			// This properly handles submodule dependencies by considering only commits that affect the specific module path
-			latestVersion, err := getLatestDependencyVersion(module)
-			g.Expect(err).NotTo(HaveOccurred(), "Should be able to get latest version from main for %s", module)
+			latestVersion, err := getLatestDependencyVersion(module, targetBranch)
+			g.Expect(err).NotTo(HaveOccurred(), "Should be able to get latest version from %s for %s", targetBranch, module)
 
 			t.Logf("Latest available %s version: %s", module, latestVersion)
 
@@ -51,15 +65,15 @@ func TestWatchedDependenciesAreUpToDate(t *testing.T) {
 			if currentVersion != latestVersion {
 				allDependenciesUpToDate = false
 
-				errorMsg := fmt.Sprintf("Dependency %s is not up-to-date with upstream main branch.\n"+
+				errorMsg := fmt.Sprintf("Dependency %s is not up-to-date with upstream %s branch.\n"+
 					"Current version: %s\n"+
 					"Latest available: %s\n"+
-					"Consider running: go get %s@main && go mod tidy && go mod vendor",
-					module, currentVersion, latestVersion, module)
+					"Consider running: go get %s@%s && go mod tidy && go mod vendor",
+					module, targetBranch, currentVersion, latestVersion, module, targetBranch)
 				failureMessages = append(failureMessages, errorMsg)
 				t.Error(errorMsg)
 			} else {
-				t.Logf("✅ Dependency %s is up-to-date with upstream main branch", module)
+				t.Logf("✅ Dependency %s is up-to-date with upstream %s branch", module, targetBranch)
 			}
 		})
 	}
@@ -103,10 +117,10 @@ func getCurrentDependencyVersion(module string) (string, error) {
 }
 
 // getLatestDependencyVersion attempts to get the latest version of the module
-// from the main branch using go list. This properly handles submodule dependencies
+// from the specified branch using go list. This properly handles submodule dependencies
 // by only considering commits that affect the specific module path.
-func getLatestDependencyVersion(module string) (string, error) {
-	cmd := exec.Command("go", "list", "-mod=mod", "-m", module+"@main")
+func getLatestDependencyVersion(module, branch string) (string, error) {
+	cmd := exec.Command("go", "list", "-mod=mod", "-m", module+"@"+branch)
 	output, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("failed to get latest version: %w", err)
