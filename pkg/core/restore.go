@@ -154,14 +154,6 @@ func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*v
 
 	kind := input.Item.GetObjectKind().GroupVersionKind().Kind
 	switch {
-	case common.MatchSuffixKind(kind, "clusters", "machines"):
-		metadata, err := meta.Accessor(input.Item)
-		if err != nil {
-			return nil, fmt.Errorf("error getting metadata accessor: %v", err)
-		}
-		common.RemoveAnnotation(metadata, common.CAPIPausedAnnotationName)
-		p.log.Infof("Removed CAPI Paused Annotation: %s from %s", common.CAPIPausedAnnotationName, metadata.GetName())
-
 	case kind == common.HostedControlPlaneKind:
 		hcp := &hyperv1.HostedControlPlane{}
 		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(input.Item.UnstructuredContent(), hcp); err != nil {
@@ -176,16 +168,6 @@ func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*v
 		return velero.NewRestoreItemActionExecuteOutput(input.Item).WithoutRestore(), nil
 
 	case common.MainKinds[kind]:
-		// updating NodePools
-		if err := common.UpdateNodepools(ctx, p.client, p.log, "", input.Restore.Spec.IncludedNamespaces); err != nil {
-			return nil, fmt.Errorf("error updating NodePools: %v", err)
-		}
-
-		// updating HostedClusters
-		if err := common.UpdateHostedCluster(ctx, p.client, p.log, "", input.Restore.Spec.IncludedNamespaces); err != nil {
-			return nil, fmt.Errorf("error updating HostedClusters: %v", err)
-		}
-
 		if kind == common.HostedClusterKind {
 			metadata, err := meta.Accessor(input.Item)
 			if err != nil {

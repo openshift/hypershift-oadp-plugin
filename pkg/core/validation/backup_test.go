@@ -343,8 +343,6 @@ func TestValidateDataMoverWithFinishedStates(t *testing.T) {
 				DUFinished:          ptr.To(tt.duFinished),
 				DataUploadTimeout:   15 * time.Minute,
 				DataUploadCheckPace: 30 * time.Second,
-				NPaused:             ptr.To(false),
-				HCPaused:            ptr.To(false),
 			}
 
 			ctx := context.Background()
@@ -399,8 +397,6 @@ func TestValidateDataMoverWithClient(t *testing.T) {
 		DUFinished:          ptr.To(false),
 		DataUploadTimeout:   15 * time.Minute,
 		DataUploadCheckPace: 30 * time.Second,
-		NPaused:             ptr.To(false),
-		HCPaused:            ptr.To(false),
 	}
 
 	ctx := context.Background()
@@ -438,8 +434,6 @@ func TestValidateDataMoverEdgeCases(t *testing.T) {
 				DUFinished:          ptr.To(false),
 				DataUploadTimeout:   15 * time.Minute,
 				DataUploadCheckPace: 30 * time.Second,
-				NPaused:             ptr.To(false),
-				HCPaused:            ptr.To(false),
 			},
 			expectError: true,
 		},
@@ -562,8 +556,6 @@ func TestValidateDataMoverWithHighAvailability(t *testing.T) {
 		PVBackupFinished:    ptr.To(false),
 		DUStarted:           ptr.To(false),
 		DUFinished:          ptr.To(false),
-		NPaused:             ptr.To(false),
-		HCPaused:            ptr.To(false),
 	}
 
 	ctx := context.Background()
@@ -642,8 +634,6 @@ func TestValidateDataMoverWithDifferentTimeouts(t *testing.T) {
 				PVBackupFinished:    ptr.To(false),
 				DUStarted:           ptr.To(false),
 				DUFinished:          ptr.To(false),
-				NPaused:             ptr.To(false),
-				HCPaused:            ptr.To(false),
 			}
 
 			ctx := context.Background()
@@ -807,8 +797,6 @@ func TestValidateDataMoverWithDifferentDataUploadStates(t *testing.T) {
 				PVBackupFinished:    ptr.To(tt.pvBackupFinished),
 				DUStarted:           ptr.To(false),
 				DUFinished:          ptr.To(tt.duFinished),
-				NPaused:             ptr.To(false),
-				HCPaused:            ptr.To(false),
 			}
 
 			ctx := context.Background()
