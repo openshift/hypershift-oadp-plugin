@@ -21,6 +21,7 @@ VERSION ?= $(shell git describe --tags --always)
 ARCHS ?= amd64 arm64
 DOCKER_BUILD_ARGS ?= --platform=linux/$(ARCH)
 GO=GO111MODULE=on GOWORK=off GOFLAGS=-mod=vendor go
+DEPS_UPSTREAM_BRANCH ?= main
 
 .PHONY: install-goreleaser
 install-goreleaser:
@@ -48,7 +49,7 @@ release-local: verify install-goreleaser build-dirs
 
 .PHONY: tests
 test:
-	$(GO) test -v -timeout 60s ./...
+	DEPS_UPSTREAM_BRANCH=$(DEPS_UPSTREAM_BRANCH) $(GO) test -v -timeout 60s ./...
 
 .PHONY: cover
 cover:
@@ -61,7 +62,7 @@ deps:
 .PHONY: update-deps
 update-deps:
 	@echo "Running dependency update script..."
-	$(GO) run scripts/update-dependencies.go
+	DEPS_UPSTREAM_BRANCH=$(DEPS_UPSTREAM_BRANCH) $(GO) run scripts/update-dependencies.go
 
 .PHONY: verify
 verify: verify-modules test verify-goreleaser
