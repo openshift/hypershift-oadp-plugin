@@ -39,8 +39,6 @@ type BackupPluginValidator struct {
 	DUStarted           *bool
 	DUFinished          *bool
 	DUCompleted         int
-	HCPaused            *bool
-	NPaused             *bool
 }
 
 func (p *BackupPluginValidator) ValidatePluginConfig(config map[string]string) (*plugtypes.BackupOptions, error) {
