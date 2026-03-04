@@ -61,6 +61,13 @@ release-snapshot: verify install-goreleaser build-dirs
 test:
 	DEPS_UPSTREAM_BRANCH=$(DEPS_UPSTREAM_BRANCH) $(GO) test -v -timeout 60s ./...
 
+# test-renovate validates the renovate.json config structure and runs the official
+# renovate-config-validator. Requires: npx (Node.js)
+.PHONY: test-renovate
+test-renovate:
+	@command -v npx >/dev/null 2>&1 || { echo "Error: npx is required but not found. Install Node.js to get it."; exit 1; }
+	$(GO) test -v -tags renovate -timeout 120s ./tests/integration/renovate/
+
 .PHONY: cover
 cover:
 	$(GO) test --cover -timeout 60s ./...
