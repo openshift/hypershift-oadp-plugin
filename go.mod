@@ -7,7 +7,7 @@ require (
 	github.com/onsi/gomega v1.38.2
 	github.com/openshift/hive/apis v0.0.0-20241220022629-3f49f26197ff
 	github.com/openshift/hypershift/api v0.0.0-20260302164434-7af765d8054e
-	github.com/sirupsen/logrus v1.9.3
+	github.com/sirupsen/logrus v1.9.4
 	github.com/vmware-tanzu/velero v1.14.0
 	k8s.io/api v0.34.2
 	k8s.io/apiextensions-apiserver v0.34.2
