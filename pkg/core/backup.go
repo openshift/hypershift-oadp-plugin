@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	common "github.com/openshift/hypershift-oadp-plugin/pkg/common"
 	plugtypes "github.com/openshift/hypershift-oadp-plugin/pkg/core/types"
@@ -19,7 +18,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/utils/ptr"
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -28,19 +26,10 @@ type BackupPlugin struct {
 	log logrus.FieldLogger
 	ctx context.Context
 
-	client       crclient.Client
-	config       map[string]string
-	validator    validation.BackupValidator
-	hcp          *hyperv1.HostedControlPlane
-	hcpNamespace string
-	ha           bool
-
-	// uploadTimeout is the time in minutes to wait for the data upload to finish.
-	dataUploadTimeout time.Duration
-	pvBackupStarted   bool
-	pvBackupFinished  bool
-	duStarted         bool
-	duFinished        bool
+	client    crclient.Client
+	config    map[string]string
+	validator validation.BackupValidator
+	hcp       *hyperv1.HostedControlPlane
 	*plugtypes.BackupOptions
 }
 
@@ -78,15 +67,8 @@ func NewBackupPlugin(logger logrus.FieldLogger) (*BackupPlugin, error) {
 	}
 
 	validator := &validation.BackupPluginValidator{
-		Log:                 logger,
-		Client:              client,
-		HA:                  false,
-		DataUploadTimeout:   0,
-		DataUploadCheckPace: 0,
-		PVBackupStarted:  ptr.To(false),
-		PVBackupFinished: ptr.To(false),
-		DUStarted:        ptr.To(false),
-		DUFinished:       ptr.To(false),
+		Log:    logger,
+		Client: client,
 	}
 
 	bp := &BackupPlugin{
@@ -99,12 +81,6 @@ func NewBackupPlugin(logger logrus.FieldLogger) (*BackupPlugin, error) {
 
 	if bp.BackupOptions, err = bp.validator.ValidatePluginConfig(bp.config); err != nil {
 		return nil, fmt.Errorf("error validating plugin configuration: %s", err.Error())
-	}
-
-	// Set the timeouts for the validator
-	if validator, ok := bp.validator.(*validation.BackupPluginValidator); ok {
-		validator.DataUploadTimeout = bp.DataUploadTimeout
-		validator.DataUploadCheckPace = bp.DataUploadCheckPace
 	}
 
 	bp.log.Infof("Backup plugin initialized with log level: %s", logrus.GetLevel())
@@ -144,17 +120,6 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 			return nil, nil, fmt.Errorf("error getting HCP namespace: %v", err)
 		}
 
-		if p.hcp.Spec.ControllerAvailabilityPolicy == hyperv1.HighlyAvailable {
-			p.ha = true
-			if validator, ok := p.validator.(*validation.BackupPluginValidator); ok {
-				validator.HA = true
-			}
-		} else {
-			p.ha = false
-			if validator, ok := p.validator.(*validation.BackupPluginValidator); ok {
-				validator.HA = false
-			}
-		}
 	}
 
 	kind := item.GetObjectKind().GroupVersionKind().Kind
@@ -206,37 +171,6 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 		labels := metadata.GetLabels()
 		if _, exists := labels[common.KubevirtRHCOSLabel]; exists {
 			return nil, nil, nil
-		}
-	}
-
-	if (backup.Spec.DefaultVolumesToFsBackup != nil && !*backup.Spec.DefaultVolumesToFsBackup) || backup.Spec.DefaultVolumesToFsBackup == nil {
-		p.log.Debug("Validating DataMover")
-		if err := p.validator.ValidateDataMover(ctx, p.hcp, backup, &p.pvBackupFinished, &p.duFinished); err != nil {
-			return nil, nil, fmt.Errorf("error validating DataMover: %v", err)
-		}
-
-	} else {
-		p.log.Debug("checking PodVolumeBackup")
-		switch {
-		case !p.pvBackupStarted:
-			var err error
-
-			p.log.Debug("Checking if PodVolumeBackup exists")
-			p.pvBackupStarted, p.pvBackupFinished, err = common.CheckPodVolumeBackup(ctx, p.client, p.log, backup, p.ha)
-			if err != nil {
-				return nil, nil, err
-			}
-		// If the PodVolumeBackup is started, we need to wait for it to be completed, if not, continue with the backup
-		// This is a security measure to avoid deadlocks in the backup process, when the plugin waits for the PodVolumeBackup
-		// to be completed but the PodVolumeBackup is not started yet.
-		case p.pvBackupStarted && !p.pvBackupFinished:
-			var err error
-
-			p.log.Debug("PodVolumeBackup exists, waiting for it to be completed")
-			p.pvBackupFinished, err = common.WaitForPodVolumeBackup(ctx, p.client, p.log, backup, p.dataUploadTimeout, p.DataUploadCheckPace, p.ha)
-			if err != nil {
-				return nil, nil, err
-			}
 		}
 	}
 

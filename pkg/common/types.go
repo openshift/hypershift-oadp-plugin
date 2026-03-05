@@ -1,7 +1,5 @@
 package common
 
-import "time"
-
 const (
 	CommonBackupAnnotationName  string = "hypershift.openshift.io/common-backup-plugin"
 	CommonRestoreAnnotationName string = "hypershift.openshift.io/common-restore-plugin"
@@ -12,10 +10,6 @@ const (
 	RestoreDone            RestoreStatus = "true"
 
 	PluginConfigMapName string = "hypershift-oadp-plugin-config"
-
-	// Default values for the backup plugin.
-	defaultPVBackupTimeout   time.Duration = 30 * time.Minute
-	defaultPVBackupCheckPace time.Duration = 10 * time.Second
 
 	DefaultK8sSAFilePath string = "/var/run/secrets/kubernetes.io/serviceaccount"
 	KubevirtRHCOSLabel   string = "hypershift.openshift.io/is-kubevirt-rhcos"
