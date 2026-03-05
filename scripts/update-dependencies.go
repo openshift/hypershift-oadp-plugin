@@ -20,7 +20,13 @@ var watchedDependencies = map[string]string{
 }
 
 func main() {
-	fmt.Println("🔄 Updating watched dependencies to latest main branch versions...")
+	// Read the target upstream branch from environment variable, defaulting to "main"
+	targetBranch := os.Getenv("DEPS_UPSTREAM_BRANCH")
+	if targetBranch == "" {
+		targetBranch = "main"
+	}
+
+	fmt.Printf("🔄 Updating watched dependencies to latest %s branch versions...\n", targetBranch)
 
 	// Find project root
 	rootDir, err := findProjectRoot()
@@ -37,8 +43,6 @@ func main() {
 		watchedDependencies = testDeps
 	}
 
-	hasUpdates := false
-
 	// Update each dependency
 	for module := range watchedDependencies {
 		fmt.Printf("🔍 Checking %s...\n", module)
@@ -52,9 +56,9 @@ func main() {
 
 		fmt.Printf("   Current version: %s\n", currentVersion)
 
-		// Update to latest
-		fmt.Printf("   Updating to @main...\n")
-		cmd := exec.Command("go", "get", module+"@main")
+		// Update to latest from target branch
+		fmt.Printf("   Updating to @%s...\n", targetBranch)
+		cmd := exec.Command("go", "get", module+"@"+targetBranch)
 		cmd.Dir = rootDir
 		output, err := cmd.CombinedOutput()
 		if err != nil {
@@ -62,39 +66,33 @@ func main() {
 			continue
 		}
 
-		// Check if there was actually an update
-		if strings.Contains(string(output), "upgraded") {
-			hasUpdates = true
-			fmt.Printf("   ✅ Updated successfully\n")
-		} else {
-			fmt.Printf("   ℹ️  Already up-to-date\n")
-		}
+		fmt.Printf("   ✅ Updated successfully\n")
 	}
 
-	if hasUpdates {
-		fmt.Println("🧹 Running go mod tidy and go mod vendor...")
+	// Always run tidy and vendor to ensure consistency
+	fmt.Println("🧹 Running go mod tidy and go mod vendor...")
 
-		// Run go mod tidy
-		cmd := exec.Command("go", "mod", "tidy")
-		cmd.Dir = rootDir
-		if err := cmd.Run(); err != nil {
-			log.Fatalf("Failed to run go mod tidy: %v", err)
-		}
-
-		// Run go mod vendor
-		cmd = exec.Command("go", "mod", "vendor")
-		cmd.Dir = rootDir
-		if err := cmd.Run(); err != nil {
-			log.Fatalf("Failed to run go mod vendor: %v", err)
-		}
-
-		fmt.Println("✅ All dependencies updated successfully!")
-	} else {
-		fmt.Println("✅ All dependencies were already up-to-date!")
+	cmd := exec.Command("go", "mod", "tidy")
+	cmd.Dir = rootDir
+	if err := cmd.Run(); err != nil {
+		log.Fatalf("Failed to run go mod tidy: %v", err)
 	}
+
+	cmd = exec.Command("go", "mod", "vendor")
+	cmd.Dir = rootDir
+	if err := cmd.Run(); err != nil {
+		log.Fatalf("Failed to run go mod vendor: %v", err)
+	}
+
+	fmt.Println("✅ Dependency update complete!")
 }
 
-// parseWatchedDependenciesFromTest parses the watchedDependencies map from the test file
+// parseWatchedDependenciesFromTest parses the watchedDependencies slice from the test file.
+// It supports the []string format used in the test:
+//
+//	var watchedDependencies = []string{
+//	    "github.com/openshift/hypershift/api",
+//	}
 func parseWatchedDependenciesFromTest(rootDir string) (map[string]string, error) {
 	testFile := filepath.Join(rootDir, "tests", "integration", "dependencies", "dependencies_test.go")
 
@@ -108,21 +106,21 @@ func parseWatchedDependenciesFromTest(rootDir string) (map[string]string, error)
 	scanner := bufio.NewScanner(file)
 	inWatchedDependencies := false
 
-	// Regex to match dependency entries like: "github.com/openshift/hypershift/api": "https://github.com/openshift/hypershift",
-	depRegex := regexp.MustCompile(`^\s*"([^"]+)":\s*"([^"]+)",?\s*$`)
+	// Regex to match slice entries like: "github.com/openshift/hypershift/api",
+	sliceEntryRegex := regexp.MustCompile(`^\s*"([^"]+)",?\s*$`)
 
 	for scanner.Scan() {
 		line := scanner.Text()
 		trimmed := strings.TrimSpace(line)
 
-		// Start of watchedDependencies map
-		if strings.Contains(line, "var watchedDependencies = map[string]string{") {
+		// Start of watchedDependencies (supports both []string and map[string]string)
+		if strings.Contains(line, "var watchedDependencies") && strings.Contains(line, "{") {
 			inWatchedDependencies = true
 			continue
 		}
 
-		// End of watchedDependencies map
-		if inWatchedDependencies && strings.Contains(line, "}") {
+		// End of watchedDependencies
+		if inWatchedDependencies && trimmed == "}" {
 			break
 		}
 
@@ -133,9 +131,9 @@ func parseWatchedDependenciesFromTest(rootDir string) (map[string]string, error)
 				continue
 			}
 
-			matches := depRegex.FindStringSubmatch(line)
-			if len(matches) == 3 {
-				dependencies[matches[1]] = matches[2]
+			matches := sliceEntryRegex.FindStringSubmatch(line)
+			if len(matches) == 2 {
+				dependencies[matches[1]] = ""
 			}
 		}
 	}
