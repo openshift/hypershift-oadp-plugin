@@ -19,6 +19,7 @@ spec:
   - bmh
   - configmap
   - infraenv
+  - nmstateconfig
   - priorityclasses
   - pdb
   - agents
