@@ -5,7 +5,7 @@ go 1.25.3
 require (
 	github.com/kubernetes-csi/external-snapshotter/client/v8 v8.2.0
 	github.com/onsi/gomega v1.39.0
-	github.com/openshift/hive/apis v0.0.0-20241220022629-3f49f26197ff
+	github.com/openshift/hive/apis v0.0.0-20260303192309-a5d0850b13a7
 	github.com/openshift/hypershift/api v0.0.0-20260306140012-860432ad354d
 	github.com/sirupsen/logrus v1.9.3
 	github.com/vmware-tanzu/velero v1.14.0
@@ -26,7 +26,6 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/kubernetes-csi/external-snapshotter/client/v7 v7.0.0 // indirect
 	github.com/openshift/api v0.0.0-20260120150926-4c643a652d54 // indirect
-	github.com/openshift/custom-resource-status v1.1.3-0.20220503160415-f2fdb4999d87 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/client_golang v1.23.2 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
@@ -39,7 +38,7 @@ require (
 	gomodules.xyz/jsonpatch/v2 v2.5.0 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.12.0 // indirect
 	sigs.k8s.io/randfill v1.0.0 // indirect
-	sigs.k8s.io/structured-merge-diff/v6 v6.3.0 // indirect
+	sigs.k8s.io/structured-merge-diff/v6 v6.3.1 // indirect
 )
 
 require (
