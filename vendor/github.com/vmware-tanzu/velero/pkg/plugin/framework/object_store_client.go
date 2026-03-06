@@ -20,8 +20,9 @@ import (
 	"io"
 	"time"
 
+	"context"
+
 	"github.com/pkg/errors"
-	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 
 	"github.com/vmware-tanzu/velero/pkg/plugin/framework/common"
@@ -44,7 +45,7 @@ type ObjectStoreGRPCClient struct {
 	grpcClient proto.ObjectStoreClient
 }
 
-func newObjectStoreGRPCClient(base *common.ClientBase, clientConn *grpc.ClientConn) interface{} {
+func newObjectStoreGRPCClient(base *common.ClientBase, clientConn *grpc.ClientConn) any {
 	return &ObjectStoreGRPCClient{
 		ClientBase: base,
 		grpcClient: proto.NewObjectStoreClient(clientConn),

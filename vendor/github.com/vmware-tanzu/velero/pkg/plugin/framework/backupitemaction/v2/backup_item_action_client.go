@@ -19,8 +19,9 @@ package v2
 import (
 	"encoding/json"
 
+	"context"
+
 	"github.com/pkg/errors"
-	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -46,7 +47,7 @@ type BackupItemActionGRPCClient struct {
 	grpcClient protobiav2.BackupItemActionClient
 }
 
-func newBackupItemActionGRPCClient(base *common.ClientBase, clientConn *grpc.ClientConn) interface{} {
+func newBackupItemActionGRPCClient(base *common.ClientBase, clientConn *grpc.ClientConn) any {
 	return &BackupItemActionGRPCClient{
 		ClientBase: base,
 		grpcClient: protobiav2.NewBackupItemActionClient(clientConn),

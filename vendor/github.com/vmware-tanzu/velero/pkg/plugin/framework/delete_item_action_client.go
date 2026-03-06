@@ -19,8 +19,9 @@ package framework
 import (
 	"encoding/json"
 
+	"context"
+
 	"github.com/pkg/errors"
-	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 
 	"github.com/vmware-tanzu/velero/pkg/plugin/framework/common"
@@ -44,7 +45,7 @@ type DeleteItemActionGRPCClient struct {
 	grpcClient proto.DeleteItemActionClient
 }
 
-func newDeleteItemActionGRPCClient(base *common.ClientBase, clientConn *grpc.ClientConn) interface{} {
+func newDeleteItemActionGRPCClient(base *common.ClientBase, clientConn *grpc.ClientConn) any {
 	return &DeleteItemActionGRPCClient{
 		ClientBase: base,
 		grpcClient: proto.NewDeleteItemActionClient(clientConn),

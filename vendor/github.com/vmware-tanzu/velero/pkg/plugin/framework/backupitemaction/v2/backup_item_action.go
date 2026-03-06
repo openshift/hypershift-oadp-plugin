@@ -17,8 +17,9 @@ limitations under the License.
 package v2
 
 import (
+	"context"
+
 	plugin "github.com/hashicorp/go-plugin"
-	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 
 	"github.com/vmware-tanzu/velero/pkg/plugin/framework/common"
@@ -34,7 +35,7 @@ type BackupItemActionPlugin struct {
 }
 
 // GRPCClient returns a clientDispenser for BackupItemAction gRPC clients.
-func (p *BackupItemActionPlugin) GRPCClient(_ context.Context, _ *plugin.GRPCBroker, clientConn *grpc.ClientConn) (interface{}, error) {
+func (p *BackupItemActionPlugin) GRPCClient(_ context.Context, _ *plugin.GRPCBroker, clientConn *grpc.ClientConn) (any, error) {
 	return common.NewClientDispenser(p.ClientLogger, clientConn, newBackupItemActionGRPCClient), nil
 }
 

@@ -19,8 +19,9 @@ package framework
 import (
 	"encoding/json"
 
+	"context"
+
 	"github.com/pkg/errors"
-	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -47,7 +48,7 @@ type RestoreItemActionGRPCClient struct {
 	grpcClient proto.RestoreItemActionClient
 }
 
-func newRestoreItemActionGRPCClient(base *common.ClientBase, clientConn *grpc.ClientConn) interface{} {
+func newRestoreItemActionGRPCClient(base *common.ClientBase, clientConn *grpc.ClientConn) any {
 	return &RestoreItemActionGRPCClient{
 		ClientBase: base,
 		grpcClient: proto.NewRestoreItemActionClient(clientConn),

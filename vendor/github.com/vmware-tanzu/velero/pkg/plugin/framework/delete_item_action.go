@@ -17,8 +17,9 @@ limitations under the License.
 package framework
 
 import (
+	"context"
+
 	plugin "github.com/hashicorp/go-plugin"
-	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 
 	"github.com/vmware-tanzu/velero/pkg/plugin/framework/common"
@@ -34,7 +35,7 @@ type DeleteItemActionPlugin struct {
 }
 
 // GRPCClient returns a DeleteItemAction gRPC client.
-func (p *DeleteItemActionPlugin) GRPCClient(_ context.Context, _ *plugin.GRPCBroker, clientConn *grpc.ClientConn) (interface{}, error) {
+func (p *DeleteItemActionPlugin) GRPCClient(_ context.Context, _ *plugin.GRPCBroker, clientConn *grpc.ClientConn) (any, error) {
 	return common.NewClientDispenser(p.ClientLogger, clientConn, newDeleteItemActionGRPCClient), nil
 }
 

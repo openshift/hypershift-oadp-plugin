@@ -17,9 +17,10 @@ limitations under the License.
 package framework
 
 import (
+	"context"
+
 	plugin "github.com/hashicorp/go-plugin"
 	"github.com/pkg/errors"
-	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 
 	"github.com/vmware-tanzu/velero/pkg/plugin/framework/common"
@@ -69,7 +70,7 @@ func NewPluginListerPlugin(impl PluginLister) *PluginListerPlugin {
 //////////////////////////////////////////////////////////////////////////////
 
 // GRPCClient returns a PluginLister gRPC client.
-func (p *PluginListerPlugin) GRPCClient(_ context.Context, _ *plugin.GRPCBroker, clientConn *grpc.ClientConn) (interface{}, error) {
+func (p *PluginListerPlugin) GRPCClient(_ context.Context, _ *plugin.GRPCBroker, clientConn *grpc.ClientConn) (any, error) {
 	return &PluginListerGRPCClient{grpcClient: proto.NewPluginListerClient(clientConn)}, nil
 }
 
