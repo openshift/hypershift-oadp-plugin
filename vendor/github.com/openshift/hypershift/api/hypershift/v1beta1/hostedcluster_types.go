@@ -271,6 +271,10 @@ const (
 	// DisableMonitoringServices introduces an option to disable monitor services IBM Cloud do not use.
 	DisableMonitoringServices = "hypershift.openshift.io/disable-monitoring-services"
 
+	// EnableMetricsForwarding enables metrics forwarding from the management cluster to hosted clusters.
+	// When present, components like the endpoint-resolver and metrics-proxy will be deployed.
+	EnableMetricsForwarding = "hypershift.openshift.io/enable-metrics-forwarding"
+
 	// JSONPatchAnnotation allow modifying the kubevirt VM template using jsonpatch
 	JSONPatchAnnotation = "hypershift.openshift.io/kubevirt-vm-jsonpatch"
 
@@ -1362,7 +1366,6 @@ type AutoNode struct {
 type ProvisionerConfig struct {
 	// name specifies the name of the provisioner to use.
 	// +required
-	// +kubebuilder:validation:Enum=Karpenter
 	Name Provisioner `json:"name"`
 	// karpenter specifies the configuration for the Karpenter provisioner.
 	// +optional

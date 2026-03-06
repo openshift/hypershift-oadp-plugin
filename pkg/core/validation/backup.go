@@ -1,12 +1,8 @@
 package validation
 
 import (
-	"context"
 	"fmt"
-	"strconv"
-	"time"
 
-	"github.com/openshift/hypershift-oadp-plugin/pkg/common"
 	plugtypes "github.com/openshift/hypershift-oadp-plugin/pkg/core/types"
 	hyperv1 "github.com/openshift/hypershift/api/hypershift/v1beta1"
 	"github.com/sirupsen/logrus"
@@ -14,33 +10,14 @@ import (
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-var (
-	vscFinished, vsFinished, duFinished    bool
-	vscBlackList, vsBlackList, duBlackList common.BlackList
-)
-
 type BackupValidator interface {
 	ValidatePluginConfig(config map[string]string) (*plugtypes.BackupOptions, error)
 	ValidatePlatformConfig(hcp *hyperv1.HostedControlPlane, backup *velerov1.Backup) error
-	ValidateDataMover(ctx context.Context, hcp *hyperv1.HostedControlPlane, backup *velerov1.Backup, pvBackupFinished *bool, duFinished *bool) error
 }
 
 type BackupPluginValidator struct {
-	Log                 logrus.FieldLogger
-	Client              crclient.Client
-	Backup              *velerov1.Backup
-	HA                  bool
-	DataMover           bool
-	DataUploadTimeout   time.Duration
-	DataUploadCheckPace time.Duration
-	PVBackupStarted     *bool
-	PVBackupFinished    *bool
-	PVBackupCompleted   int
-	DUStarted           *bool
-	DUFinished          *bool
-	DUCompleted         int
-	HCPaused            *bool
-	NPaused             *bool
+	Log    logrus.FieldLogger
+	Client crclient.Client
 }
 
 func (p *BackupPluginValidator) ValidatePluginConfig(config map[string]string) (*plugtypes.BackupOptions, error) {
@@ -64,20 +41,6 @@ func (p *BackupPluginValidator) ValidatePluginConfig(config map[string]string) (
 		case "managedServices":
 			p.Log.Debugf("reading/parsing managedServices %s", value)
 			bo.ManagedServices = value == "true"
-		case "dataUploadTimeout":
-			p.Log.Debugf("reading/parsing dataUploadTimeout %s", value)
-			minutes, err := strconv.ParseInt(value, 10, 64)
-			if err != nil {
-				return nil, fmt.Errorf("error parsing dataUploadTimeout: %s", err.Error())
-			}
-			bo.DataUploadTimeout = time.Duration(minutes)
-		case "dataUploadCheckPace":
-			p.Log.Debugf("reading/parsing dataUploadCheckPace %s", value)
-			seconds, err := strconv.ParseInt(value, 10, 64)
-			if err != nil {
-				return nil, fmt.Errorf("error parsing dataUploadCheckPace: %s", err.Error())
-			}
-			bo.DataUploadCheckPace = time.Duration(seconds)
 		default:
 			p.Log.Warnf("unknown configuration key: %s with value %s", key, value)
 		}
@@ -90,10 +53,6 @@ func (p *BackupPluginValidator) ValidatePluginConfig(config map[string]string) (
 }
 
 func (p *BackupPluginValidator) ValidatePlatformConfig(hcp *hyperv1.HostedControlPlane, backup *velerov1.Backup) error {
-	if p.Backup == nil {
-		p.Backup = backup
-	}
-
 	switch hcp.Spec.Platform.Type {
 	case hyperv1.AWSPlatform:
 		return p.checkAWSPlatform(hcp)
@@ -112,105 +71,6 @@ func (p *BackupPluginValidator) ValidatePlatformConfig(hcp *hyperv1.HostedContro
 	}
 }
 
-func (pv *BackupPluginValidator) ValidateDataMover(ctx context.Context, hcp *hyperv1.HostedControlPlane, backup *velerov1.Backup, pvBackupFinished *bool, duFinished *bool) error {
-	if pv.Backup == nil {
-		pv.Backup = backup
-	}
-
-	switch hcp.Spec.Platform.Type {
-	case hyperv1.AWSPlatform:
-		if *pv.PVBackupFinished && *pv.DUFinished {
-			*pvBackupFinished = true
-			*duFinished = true
-			return nil
-		}
-
-		// Check if SnapshotMoveData is configured before dereferencing
-		if err := pv.reconcileStandardDataMover(ctx, hcp, backup.Spec.SnapshotMoveData); err != nil {
-			return fmt.Errorf("error reconciling standard data mover: %s", err.Error())
-		}
-
-		*pvBackupFinished = *pv.PVBackupFinished
-		*duFinished = *pv.DUFinished
-
-		return nil
-	case hyperv1.AzurePlatform:
-		if *pv.PVBackupFinished {
-			*pvBackupFinished = true
-			return nil
-		}
-
-		if err := pv.reconcileAzureDataMover(ctx, hcp); err != nil {
-			return fmt.Errorf("error reconciling Azure data mover: %s", err.Error())
-		}
-
-		*pvBackupFinished = *pv.PVBackupFinished
-
-		return nil
-	case hyperv1.IBMCloudPlatform:
-		if *pv.PVBackupFinished && *pv.DUFinished {
-			*pvBackupFinished = true
-			*duFinished = true
-			return nil
-		}
-
-		if err := pv.reconcileStandardDataMover(ctx, hcp, backup.Spec.SnapshotMoveData); err != nil {
-			return fmt.Errorf("error reconciling standard data mover: %s", err.Error())
-		}
-
-		*pvBackupFinished = *pv.PVBackupFinished
-		*duFinished = *pv.DUFinished
-
-		return nil
-	case hyperv1.KubevirtPlatform:
-		if *pv.PVBackupFinished && *pv.DUFinished {
-			*pvBackupFinished = true
-			*duFinished = true
-			return nil
-		}
-
-		if err := pv.reconcileStandardDataMover(ctx, hcp, backup.Spec.SnapshotMoveData); err != nil {
-			return fmt.Errorf("error reconciling standard data mover: %s", err.Error())
-		}
-
-		*pvBackupFinished = *pv.PVBackupFinished
-		*duFinished = *pv.DUFinished
-
-		return nil
-	case hyperv1.OpenStackPlatform:
-		if *pv.PVBackupFinished && *pv.DUFinished {
-			*pvBackupFinished = true
-			*duFinished = true
-			return nil
-		}
-
-		if err := pv.reconcileStandardDataMover(ctx, hcp, backup.Spec.SnapshotMoveData); err != nil {
-			return fmt.Errorf("error reconciling standard data mover: %s", err.Error())
-		}
-
-		*pvBackupFinished = *pv.PVBackupFinished
-		*duFinished = *pv.DUFinished
-
-		return nil
-	case hyperv1.AgentPlatform, hyperv1.NonePlatform:
-		if *pv.PVBackupFinished && *pv.DUFinished {
-			*pvBackupFinished = true
-			*duFinished = true
-			return nil
-		}
-
-		if err := pv.reconcileStandardDataMover(ctx, hcp, backup.Spec.SnapshotMoveData); err != nil {
-			return fmt.Errorf("error reconciling standard data mover: %s", err.Error())
-		}
-
-		*pvBackupFinished = *pv.PVBackupFinished
-		*duFinished = *pv.DUFinished
-
-		return nil
-	default:
-		return fmt.Errorf("unsupported platform type %s", hcp.Spec.Platform.Type)
-	}
-}
 
 func (p *BackupPluginValidator) checkAWSPlatform(hcp *hyperv1.HostedControlPlane) error {
 	// Check if the AWS platform is configured properly
@@ -250,110 +110,3 @@ func (p *BackupPluginValidator) checkAgentPlatform(hcp *hyperv1.HostedControlPla
 	return nil
 }
 
-// This datamover reconciles the VSC, VS and DataUpload
-func (p *BackupPluginValidator) reconcileStandardDataMover(ctx context.Context, hcp *hyperv1.HostedControlPlane, dataMover *bool) error {
-	var (
-		err error
-	)
-
-	// Initialize the blacklists
-	if vscBlackList.Kind == "" || vsBlackList.Kind == "" || duBlackList.Kind == "" {
-		vscBlackList, vsBlackList, duBlackList, err = common.InitializeBlacklists(ctx, p.Client, p.Log, hcp, p.Backup)
-		if err != nil {
-			return fmt.Errorf("error initializing blacklists: %s", err.Error())
-		}
-	}
-
-	// Reconcile the standard dataMover
-	p.Log.Debugf("Reconciling standard data mover for HCP: %s", hcp.Name)
-	if vscFinished, err = common.ReconcileVolumeSnapshotContent(ctx, hcp, p.Client, p.Log, p.Backup, p.DataUploadTimeout, p.DataUploadCheckPace, p.PVBackupStarted, p.PVBackupFinished, &vscBlackList); err != nil {
-		return fmt.Errorf("error reconciling volume snapshot content: %s", err.Error())
-	}
-
-	if !vscFinished {
-		return nil
-	}
-
-	if vsFinished, err = common.ReconcileVolumeSnapshots(ctx, hcp, p.Client, p.Log, p.Backup, p.DataUploadTimeout, p.DataUploadCheckPace, p.PVBackupStarted, p.PVBackupFinished, &vsBlackList); err != nil {
-		return fmt.Errorf("error reconciling volume snapshots: %s", err.Error())
-	}
-
-	if !vsFinished {
-		return nil
-	}
-
-	if p.HA {
-		if (len(common.VSCStatus) == 3 && common.AllObjectsCompleted(common.VSCStatus)) && (len(common.VSStatus) == 3 && common.AllObjectsCompleted(common.VSStatus)) {
-			p.Log.Debugf("VSC and VS are completed for backup %s", p.Backup.Name)
-			*p.PVBackupFinished = true
-		}
-	} else {
-		p.Log.Debugf("HA is disabled for backup %s", p.Backup.Name)
-		*p.PVBackupFinished = true
-	}
-
-	if dataMover != nil && *dataMover {
-		if duFinished, err = common.ReconcileDataUpload(ctx, p.Client, p.Log, p.Backup, p.DataUploadTimeout, p.DataUploadCheckPace, p.DUStarted, p.DUFinished, &duBlackList); err != nil {
-			return fmt.Errorf("error reconciling data upload: %s", err.Error())
-		}
-
-		if !duFinished {
-			return nil
-		}
-
-		if p.HA {
-			if len(common.DUStatus) == 3 && common.AllObjectsCompleted(common.DUStatus) {
-				*p.DUFinished = true
-			}
-		} else {
-			*p.DUFinished = true
-		}
-	} else {
-		*p.DUFinished = true
-	}
-
-	return nil
-}
-
-// This datamover reconciles the VSC and VS
-func (p *BackupPluginValidator) reconcileAzureDataMover(ctx context.Context, hcp *hyperv1.HostedControlPlane) error {
-	var (
-		err error
-	)
-
-	// Initialize the blacklists
-	if vscBlackList.Kind == "" || vsBlackList.Kind == "" {
-		vscBlackList, vsBlackList, _, err = common.InitializeBlacklists(ctx, p.Client, p.Log, hcp, p.Backup)
-		if err != nil {
-			return fmt.Errorf("error initializing blacklists: %s", err.Error())
-		}
-	}
-
-	// Reconcile the Azure mover
-	p.Log.Debugf("Reconciling Azure data mover for HCP: %s", hcp.Name)
-	if vscFinished, err = common.ReconcileVolumeSnapshotContent(ctx, hcp, p.Client, p.Log, p.Backup, p.DataUploadTimeout, p.DataUploadCheckPace, p.PVBackupStarted, p.PVBackupFinished, &vscBlackList); err != nil {
-		return fmt.Errorf("error reconciling volume snapshot content: %s", err.Error())
-	}
-
-	if !vscFinished {
-		return nil
-	}
-
-	if vsFinished, err = common.ReconcileVolumeSnapshots(ctx, hcp, p.Client, p.Log, p.Backup, p.DataUploadTimeout, p.DataUploadCheckPace, p.PVBackupStarted, p.PVBackupFinished, &vsBlackList); err != nil {
-		return fmt.Errorf("error reconciling volume snapshots: %s", err.Error())
-	}
-
-	if !vsFinished {
-		return nil
-	}
-
-	if p.HA {
-		if (len(common.VSCStatus) == 3 && common.AllObjectsCompleted(common.VSCStatus)) && (len(common.VSStatus) == 3 && common.AllObjectsCompleted(common.VSStatus)) {
-			*p.PVBackupFinished = true
-		}
-	} else {
-		*p.PVBackupFinished = true
-	}
-
-	return nil
-}
