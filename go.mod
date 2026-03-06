@@ -8,7 +8,7 @@ require (
 	github.com/openshift/hive/apis v0.0.0-20241220022629-3f49f26197ff
 	github.com/openshift/hypershift/api v0.0.0-20260304091838-50b7b2c1e50c
 	github.com/sirupsen/logrus v1.9.3
-	github.com/vmware-tanzu/velero v1.14.0
+	github.com/vmware-tanzu/velero v1.18.0
 	k8s.io/api v0.34.3
 	k8s.io/apiextensions-apiserver v0.34.3
 	sigs.k8s.io/controller-runtime v0.22.4
