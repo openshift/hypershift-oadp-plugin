@@ -14,7 +14,7 @@ var (
 	BackupIBMPowerVSResources = []string{"ibmpowervsmachines", "ibmpowervsmachinetemplates", "ibmpowervsclusters", "ibmpowervsclustertemplates"}
 	BackupOpenStackResources  = []string{"openstackmachines", "openstackmachinetemplates", "openstackclusters", "openstackclustertemplates"}
 	BackupKubevirtResources   = []string{"kubevirtcluster", "kubevirtmachinetemplate", "datavolume"}
-	BackupAgentResources      = []string{"agents", "agentmachines", "agentmachinetemplates", "agentmachinepools", "agentclusters"}
+	BackupAgentResources      = []string{"agents", "agentmachines", "agentmachinetemplates", "agentmachinepools", "agentclusters", "nmstateconfigs", "nmstateconfig", "infraenvs", "infraenv"}
 )
 
 type BackupOptions struct {
