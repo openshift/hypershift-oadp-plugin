@@ -3,11 +3,11 @@ module github.com/openshift/hypershift-oadp-plugin
 go 1.25.3
 
 require (
-	github.com/kubernetes-csi/external-snapshotter/client/v8 v8.2.0
-	github.com/onsi/gomega v1.39.0
+	github.com/kubernetes-csi/external-snapshotter/client/v8 v8.4.0
+	github.com/onsi/gomega v1.39.1
 	github.com/openshift/hive/apis v0.0.0-20241220022629-3f49f26197ff
 	github.com/openshift/hypershift/api v0.0.0-20260306140012-860432ad354d
-	github.com/sirupsen/logrus v1.9.3
+	github.com/sirupsen/logrus v1.9.4
 	github.com/vmware-tanzu/velero v1.14.0
 	k8s.io/api v0.34.3
 	k8s.io/apiextensions-apiserver v0.34.3
