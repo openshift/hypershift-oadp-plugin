@@ -20,10 +20,10 @@ var watchedDependencies = map[string]string{
 }
 
 func main() {
-	// Read the target upstream branch from environment variable, defaulting to "main"
+	// Read the target upstream branch from environment variable, defaulting to "release-4.20"
 	targetBranch := os.Getenv("DEPS_UPSTREAM_BRANCH")
 	if targetBranch == "" {
-		targetBranch = "main"
+		targetBranch = "release-4.20"
 	}
 
 	fmt.Printf("🔄 Updating watched dependencies to latest %s branch versions...\n", targetBranch)
