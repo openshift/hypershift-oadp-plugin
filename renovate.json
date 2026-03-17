@@ -1,0 +1,26 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "branchPrefix": "konflux/mintmaker/",
+  "labels": ["area/ci-tooling", "ok-to-test"],
+  "pruneStaleBranches": true,
+  "packageRules": [
+    {
+      "description": "Group Kubernetes dependencies (k8s.io, sigs.k8s.io)",
+      "groupName": "k8s-dependencies",
+      "matchPackagePrefixes": [
+        "k8s.io/",
+        "sigs.k8s.io/"
+      ]
+    },
+    {
+      "description": "Group all non-Kubernetes Go dependencies",
+      "groupName": "non-k8s-go-dependencies",
+      "matchManagers": ["gomod"],
+      "excludePackagePrefixes": [
+        "k8s.io/",
+        "sigs.k8s.io/"
+      ]
+    }
+  ]
+}
