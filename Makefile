@@ -25,19 +25,21 @@ DEPS_UPSTREAM_BRANCH ?= main
 
 .PHONY: install-goreleaser
 install-goreleaser:
- 	## Using goreleaser v2 compatible with go 1.24
+ 	## Using goreleaser v2 compatible with go 1.25
 	@echo "Installing goreleaser v2..."
 	@mkdir -p ./bin
-	@GOBIN=$(PWD)/bin GOFLAGS= go install github.com/goreleaser/goreleaser/v2@latest
+	@GOBIN=$(PWD)/bin GOFLAGS= go install github.com/goreleaser/goreleaser/v2@v2.13.3
 	@echo "Goreleaser installed successfully!"
 
 .PHONY: local
-local: verify install-goreleaser build-dirs
-	./bin/goreleaser build --snapshot --clean
-	@mkdir -p dist/$(BIN)_$(VERSION)
-	@find dist/default_*/ -name "$(BIN)-*" -exec cp {} dist/$(BIN)_$(VERSION)/ \;
-	@echo "Binaries copied to dist/$(BIN)_$(VERSION)/"
-	@ls -la dist/$(BIN)_$(VERSION)/
+local: verify build-dirs
+	CGO_ENABLED=0 $(GO) build \
+		-ldflags "-s -w -extldflags '-static' \
+		-X $(PKG)/pkg/version.Version=$(VERSION) \
+		-X $(PKG)/pkg/version.Commit=$(shell git rev-parse HEAD) \
+		-X $(PKG)/pkg/version.Date=$(shell date -u +%Y-%m-%dT%H:%M:%SZ)" \
+		-o dist/$(BIN) ./main.go
+	@echo "Binary built at dist/$(BIN)"
 
 .PHONY: release
 release: verify install-goreleaser
@@ -46,6 +48,14 @@ release: verify install-goreleaser
 .PHONY: release-local
 release-local: verify install-goreleaser build-dirs
 	GORELEASER_CURRENT_TAG=$(VERSION) ./bin/goreleaser build --clean
+
+.PHONY: release-snapshot
+release-snapshot: verify install-goreleaser build-dirs
+	./bin/goreleaser build --snapshot --clean
+	@mkdir -p dist/$(BIN)_$(VERSION)
+	@find dist/default_*/ -name "$(BIN)-*" -exec cp {} dist/$(BIN)_$(VERSION)/ \;
+	@echo "Binaries copied to dist/$(BIN)_$(VERSION)/"
+	@ls -la dist/$(BIN)_$(VERSION)/
 
 .PHONY: tests
 test:
@@ -65,7 +75,7 @@ update-deps:
 	DEPS_UPSTREAM_BRANCH=$(DEPS_UPSTREAM_BRANCH) $(GO) run scripts/update-dependencies.go
 
 .PHONY: verify
-verify: verify-modules test verify-goreleaser
+verify: verify-modules test
 
 .PHONY: verify-goreleaser
 verify-goreleaser: install-goreleaser
