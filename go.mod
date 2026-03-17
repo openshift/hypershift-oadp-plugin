@@ -33,8 +33,8 @@ require (
 	github.com/spf13/afero v1.10.0 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	golang.org/x/exp v0.0.0-20240213143201-ec583247a57a // indirect
-	gomodules.xyz/jsonpatch/v2 v2.4.0 // indirect
-	gopkg.in/evanphx/json-patch.v4 v4.12.0 // indirect
+	gomodules.xyz/jsonpatch/v3 v3.0.1 // indirect
+	gopkg.in/evanphx/json-patch.v5 v5.9.11 // indirect
 )
 
 require (
@@ -49,7 +49,7 @@ require (
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/google/gofuzz v1.2.0 // indirect
-	github.com/hashicorp/go-hclog v0.14.1 // indirect
+	github.com/hashicorp/go-hclog v1.6.3 // indirect
 	github.com/hashicorp/go-plugin v1.6.0 // indirect
 	github.com/hashicorp/yamux v0.1.1 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
