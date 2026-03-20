@@ -172,6 +172,23 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 		if _, exists := labels[common.KubevirtRHCOSLabel]; exists {
 			return nil, nil, nil
 		}
+		// CDI does not propagate the RHCOS label from DataVolumes to the PVCs it creates.
+		// Without this check, CDI-managed PVCs pass through the label selector and get
+		// CSI-snapshotted, creating operations that never complete and causing the backup
+		// to hang in WaitingForPluginOperations.
+		if kind == common.PersistentVolumeClaimKind {
+			for _, ownerRef := range metadata.GetOwnerReferences() {
+				if ownerRef.Kind == common.DataVolumeKind && strings.Contains(ownerRef.APIVersion, common.CDIAPIGroup) {
+					p.log.Infof("Excluding CDI-managed PVC %s/%s (owned by DataVolume %s) from backup", metadata.GetNamespace(), metadata.GetName(), ownerRef.Name)
+					return nil, nil, nil
+				}
+			}
+			annotations := metadata.GetAnnotations()
+			if _, exists := annotations[common.CDIPopulatedForAnnotation]; exists {
+				p.log.Infof("Excluding CDI-managed PVC %s/%s from backup", metadata.GetNamespace(), metadata.GetName())
+				return nil, nil, nil
+			}
+		}
 	}
 
 	return item, nil, nil

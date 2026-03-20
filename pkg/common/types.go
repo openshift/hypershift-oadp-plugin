@@ -11,8 +11,10 @@ const (
 
 	PluginConfigMapName string = "hypershift-oadp-plugin-config"
 
-	DefaultK8sSAFilePath string = "/var/run/secrets/kubernetes.io/serviceaccount"
-	KubevirtRHCOSLabel   string = "hypershift.openshift.io/is-kubevirt-rhcos"
+	DefaultK8sSAFilePath      string = "/var/run/secrets/kubernetes.io/serviceaccount"
+	KubevirtRHCOSLabel        string = "hypershift.openshift.io/is-kubevirt-rhcos"
+	CDIPopulatedForAnnotation string = "cdi.kubevirt.io/storage.populatedFor"
+	CDIAPIGroup               string = "cdi.kubevirt.io"
 
 	// Integration with Hypershift, more info here: https://github.com/openshift/hypershift/pull/6195
 	HostedClusterRestoredFromBackupAnnotation string = "hypershift.openshift.io/restored-from-backup"
