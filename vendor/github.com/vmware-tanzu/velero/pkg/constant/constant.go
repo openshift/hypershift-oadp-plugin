@@ -1,6 +1,7 @@
 package constant
 
 const (
+	ControllerBackupQueue           = "backup-queue"
 	ControllerBackup                = "backup"
 	ControllerBackupOperations      = "backup-operations"
 	ControllerBackupDeletion        = "backup-deletion"
@@ -22,4 +23,7 @@ const (
 
 	PluginCSIPVCRestoreRIA            = "velero.io/csi-pvc-restorer"
 	PluginCsiVolumeSnapshotRestoreRIA = "velero.io/csi-volumesnapshot-restorer"
+
+	DefaultEphemeralStorageRequest = "0"
+	DefaultEphemeralStorageLimit   = "0"
 )
