@@ -21,7 +21,7 @@ VERSION ?= $(shell git describe --tags --always)
 ARCHS ?= amd64 arm64
 DOCKER_BUILD_ARGS ?= --platform=linux/$(ARCH)
 GO=GO111MODULE=on GOWORK=off GOFLAGS=-mod=vendor go
-DEPS_UPSTREAM_BRANCH ?= release-4.21
+DEPS_UPSTREAM_BRANCH ?= release-4.20
 
 .PHONY: install-goreleaser
 install-goreleaser:
