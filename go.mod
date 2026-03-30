@@ -1,12 +1,12 @@
 module github.com/openshift/hypershift-oadp-plugin
 
-go 1.24.4
+go 1.25.8
 
 require (
 	github.com/kubernetes-csi/external-snapshotter/client/v8 v8.2.0
 	github.com/onsi/gomega v1.38.2
 	github.com/openshift/hive/apis v0.0.0-20241220022629-3f49f26197ff
-	github.com/openshift/hypershift/api v0.0.0-20260302164434-7af765d8054e
+	github.com/openshift/hypershift/api v0.0.0-20260306152921-2bfe1933d8a1
 	github.com/sirupsen/logrus v1.9.3
 	github.com/vmware-tanzu/velero v1.14.0
 	k8s.io/api v0.34.2
@@ -35,7 +35,7 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
-	golang.org/x/sync v0.18.0 // indirect
+	golang.org/x/sync v0.20.0 // indirect
 	gomodules.xyz/jsonpatch/v2 v2.5.0 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.12.0 // indirect
 	sigs.k8s.io/randfill v1.0.0 // indirect
@@ -70,11 +70,11 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/spf13/cobra v1.9.1 // indirect
 	github.com/spf13/pflag v1.0.7 // indirect
-	golang.org/x/net v0.47.0 // indirect
+	golang.org/x/net v0.52.0 // indirect
 	golang.org/x/oauth2 v0.30.0 // indirect
-	golang.org/x/sys v0.38.0 // indirect
-	golang.org/x/term v0.37.0 // indirect
-	golang.org/x/text v0.31.0 // indirect
+	golang.org/x/sys v0.42.0 // indirect
+	golang.org/x/term v0.41.0 // indirect
+	golang.org/x/text v0.35.0 // indirect
 	golang.org/x/time v0.11.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250303144028-a0af3efb3deb // indirect
 	google.golang.org/grpc v1.72.1 // indirect
@@ -85,9 +85,9 @@ require (
 	k8s.io/client-go v0.34.2
 	k8s.io/klog/v2 v2.130.1 // indirect
 	k8s.io/kube-openapi v0.0.0-20250710124328-f3f2b991d03b // indirect
-	k8s.io/utils v0.0.0-20250604170112-4c0f3b243397
+	k8s.io/utils v0.0.0-20250604170112-4c0f3b243397 // indirect
 	sigs.k8s.io/json v0.0.0-20241014173422-cfa47c3a1cc8 // indirect
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
 
-replace github.com/vmware-tanzu/velero => github.com/openshift/velero v0.10.2-0.20250514165055-8fbcf3a8da11
+replace github.com/vmware-tanzu/velero => github.com/openshift/velero v0.10.2-0.20260317163839-1b8c9c4464d0
