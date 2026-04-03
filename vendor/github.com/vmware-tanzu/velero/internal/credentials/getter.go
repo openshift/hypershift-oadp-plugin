@@ -1,5 +1,5 @@
 /*
-Copyright 2018 The Kubernetes Authors.
+Copyright the Velero contributors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,7 +14,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// +k8s:deepcopy-gen=package
-// +groupName=snapshot.storage.k8s.io
+package credentials
 
-package v1
+// CredentialGetter is a collection of interfaces for interacting with credentials
+// that are stored in different targets
+type CredentialGetter struct {
+	FromFile   FileStore
+	FromSecret SecretStore
+}

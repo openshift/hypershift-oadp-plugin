@@ -1,5 +1,5 @@
 /*
-Copyright 2018 The Kubernetes Authors.
+Copyright 2023 The Kubernetes Authors.
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -11,7 +11,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1
+package v1beta1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -20,7 +20,7 @@ import (
 )
 
 // GroupName is the group name use in this package.
-const GroupName = "snapshot.storage.k8s.io"
+const GroupName = "groupsnapshot.storage.k8s.io"
 
 var (
 	// SchemeBuilder is the new scheme builder
@@ -28,10 +28,9 @@ var (
 	// AddToScheme adds to scheme
 	AddToScheme = SchemeBuilder.AddToScheme
 	// SchemeGroupVersion is the group version used to register these objects.
-	SchemeGroupVersion = schema.GroupVersion{Group: GroupName, Version: "v1"}
+	SchemeGroupVersion = schema.GroupVersion{Group: GroupName, Version: "v1beta1"}
 )
 
-// Resource takes an unqualified resource and returns a Group-qualified GroupResource.
 func Resource(resource string) schema.GroupResource {
 	return SchemeGroupVersion.WithResource(resource).GroupResource()
 }
@@ -46,12 +45,12 @@ func init() {
 // addKnownTypes adds the set of types defined in this package to the supplied scheme.
 func addKnownTypes(scheme *runtime.Scheme) error {
 	scheme.AddKnownTypes(SchemeGroupVersion,
-		&VolumeSnapshotClass{},
-		&VolumeSnapshotClassList{},
-		&VolumeSnapshot{},
-		&VolumeSnapshotList{},
-		&VolumeSnapshotContent{},
-		&VolumeSnapshotContentList{},
+		&VolumeGroupSnapshotClass{},
+		&VolumeGroupSnapshotClassList{},
+		&VolumeGroupSnapshot{},
+		&VolumeGroupSnapshotList{},
+		&VolumeGroupSnapshotContent{},
+		&VolumeGroupSnapshotContentList{},
 	)
 	metav1.AddToGroupVersion(scheme, SchemeGroupVersion)
 	return nil
