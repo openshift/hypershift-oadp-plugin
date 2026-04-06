@@ -1,15 +1,28 @@
+# FIPS 140-3 Compliance Configuration using Microsoft Go and Azure Linux:
+# - Builder: mcr.microsoft.com/oss/go/microsoft/golang:1.25-azurelinux3.0
+#   Microsoft's Go fork with integrated FIPS support via platform crypto libraries
+# - Runtime: mcr.microsoft.com/azurelinux/distroless/base:3.0
+#   Azure Linux 3.0 distroless image with FIPS 140-3 compliance
+# - GOFIPS140=latest: Enables FIPS mode in Microsoft's Go fork
+# - CGO_ENABLED=1: Required for platform-dependent crypto (OpenSSL on Linux)
+# - Plugin processes inherit GODEBUG=fips140=on from parent Velero process
+# - Required for OpenShift HyperShift deployments in regulated environments
+# - Reference: https://github.com/Azure/ARO-HCP/blob/main/frontend/Dockerfile
+
 #@follow_tag(registry-proxy.engineering.redhat.com/rh-osbs/openshift-golang-builder:rhel_9_golang_1.25)
-FROM brew.registry.redhat.io/rh-osbs/openshift-golang-builder:rhel_9_golang_1.25 AS builder
+# FROM brew.registry.redhat.io/rh-osbs/openshift-golang-builder:rhel_9_golang_1.25 AS builder
+FROM mcr.microsoft.com/oss/go/microsoft/golang:1.25-azurelinux3.0 as builder
 
 COPY . /workspace
 WORKDIR /workspace/
-ENV GOEXPERIMENT strictfipsruntime
-RUN CGO_ENABLED=1 GOOS=linux go build -v -mod=vendor -tags strictfipsruntime -o /workspace/bin/hypershift-oadp-plugin .
+# ENV GOEXPERIMENT strictfipsruntime
+# RUN CGO_ENABLED=1 GOOS=linux go build -v -mod=vendor -tags strictfipsruntime -o /workspace/bin/hypershift-oadp-plugin .
+
+ENV CGO_ENABLED=1 GOFIPS140=latest
+RUN GOOS=linux go build -v -mod=vendor -o /workspace/bin/hypershift-oadp-plugin .
 
 #@follow_tag(registry.redhat.io/ubi9/ubi-minimal:latest)
-FROM registry.redhat.io/ubi9/ubi-minimal:latest
-RUN microdnf -y install openssl && microdnf -y reinstall tzdata && microdnf clean all
-RUN mkdir /plugins
+FROM mcr.microsoft.com/azurelinux/base/core:3.0
 COPY --from=builder /workspace/bin/hypershift-oadp-plugin /plugins/
 COPY LICENSE /licenses/
 USER 65534:65534
