@@ -21,18 +21,18 @@ var watchedDependencies = []string{
 }
 
 // getTargetBranch returns the upstream branch to check dependencies against.
-// It reads the DEPS_UPSTREAM_BRANCH environment variable, defaulting to "main".
+// It reads the DEPS_UPSTREAM_BRANCH environment variable, defaulting to "release-4.21".
 func getTargetBranch() string {
 	branch := os.Getenv("DEPS_UPSTREAM_BRANCH")
 	if branch == "" {
-		branch = "main"
+		branch = "release-4.21"
 	}
 	return branch
 }
 
 // TestWatchedDependenciesAreUpToDate validates that all watched dependencies
 // are up-to-date with the latest versions available from the target upstream branch.
-// The target branch is controlled by the DEPS_UPSTREAM_BRANCH environment variable (default: "main").
+// The target branch is controlled by the DEPS_UPSTREAM_BRANCH environment variable (default: "release-4.21").
 // This helps prevent scheme-related issues and compatibility problems.
 func TestWatchedDependenciesAreUpToDate(t *testing.T) {
 	targetBranch := getTargetBranch()
