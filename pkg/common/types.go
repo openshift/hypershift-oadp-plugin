@@ -16,6 +16,9 @@ const (
 
 	// Integration with Hypershift, more info here: https://github.com/openshift/hypershift/pull/6195
 	HostedClusterRestoredFromBackupAnnotation string = "hypershift.openshift.io/restored-from-backup"
+	// Etcd snapshot URL annotation: set during backup so the restore plugin can read it
+	// (Velero strips status from items during restore, so we persist it as an annotation)
+	EtcdSnapshotURLAnnotation string = "hypershift.openshift.io/etcd-snapshot-url"
 
 	// hypershift/cluster-api kinds
 	HostedClusterKind         string = "HostedCluster"
@@ -25,6 +28,29 @@ const (
 	PersistentVolumeClaimKind string = "PersistentVolumeClaim"
 	ClusterDeploymentKind     string = "ClusterDeployment"
 	DataVolumeKind            string = "DataVolume"
+	HCPEtcdBackupKind         string = "HCPEtcdBackup"
+
+	// Default HyperShift Operator namespace
+	DefaultHONamespace string = "hypershift"
+	// ConfigMap key to override the HO namespace
+	ConfigKeyHONamespace string = "hoNamespace"
+
+	// Etcd backup method configuration
+	ConfigKeyEtcdBackupMethod    string = "etcdBackupMethod"
+	EtcdBackupMethodVolume       string = "volumeSnapshot"
+	EtcdBackupMethodEtcdSnapshot string = "etcdSnapshot"
+
+	// Velero annotation to exclude specific volumes from backup
+	BackupVolumesExcludesAnnotation string = "backup.velero.io/backup-volumes-excludes"
+	// Etcd data volume name in the StatefulSet pod
+	EtcdDataVolumeName string = "data"
+	// Etcd PVC name prefix (StatefulSet pattern: {volumeName}-{stsName}-{index})
+	EtcdPVCPrefix string = "data-etcd-"
+
+	// TODO(CNTRLPLANE-2685): Remove these local constants once openshift/hypershift#8139 is merged
+	// and the vendor is updated. These must match the values used by the HCPEtcdBackup controller.
+	BackupInProgressReason string = "BackupInProgress"
+	BackupRejectedReason   string = "BackupRejected"
 )
 
 var (

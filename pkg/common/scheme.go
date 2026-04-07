@@ -7,6 +7,7 @@ import (
 	veleroapiv1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
 	veleroapiv2alpha1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v2alpha1"
 	corev1 "k8s.io/api/core/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
@@ -33,6 +34,9 @@ func init() {
 		errs = append(errs, err)
 	}
 	if err := hive.AddToScheme(CustomScheme); err != nil {
+		errs = append(errs, err)
+	}
+	if err := apiextensionsv1.AddToScheme(CustomScheme); err != nil {
 		errs = append(errs, err)
 	}
 

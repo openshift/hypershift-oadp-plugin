@@ -2,6 +2,7 @@ package common
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -161,6 +162,32 @@ func GetHCP(ctx context.Context, nsList []string, c crclient.Client, log logrus.
 
 func GetHCPNamespace(name, namespace string) string {
 	return fmt.Sprintf("%s-%s", namespace, name)
+}
+
+// GetHostedCluster finds the HostedCluster that owns the HCP by deriving
+// its namespace and name from the HCP namespace convention: {hc-namespace}-{hc-name}.
+func GetHostedCluster(ctx context.Context, c crclient.Client, includedNamespaces []string, hcpNamespace string) (*hyperv1.HostedCluster, error) {
+	var errs []error
+	for _, ns := range includedNamespaces {
+		if ns == hcpNamespace {
+			continue
+		}
+		hcList := &hyperv1.HostedClusterList{}
+		if err := c.List(ctx, hcList, crclient.InNamespace(ns)); err != nil {
+			errs = append(errs, fmt.Errorf("list HostedClusters in namespace %s: %w", ns, err))
+			continue
+		}
+		for i := range hcList.Items {
+			hc := &hcList.Items[i]
+			if GetHCPNamespace(hc.Name, hc.Namespace) == hcpNamespace {
+				return hc, nil
+			}
+		}
+	}
+	if len(errs) > 0 {
+		return nil, errors.Join(errs...)
+	}
+	return nil, nil
 }
 
 // ShouldEndPluginExecution checks if the plugin should end execution by verifying if the required

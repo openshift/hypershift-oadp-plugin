@@ -21,11 +21,23 @@ func TestValidatePluginConfig(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "valid config with all options",
+			name: "valid config with migration",
 			config: map[string]string{
-				"migration":       "true",
-				"readoptNodes":    "true",
-				"managedServices": "true",
+				"migration": "true",
+			},
+			expectError: false,
+		},
+		{
+			name: "When config contains etcdBackupMethod, It Should accept it without error",
+			config: map[string]string{
+				"etcdBackupMethod": "etcdSnapshot",
+			},
+			expectError: false,
+		},
+		{
+			name: "When config contains hoNamespace, It Should accept it without error",
+			config: map[string]string{
+				"hoNamespace": "my-hypershift",
 			},
 			expectError: false,
 		},
