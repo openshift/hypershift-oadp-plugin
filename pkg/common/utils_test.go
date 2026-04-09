@@ -573,6 +573,34 @@ func TestShouldEndPluginExecution(t *testing.T) {
 	}
 }
 
+func TestGetHostedCluster(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = hyperv1.AddToScheme(scheme)
+
+	t.Run("When GetHostedCluster runs with a HostedCluster matching HCP namespace, It Should return that cluster", func(t *testing.T) {
+		g := NewWithT(t)
+		hc := &hyperv1.HostedCluster{
+			ObjectMeta: metav1.ObjectMeta{Name: "my-cluster", Namespace: "clusters"},
+		}
+		c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(hc).Build()
+
+		result, err := GetHostedCluster(context.TODO(), c, []string{"clusters", "clusters-my-cluster"}, "clusters-my-cluster")
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(result).NotTo(BeNil())
+		g.Expect(result.Name).To(Equal("my-cluster"))
+		g.Expect(result.Namespace).To(Equal("clusters"))
+	})
+
+	t.Run("When GetHostedCluster runs with no HostedClusters in client, It Should return nil", func(t *testing.T) {
+		g := NewWithT(t)
+		c := fake.NewClientBuilder().WithScheme(scheme).Build()
+
+		result, err := GetHostedCluster(context.TODO(), c, []string{"clusters", "clusters-my-cluster"}, "clusters-my-cluster")
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(result).To(BeNil())
+	})
+}
+
 func TestCRDExists(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = hyperv1.AddToScheme(scheme)

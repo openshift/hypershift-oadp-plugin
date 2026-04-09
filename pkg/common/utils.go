@@ -2,10 +2,12 @@ package common
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	hyperv1 "github.com/openshift/hypershift/api/hypershift/v1beta1"
 	"github.com/sirupsen/logrus"
@@ -24,8 +26,22 @@ import (
 )
 
 var (
-	k8sSAFilePath = DefaultK8sSAFilePath
+	k8sSAFilePath   = DefaultK8sSAFilePath
+	k8sSAFilePathMu sync.RWMutex
 )
+
+// SetK8sSAFilePath overrides the service account file path (for testing).
+func SetK8sSAFilePath(path string) {
+	k8sSAFilePathMu.Lock()
+	defer k8sSAFilePathMu.Unlock()
+	k8sSAFilePath = path
+}
+
+func getK8sSAFilePath() string {
+	k8sSAFilePathMu.RLock()
+	defer k8sSAFilePathMu.RUnlock()
+	return k8sSAFilePath
+}
 
 func getMetadataAndAnnotations(item runtime.Unstructured) (metav1.Object, map[string]string, error) {
 	metadata, err := meta.Accessor(item)
@@ -72,7 +88,7 @@ func GetConfig() (*rest.Config, error) {
 // "/var/run/secrets/kubernetes.io/serviceaccount/namespace". If there is an error
 // reading the file, it returns an empty string and the error.
 func GetCurrentNamespace() (string, error) {
-	namespaceFilePath := filepath.Join(k8sSAFilePath, "namespace")
+	namespaceFilePath := filepath.Join(getK8sSAFilePath(), "namespace")
 	namespace, err := os.ReadFile(namespaceFilePath)
 	if err != nil {
 		return "", err
@@ -161,6 +177,32 @@ func GetHCP(ctx context.Context, nsList []string, c crclient.Client, log logrus.
 
 func GetHCPNamespace(name, namespace string) string {
 	return fmt.Sprintf("%s-%s", namespace, name)
+}
+
+// GetHostedCluster finds the HostedCluster that owns the HCP by deriving
+// its namespace and name from the HCP namespace convention: {hc-namespace}-{hc-name}.
+func GetHostedCluster(ctx context.Context, c crclient.Client, includedNamespaces []string, hcpNamespace string) (*hyperv1.HostedCluster, error) {
+	var errs []error
+	for _, ns := range includedNamespaces {
+		if ns == hcpNamespace {
+			continue
+		}
+		hcList := &hyperv1.HostedClusterList{}
+		if err := c.List(ctx, hcList, crclient.InNamespace(ns)); err != nil {
+			errs = append(errs, fmt.Errorf("list HostedClusters in namespace %s: %w", ns, err))
+			continue
+		}
+		for i := range hcList.Items {
+			hc := &hcList.Items[i]
+			if GetHCPNamespace(hc.Name, hc.Namespace) == hcpNamespace {
+				return hc, nil
+			}
+		}
+	}
+	if len(errs) > 0 {
+		return nil, errors.Join(errs...)
+	}
+	return nil, nil
 }
 
 // ShouldEndPluginExecution checks if the plugin should end execution by verifying if the required

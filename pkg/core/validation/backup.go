@@ -35,12 +35,8 @@ func (p *BackupPluginValidator) ValidatePluginConfig(config map[string]string) (
 		case "migration":
 			p.Log.Debugf("reading/parsing migration %s", value)
 			bo.Migration = value == "true"
-		case "readoptNodes":
-			p.Log.Debugf("reading/parsing readoptNodes %s", value)
-			bo.ReadoptNodes = value == "true"
-		case "managedServices":
-			p.Log.Debugf("reading/parsing managedServices %s", value)
-			bo.ManagedServices = value == "true"
+		case "etcdBackupMethod", "hoNamespace":
+			p.Log.Debugf("configuration key %s=%s handled by plugin init", key, value)
 		default:
 			p.Log.Warnf("unknown configuration key: %s with value %s", key, value)
 		}

@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	plugtypes "github.com/openshift/hypershift-oadp-plugin/pkg/core/types"
-	aws "github.com/openshift/hypershift-oadp-plugin/pkg/platform/aws"
 	hyperv1 "github.com/openshift/hypershift/api/hypershift/v1beta1"
 	"github.com/sirupsen/logrus"
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -36,12 +35,8 @@ func (p *RestorePluginValidator) ValidatePluginConfig(config map[string]string) 
 		case "migration":
 			p.Log.Debugf("reading/parsing migration %s", value)
 			bo.Migration = value == "true"
-		case "readoptNodes":
-			p.Log.Debugf("reading/parsing readoptNodes %s", value)
-			bo.ReadoptNodes = value == "true"
-		case "managedServices":
-			p.Log.Debugf("reading/parsing managedServices %s", value)
-			bo.ManagedServices = value == "true"
+		case "etcdBackupMethod", "hoNamespace":
+			p.Log.Debugf("configuration key %s=%s handled by plugin init", key, value)
 		default:
 			p.Log.Warnf("unknown configuration key: %s with value %s", key, value)
 		}
@@ -77,13 +72,6 @@ func (p *RestorePluginValidator) validateAWSPlatform(hcp *hyperv1.HostedControlP
 	// Validate if the AWS platform is configured properly
 	// Validate ROSA
 	p.Log.Infof("%s AWS platform configuration is valid for HCP: %s", p.LogHeader, hcp.Name)
-
-	if config["managedServices"] == "true" || config["awsRegenPrivateLink"] == "true" {
-		p.Log.Infof("%s AWS platform restore tasks for HCP: %s", p.LogHeader, hcp.Name)
-		if err := aws.RestoreTasks(hcp, p.Client); err != nil {
-			return fmt.Errorf("error executing ROSA platform restore tasks: %s", err.Error())
-		}
-	}
 	return nil
 }
 
