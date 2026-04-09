@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 
 	hive "github.com/openshift/hive/apis/hive/v1"
 	common "github.com/openshift/hypershift-oadp-plugin/pkg/common"
 	plugtypes "github.com/openshift/hypershift-oadp-plugin/pkg/core/types"
 	validation "github.com/openshift/hypershift-oadp-plugin/pkg/core/validation"
+	"github.com/openshift/hypershift-oadp-plugin/pkg/s3presign"
 	hyperv1 "github.com/openshift/hypershift/api/hypershift/v1beta1"
 	"github.com/sirupsen/logrus"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
@@ -175,6 +177,37 @@ func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*v
 			}
 			common.AddAnnotation(metadata, common.HostedClusterRestoredFromBackupAnnotation, "")
 			p.log.Infof("Added restore annotation to HostedCluster %s", metadata.GetName())
+
+			// Inject restoreSnapshotURL if etcd backup URL is available.
+			// Read from annotation because Velero strips status during restore.
+			annotations := metadata.GetAnnotations()
+			snapshotURL := annotations[common.EtcdSnapshotURLAnnotation]
+			if snapshotURL != "" {
+				// Convert s3:// to pre-signed HTTPS URL
+				if strings.HasPrefix(snapshotURL, "s3://") {
+					presigned, err := p.presignS3URL(ctx, backup, snapshotURL)
+					if err != nil {
+						return nil, fmt.Errorf("error generating pre-signed URL for etcd snapshot: %v", err)
+					}
+					p.log.Infof("Converted s3:// URL to pre-signed HTTPS URL for HostedCluster restore")
+					snapshotURL = presigned
+				}
+
+				hc := &hyperv1.HostedCluster{}
+				if err := runtime.DefaultUnstructuredConverter.FromUnstructured(input.Item.UnstructuredContent(), hc); err != nil {
+					return nil, fmt.Errorf("error converting item to HostedCluster: %v", err)
+				}
+				if hc.Spec.Etcd.Managed != nil {
+					hc.Spec.Etcd.Managed.Storage.RestoreSnapshotURL = []string{snapshotURL}
+					p.log.Infof("Injected restoreSnapshotURL into HostedCluster %s", hc.Name)
+
+					unstructuredHC, err := runtime.DefaultUnstructuredConverter.ToUnstructured(hc)
+					if err != nil {
+						return nil, fmt.Errorf("error converting HostedCluster to unstructured: %v", err)
+					}
+					input.Item.SetUnstructuredContent(unstructuredHC)
+				}
+			}
 		}
 
 	case kind == common.ClusterDeploymentKind:
@@ -194,3 +227,62 @@ func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*v
 
 	return velero.NewRestoreItemActionExecuteOutput(input.Item), nil
 }
+
+// presignS3URL converts an s3:// URL into a pre-signed HTTPS GET URL using
+// credentials from the Velero BackupStorageLocation.
+func (p *RestorePlugin) presignS3URL(ctx context.Context, backup *velerov1api.Backup, s3URL string) (string, error) {
+	bucket, key, err := s3presign.ParseS3URL(s3URL)
+	if err != nil {
+		return "", fmt.Errorf("error parsing S3 URL %q: %w", s3URL, err)
+	}
+
+	// Fetch BSL
+	bsl := &velerov1api.BackupStorageLocation{}
+	oadpNS, err := common.GetCurrentNamespace()
+	if err != nil {
+		return "", fmt.Errorf("error getting current namespace: %w", err)
+	}
+
+	bslName := backup.Spec.StorageLocation
+	if err := p.client.Get(ctx, types.NamespacedName{Name: bslName, Namespace: oadpNS}, bsl); err != nil {
+		return "", fmt.Errorf("error getting BackupStorageLocation %q: %w", bslName, err)
+	}
+
+	// Read BSL config
+	region := bsl.Spec.Config["region"]
+	endpoint := bsl.Spec.Config["s3Url"]
+	forcePathStyle := bsl.Spec.Config["s3ForcePathStyle"] == "true"
+
+	// Read BSL credential Secret
+	if bsl.Spec.Credential == nil {
+		return "", fmt.Errorf("BSL %q has no credential reference", bsl.Name)
+	}
+
+	secret := &corev1.Secret{}
+	if err := p.client.Get(ctx, types.NamespacedName{Name: bsl.Spec.Credential.Name, Namespace: oadpNS}, secret); err != nil {
+		return "", fmt.Errorf("error getting BSL credential secret %q: %w", bsl.Spec.Credential.Name, err)
+	}
+
+	credData, ok := secret.Data[bsl.Spec.Credential.Key]
+	if !ok {
+		return "", fmt.Errorf("key %q not found in secret %q", bsl.Spec.Credential.Key, bsl.Spec.Credential.Name)
+	}
+
+	creds, err := s3presign.ParseAWSCredentials(credData, "default")
+	if err != nil {
+		return "", fmt.Errorf("error parsing AWS credentials: %w", err)
+	}
+
+	return s3presign.GeneratePresignedGetURL(s3presign.PresignOptions{
+		Bucket:         bucket,
+		Key:            key,
+		Region:         region,
+		AccessKeyID:    creds.AccessKeyID,
+		SecretAccessKey: creds.SecretAccessKey,
+		SessionToken:   creds.SessionToken,
+		Expiry:         s3presign.DefaultPresignExpiry,
+		Endpoint:       endpoint,
+		ForcePathStyle: forcePathStyle,
+	})
+}
+

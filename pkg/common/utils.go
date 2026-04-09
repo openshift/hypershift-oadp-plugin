@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	hyperv1 "github.com/openshift/hypershift/api/hypershift/v1beta1"
 	"github.com/sirupsen/logrus"
@@ -25,8 +26,22 @@ import (
 )
 
 var (
-	k8sSAFilePath = DefaultK8sSAFilePath
+	k8sSAFilePath   = DefaultK8sSAFilePath
+	k8sSAFilePathMu sync.RWMutex
 )
+
+// SetK8sSAFilePath overrides the service account file path (for testing).
+func SetK8sSAFilePath(path string) {
+	k8sSAFilePathMu.Lock()
+	defer k8sSAFilePathMu.Unlock()
+	k8sSAFilePath = path
+}
+
+func getK8sSAFilePath() string {
+	k8sSAFilePathMu.RLock()
+	defer k8sSAFilePathMu.RUnlock()
+	return k8sSAFilePath
+}
 
 func getMetadataAndAnnotations(item runtime.Unstructured) (metav1.Object, map[string]string, error) {
 	metadata, err := meta.Accessor(item)
@@ -73,7 +88,7 @@ func GetConfig() (*rest.Config, error) {
 // "/var/run/secrets/kubernetes.io/serviceaccount/namespace". If there is an error
 // reading the file, it returns an empty string and the error.
 func GetCurrentNamespace() (string, error) {
-	namespaceFilePath := filepath.Join(k8sSAFilePath, "namespace")
+	namespaceFilePath := filepath.Join(getK8sSAFilePath(), "namespace")
 	namespace, err := os.ReadFile(namespaceFilePath)
 	if err != nil {
 		return "", err

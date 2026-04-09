@@ -73,7 +73,8 @@ The plugin supports two mutually exclusive etcd backup methods, controlled by th
 |---|---|
 | `pkg/etcdbackup/orchestrator.go` | Core orchestration: BSL mapping, CR creation, polling, credential copy |
 | `pkg/core/backup.go` | Backup plugin: etcd backup method routing, pod/PVC exclusion |
-| `pkg/core/restore.go` | Restore plugin: snapshotURL injection into HostedCluster spec |
+| `pkg/core/restore.go` | Restore plugin: annotation-based snapshotURL reading, S3 pre-signing, injection into HostedCluster spec |
+| `pkg/s3presign/presign.go` | Pure-stdlib AWS SigV4 pre-signed URL generation (no AWS SDK dependency) |
 | `pkg/common/types.go` | Shared constants for backup methods, annotations, volume names |
 | `pkg/common/scheme.go` | Scheme registration including apiextensionsv1 for CRD checks |
 
@@ -116,15 +117,30 @@ The `Execute()` method is called once per backed-up item, with no guaranteed ord
 
 1. When the `HostedCluster` item is processed during restore, the plugin reads the etcd snapshot URL from the annotation `hypershift.openshift.io/etcd-snapshot-url`. This annotation is set during backup because Velero strips status fields from items during restore.
 
-2. If the URL is present and the HC has managed etcd (`spec.etcd.managed != nil`), the plugin injects the URL into `spec.etcd.managed.storage.restoreSnapshotURL`.
+2. During **restore**, the restore plugin reads the annotation from the HostedCluster metadata.
 
-3. The modified HC is written back to Velero's output, so when the HC is created in the target cluster, the HyperShift Operator uses the snapshot URL to restore etcd from the snapshot.
+3. If the URL uses the `s3://` scheme, the plugin converts it to a **pre-signed HTTPS GET URL** using AWS SigV4. This is required because the `etcd-init` container downloads the snapshot using `curl`, which cannot handle S3-native URLs. The pre-signed URL is generated using credentials from the Velero BackupStorageLocation (BSL) credential Secret.
+
+4. The plugin injects the pre-signed URL into `spec.etcd.managed.storage.restoreSnapshotURL` on the HostedCluster.
+
+5. The modified HC is written back to Velero's output. When the HC is created in the target cluster, the HyperShift Operator configures the etcd StatefulSet with an init container that downloads and restores the snapshot.
 
 ### Why an Annotation Instead of Status
 
 Velero strips the `status` subresource from items during restore. The backup plugin also injects `lastSuccessfulEtcdBackupURL` into the HC status for observability, but the restore plugin reads the URL from the annotation `hypershift.openshift.io/etcd-snapshot-url` since that survives the restore process.
 
 > **Note**: The `lastSuccessfulEtcdBackupURL` status field is also set via unstructured map access during backup for informational purposes, but the restore flow relies exclusively on the annotation.
+
+### S3 Pre-Signing
+
+The `s3presign` package (`pkg/s3presign/presign.go`) implements AWS SigV4 pre-signed URL generation using only the Go standard library (no AWS SDK dependency). It supports:
+
+- Virtual-hosted and path-style S3 addressing
+- Custom S3-compatible endpoints (MinIO, RHOCS, etc.)
+- STS session tokens
+- Configurable URL expiry (default: 1 hour)
+
+The credentials are read from the BSL credential Secret referenced in the Velero Backup's `spec.storageLocation`.
 
 ## Configuration
 
@@ -308,8 +324,7 @@ The overall design is defined in [Enhancement PR #1945](https://github.com/opens
 
 Once both HyperShift PRs are merged, the vendor must be updated to:
 
-1. Replace `getLastSuccessfulEtcdBackupURL()` unstructured helper in `pkg/core/restore.go` with direct field access: `hc.Status.LastSuccessfulEtcdBackupURL`
-2. Remove local constants (`BackupInProgressReason`, `BackupRejectedReason`, `EtcdBackupSucceeded`) in `pkg/common/types.go` in favor of the API-defined constants
+1. Remove local constants (`BackupInProgressReason`, `BackupRejectedReason`, `EtcdBackupSucceeded`) in `pkg/common/types.go` in favor of the API-defined constants
 
 ## Manual Testing
 
@@ -409,7 +424,7 @@ aws s3 ls s3://<bucket>/<prefix>/backups/hcp-aws-backup/etcd-backup/
 
 ```bash
 oc get hostedcluster <name> -n <hosted-cluster-namespace> \
-  -o jsonpath='{.status.lastSuccessfulEtcdBackupURL}'
+  -o jsonpath='{.metadata.annotations.hypershift\.openshift\.io/etcd-snapshot-url}'
 ```
 
 ### Testing the Restore Flow
@@ -452,26 +467,20 @@ oc get hostedcluster <name> -n <hosted-cluster-namespace> \
   -o jsonpath='{.spec.etcd.managed.storage.restoreSnapshotURL}'
 ```
 
-The output should be an array containing the snapshot URL, e.g.:
+The output should be an array containing a **pre-signed HTTPS URL**, e.g.:
 ```
-["s3://<bucket>/<prefix>/backups/hcp-aws-backup/etcd-backup/1775589976.db"]
+["https://my-bucket.s3.us-east-1.amazonaws.com/path/to/snapshot.db?X-Amz-Algorithm=AWS4-HMAC-SHA256&..."]
 ```
 
-### Manual restoreSnapshotURL Injection
+The restore plugin automatically converts the `s3://` URL stored in the annotation to a pre-signed HTTPS URL so the `etcd-init` container can download it via `curl`.
 
-To manually test the restore without going through the full OADP restore flow, you can patch the HostedCluster directly. Note that `restoreSnapshotURL` is an **array**, not a string:
+4. Verify the etcd-init container downloads and restores the snapshot:
 
 ```bash
-# Correct — array syntax
-oc patch hostedcluster <name> -n <hosted-cluster-namespace> --type=merge \
-  -p '{"spec":{"etcd":{"managed":{"storage":{"restoreSnapshotURL":["s3://<bucket>/<prefix>/etcd-backup/snapshot.db"]}}}}}'
-
-# Wrong — will be rejected by the API
-oc patch hostedcluster <name> -n <hosted-cluster-namespace> --type=merge \
-  -p '{"spec":{"etcd":{"managed":{"storage":{"restoreSnapshotURL":"s3://..."}}}}}'
+oc logs etcd-0 -c etcd-init -n <hcp-namespace>
 ```
 
-> **Important**: The `restoreSnapshotURL` field only takes effect during HostedCluster bootstrap (initial etcd creation). Patching it on an already running cluster will not trigger an etcd restore. To test a full restore, the HostedCluster must be deleted and recreated via the OADP restore flow.
+> **Important**: The `restoreSnapshotURL` field only takes effect during HostedCluster bootstrap (initial etcd creation). The `etcd-init` container skips the restore if `/var/lib/data` is not empty. To test a full restore, the HostedCluster must be deleted and recreated via the OADP restore flow.
 
 ### Verifying volumeSnapshot Method is Unchanged
 
