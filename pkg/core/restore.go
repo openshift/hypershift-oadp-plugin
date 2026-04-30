@@ -32,6 +32,7 @@ type RestorePlugin struct {
 	config    map[string]string
 	validator validation.RestoreValidator
 	fsBackup  bool
+	hasDPA    bool // true when OADP+DPA is detected, false for standalone Velero
 
 	*plugtypes.RestoreOptions
 }
@@ -80,6 +81,16 @@ func NewRestorePlugin(logger logrus.FieldLogger) (*RestorePlugin, error) {
 		logger.Info("configuration for hypershift OADP plugin not found")
 	}
 
+	hasDPA, dpaErr := common.CRDExists(ctx, common.DPACRDName, client)
+	if dpaErr != nil {
+		logger.Warnf("Could not check for DPA CRD: %v", dpaErr)
+	}
+	if hasDPA {
+		logger.Info("OADP+DPA detected, using BSL credential references")
+	} else {
+		logger.Info("Standalone Velero detected, will use fallback credentials when BSL has no credential reference")
+	}
+
 	validator := &validation.RestorePluginValidator{
 		Log:       logger,
 		Client:    client,
@@ -91,6 +102,7 @@ func NewRestorePlugin(logger logrus.FieldLogger) (*RestorePlugin, error) {
 		ctx:       ctx,
 		client:    client,
 		fsBackup:  false,
+		hasDPA:    hasDPA,
 		config:    pluginConfig.Data,
 		validator: validator,
 	}
@@ -173,7 +185,7 @@ func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*v
 		snapshotURL := annotations[common.EtcdSnapshotURLAnnotation]
 		if snapshotURL != "" {
 			if strings.HasPrefix(snapshotURL, "s3://") {
-				presigned, err := p.presignS3URL(ctx, backup, snapshotURL)
+				presigned, err := p.presignS3URL(ctx, backup, snapshotURL, hcp.Name)
 				if err != nil {
 					return nil, fmt.Errorf("error generating pre-signed URL for etcd snapshot: %w", err)
 				}
@@ -204,7 +216,8 @@ func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*v
 				return nil, fmt.Errorf("error getting metadata accessor: %v", err)
 			}
 			common.AddAnnotation(metadata, common.HostedClusterRestoredFromBackupAnnotation, "")
-			p.log.Infof("Added restore annotation to HostedCluster %s", metadata.GetName())
+			hcName := metadata.GetName()
+			p.log.Infof("Added restore annotation to HostedCluster %s", hcName)
 
 			// Inject restoreSnapshotURL if etcd backup URL is available.
 			// Read from annotation because Velero strips status during restore.
@@ -213,7 +226,7 @@ func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*v
 			if snapshotURL != "" {
 				// Convert s3:// to pre-signed HTTPS URL
 				if strings.HasPrefix(snapshotURL, "s3://") {
-					presigned, err := p.presignS3URL(ctx, backup, snapshotURL)
+					presigned, err := p.presignS3URL(ctx, backup, snapshotURL, hcName)
 					if err != nil {
 						return nil, fmt.Errorf("error generating pre-signed URL for etcd snapshot: %w", err)
 					}
@@ -258,7 +271,7 @@ func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*v
 
 // presignS3URL converts an s3:// URL into a pre-signed HTTPS GET URL using
 // credentials from the Velero BackupStorageLocation.
-func (p *RestorePlugin) presignS3URL(ctx context.Context, backup *velerov1api.Backup, s3URL string) (string, error) {
+func (p *RestorePlugin) presignS3URL(ctx context.Context, backup *velerov1api.Backup, s3URL, hcName string) (string, error) {
 	bucket, key, err := s3presign.ParseS3URL(s3URL)
 	if err != nil {
 		return "", fmt.Errorf("error parsing S3 URL %q: %w", s3URL, err)
@@ -281,24 +294,49 @@ func (p *RestorePlugin) presignS3URL(ctx context.Context, backup *velerov1api.Ba
 	endpoint := bsl.Spec.Config["s3Url"]
 	forcePathStyle := bsl.Spec.Config["s3ForcePathStyle"] == "true"
 
-	// Read BSL credential Secret
-	if bsl.Spec.Credential == nil {
-		return "", fmt.Errorf("BSL %q has no credential reference", bsl.Name)
+	// Resolve credential reference: use BSL's explicit ref or fall back to well-known secret
+	credRef := bsl.Spec.Credential
+	if credRef == nil {
+		credRef = &corev1.SecretKeySelector{
+			LocalObjectReference: corev1.LocalObjectReference{Name: common.DefaultCredentialSecretName},
+			Key:                  common.DefaultCredentialSecretKey,
+		}
+		p.log.Infof("BSL %q has no credential reference, using fallback %s/%s (key: %s)", bsl.Name, oadpNS, credRef.Name, credRef.Key)
 	}
 
 	secret := &corev1.Secret{}
-	if err := p.client.Get(ctx, types.NamespacedName{Name: bsl.Spec.Credential.Name, Namespace: oadpNS}, secret); err != nil {
-		return "", fmt.Errorf("error getting BSL credential secret %q: %w", bsl.Spec.Credential.Name, err)
+	if err := p.client.Get(ctx, types.NamespacedName{Name: credRef.Name, Namespace: oadpNS}, secret); err != nil {
+		return "", fmt.Errorf("error getting credential secret %q: %w", credRef.Name, err)
 	}
 
-	credData, ok := secret.Data[bsl.Spec.Credential.Key]
+	credData, ok := secret.Data[credRef.Key]
 	if !ok {
-		return "", fmt.Errorf("key %q not found in secret %q", bsl.Spec.Credential.Key, bsl.Spec.Credential.Name)
+		return "", fmt.Errorf("key %q not found in secret %q", credRef.Key, credRef.Name)
 	}
 
-	creds, err := s3presign.ParseAWSCredentials(credData, "default")
+	parsed, err := s3presign.ParseAWSCredentialData(credData, "default")
 	if err != nil {
 		return "", fmt.Errorf("error parsing AWS credentials: %w", err)
+	}
+
+	var creds *s3presign.AWSCredentials
+	switch parsed.Type {
+	case s3presign.STSRoleCredentialType:
+		stsClient := s3presign.NewSTSClient()
+		sessionName := fmt.Sprintf("oadp-restore-%s", hcName)
+		creds, err = stsClient.AssumeRoleWithWebIdentity(
+			parsed.STSRole.RoleARN,
+			parsed.STSRole.WebIdentityTokenFile,
+			sessionName,
+		)
+		if err != nil {
+			return "", fmt.Errorf("error assuming role via STS: %w", err)
+		}
+		p.log.Infof("Assumed role %s via STS for pre-signing", parsed.STSRole.RoleARN)
+	case s3presign.StaticCredentialType:
+		creds = parsed.Static
+	default:
+		return "", fmt.Errorf("unsupported credential type %q", parsed.Type)
 	}
 
 	return s3presign.GeneratePresignedGetURL(s3presign.PresignOptions{
