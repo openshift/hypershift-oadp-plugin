@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/openshift/hypershift-oadp-plugin/pkg/common"
 	hyperv1 "github.com/openshift/hypershift/api/hypershift/v1beta1"
 	"github.com/sirupsen/logrus"
 	velerov1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
@@ -65,7 +66,16 @@ func (o *Orchestrator) CreateEtcdBackup(ctx context.Context, backup *velerov1.Ba
 		return fmt.Errorf("failed to map BSL to HCPEtcdBackup storage: %w", err)
 	}
 
-	credSecretName, err := o.copyCredentialSecret(ctx, bsl, o.OADPNamespace, o.HONamespace, backup.Name)
+	credRef := bsl.Spec.Credential
+	if credRef == nil {
+		credRef = &corev1.SecretKeySelector{
+			LocalObjectReference: corev1.LocalObjectReference{Name: common.DefaultCredentialSecretName},
+			Key:                  common.DefaultCredentialSecretKey,
+		}
+		o.log.Infof("BSL %q has no credential reference, using fallback %s/%s (key: %s)", bsl.Name, o.OADPNamespace, credRef.Name, credRef.Key)
+	}
+
+	credSecretName, err := o.copyCredentialSecret(ctx, credRef, o.OADPNamespace, o.HONamespace, backup.Name)
 	if err != nil {
 		return fmt.Errorf("failed to copy credential Secret: %w", err)
 	}
@@ -259,16 +269,11 @@ func mapAzureBSLToStorage(bsl *velerov1.BackupStorageLocation, keyPrefix string)
 	}
 }
 
-// copyCredentialSecret copies the BSL credential Secret to the HO namespace,
-// remapping the data key from the BSL's key (typically "cloud") to "credentials"
-// as expected by the HCPEtcdBackup controller.
+// copyCredentialSecret copies the credential Secret identified by credRef to the HO namespace,
+// remapping the data key to "credentials" as expected by the HCPEtcdBackup controller.
 // If the destination Secret already exists, it is reused. The credential data
 // contains an STS IAM Role ARN (not rotatable keys), so it is safe to reuse.
-func (o *Orchestrator) copyCredentialSecret(ctx context.Context, bsl *velerov1.BackupStorageLocation, fromNS, toNS, backupName string) (string, error) {
-	if bsl.Spec.Credential == nil {
-		return "", fmt.Errorf("BSL %q has no credential reference", bsl.Name)
-	}
-
+func (o *Orchestrator) copyCredentialSecret(ctx context.Context, credRef *corev1.SecretKeySelector, fromNS, toNS, backupName string) (string, error) {
 	dstName := fmt.Sprintf("etcd-backup-creds-%s", backupName)
 
 	// Check if the destination Secret already exists
@@ -279,19 +284,25 @@ func (o *Orchestrator) copyCredentialSecret(ctx context.Context, bsl *velerov1.B
 
 	srcSecret := &corev1.Secret{}
 	if err := o.client.Get(ctx, types.NamespacedName{
-		Name:      bsl.Spec.Credential.Name,
+		Name:      credRef.Name,
 		Namespace: fromNS,
 	}, srcSecret); err != nil {
-		return "", fmt.Errorf("failed to get BSL credential Secret %s/%s: %w", fromNS, bsl.Spec.Credential.Name, err)
+		return "", fmt.Errorf("failed to get credential Secret %s/%s: %w", fromNS, credRef.Name, err)
 	}
 
-	// The BSL references a specific key in the Secret (e.g. "cloud").
-	// The HCPEtcdBackup controller mounts the Secret as a volume and reads
-	// the file at /etc/etcd-backup-creds/credentials, so we remap the key.
-	srcKey := bsl.Spec.Credential.Key
+	srcKey := credRef.Key
 	credData, ok := srcSecret.Data[srcKey]
 	if !ok {
-		return "", fmt.Errorf("BSL credential Secret %s/%s does not contain key %q", fromNS, bsl.Spec.Credential.Name, srcKey)
+		return "", fmt.Errorf("credential Secret %s/%s does not contain key %q", fromNS, credRef.Name, srcKey)
+	}
+
+	dstData := map[string][]byte{
+		"credentials": credData,
+	}
+	// Preserve the original key alongside "credentials" so the controller
+	// can auto-detect credential type by key name (e.g., "cloud" for Azure WI).
+	if srcKey != "credentials" {
+		dstData[srcKey] = credData
 	}
 
 	dstSecret := &corev1.Secret{
@@ -302,9 +313,7 @@ func (o *Orchestrator) copyCredentialSecret(ctx context.Context, bsl *velerov1.B
 				"hypershift.openshift.io/etcd-backup": "true",
 			},
 		},
-		Data: map[string][]byte{
-			"credentials": credData,
-		},
+		Data: dstData,
 	}
 
 	if err := o.client.Create(ctx, dstSecret); err != nil {

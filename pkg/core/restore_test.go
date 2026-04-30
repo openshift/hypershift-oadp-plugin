@@ -124,7 +124,29 @@ aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
 			wantErr: true,
 		},
 		{
-			name: "When BSL has no credential, it should return error",
+			name: "When BSL has no credential ref, it should use fallback cloud-credentials and presign successfully",
+			setup: func() (*RestorePlugin, *velerov1api.Backup) {
+				bsl := defaultBSL.DeepCopy()
+				bsl.Name = "no-cred-bsl"
+				bsl.Spec.Credential = nil
+				client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bsl, defaultSecret).Build()
+				backup := defaultBackup.DeepCopy()
+				backup.Spec.StorageLocation = "no-cred-bsl"
+				return &RestorePlugin{log: logrus.New(), ctx: context.Background(), client: client}, backup
+			},
+			s3URL: "s3://bucket/key",
+			assert: func(t *testing.T, result string) {
+				parsed, err := url.Parse(result)
+				if err != nil {
+					t.Fatalf("failed to parse result URL: %v", err)
+				}
+				if parsed.Scheme != "https" {
+					t.Errorf("expected https scheme, got %s", parsed.Scheme)
+				}
+			},
+		},
+		{
+			name: "When BSL has no credential ref and fallback secret is missing, it should return error",
 			setup: func() (*RestorePlugin, *velerov1api.Backup) {
 				bsl := defaultBSL.DeepCopy()
 				bsl.Name = "no-cred-bsl"
@@ -192,7 +214,7 @@ aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			plugin, backup := tt.setup()
-			result, err := plugin.presignS3URL(context.Background(), backup, tt.s3URL)
+			result, err := plugin.presignS3URL(context.Background(), backup, tt.s3URL, "test-hc")
 			if tt.wantErr {
 				if err == nil {
 					t.Error("expected error but got nil")
@@ -400,6 +422,22 @@ func TestRestoreExecuteSnapshotURL(t *testing.T) {
 				expected := "https://my-bucket.s3.us-east-1.amazonaws.com/path/to/snapshot.db?X-Amz-Signature=abc123"
 				if urls[0].(string) != expected {
 					t.Errorf("expected URL to pass through unchanged, got %s", urls[0])
+				}
+			},
+		},
+		{
+			name: "When HC has Azure Blob https annotation, it should pass through without presigning",
+			annotations: map[string]string{
+				common.EtcdSnapshotURLAnnotation: "https://mystorageaccount.blob.core.windows.net/backups/etcd-snapshot/snapshot.db",
+			},
+			assert: func(t *testing.T, output *veleroapiv1.RestoreItemActionExecuteOutput) {
+				urls, ok := extractRestoreSnapshotURL(output)
+				if !ok || len(urls) == 0 {
+					t.Fatal("expected restoreSnapshotURL to be set for Azure Blob URL")
+				}
+				expected := "https://mystorageaccount.blob.core.windows.net/backups/etcd-snapshot/snapshot.db"
+				if urls[0].(string) != expected {
+					t.Errorf("expected Azure Blob URL to pass through unchanged, got %s", urls[0])
 				}
 			},
 		},
