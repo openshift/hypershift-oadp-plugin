@@ -222,6 +222,16 @@ func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*v
 		p.log.Debugf("Pod found, skipping restore")
 		return velero.NewRestoreItemActionExecuteOutput(input.Item).WithoutRestore(), nil
 
+	case kind == "StatefulSet":
+		metadata, err := meta.Accessor(input.Item)
+		if err != nil {
+			return nil, fmt.Errorf("error getting metadata accessor: %v", err)
+		}
+		if metadata.GetName() == "etcd" && p.config[common.ConfigKeyEtcdBackupMethod] == common.EtcdBackupMethodEtcdSnapshot {
+			p.log.Infof("etcd StatefulSet found, skipping restore (using etcdSnapshot method)")
+			return velero.NewRestoreItemActionExecuteOutput(input.Item).WithoutRestore(), nil
+		}
+
 	case common.MainKinds[kind]:
 		if kind == common.HostedClusterKind {
 			metadata, err := meta.Accessor(input.Item)
