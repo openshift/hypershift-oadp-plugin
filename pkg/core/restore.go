@@ -3,10 +3,13 @@ package core
 import (
 	"context"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
+	"time"
 
 	hive "github.com/openshift/hive/apis/hive/v1"
+	"github.com/openshift/hypershift-oadp-plugin/pkg/azblobsas"
 	common "github.com/openshift/hypershift-oadp-plugin/pkg/common"
 	plugtypes "github.com/openshift/hypershift-oadp-plugin/pkg/core/types"
 	validation "github.com/openshift/hypershift-oadp-plugin/pkg/core/validation"
@@ -33,6 +36,8 @@ type RestorePlugin struct {
 	validator validation.RestoreValidator
 	fsBackup  bool
 	hasDPA    bool // true when OADP+DPA is detected, false for standalone Velero
+
+	newTokenProvider func(creds *azblobsas.AADCredentials) (azblobsas.TokenProvider, error)
 
 	*plugtypes.RestoreOptions
 }
@@ -98,13 +103,14 @@ func NewRestorePlugin(logger logrus.FieldLogger) (*RestorePlugin, error) {
 	}
 
 	rp := &RestorePlugin{
-		log:       logger,
-		ctx:       ctx,
-		client:    client,
-		fsBackup:  false,
-		hasDPA:    hasDPA,
-		config:    pluginConfig.Data,
-		validator: validator,
+		log:              logger,
+		ctx:              ctx,
+		client:           client,
+		fsBackup:         false,
+		hasDPA:           hasDPA,
+		config:           pluginConfig.Data,
+		validator:        validator,
+		newTokenProvider: azblobsas.NewAADTokenProvider,
 	}
 
 	if rp.RestoreOptions, err = rp.validator.ValidatePluginConfig(rp.config); err != nil {
@@ -191,6 +197,13 @@ func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*v
 				}
 				p.log.Infof("Converted s3:// URL to pre-signed HTTPS URL for HostedControlPlane restore")
 				snapshotURL = presigned
+			} else if azblobsas.IsAzBlobURL(snapshotURL) {
+				signed, err := p.presignAzBlobUrl(ctx, backup, snapshotURL)
+				if err != nil {
+					return nil, fmt.Errorf("error generating SAS URL for etcd snapshot: %w", err)
+				}
+				p.log.Infof("Generated SAS URL for Azure Blob snapshot for HostedControlPlane restore")
+				snapshotURL = signed
 			}
 
 			if hcp.Spec.Etcd.Managed != nil {
@@ -232,6 +245,13 @@ func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*v
 					}
 					p.log.Infof("Converted s3:// URL to pre-signed HTTPS URL for HostedCluster restore")
 					snapshotURL = presigned
+				} else if azblobsas.IsAzBlobURL(snapshotURL) {
+					signed, err := p.presignAzBlobUrl(ctx, backup, snapshotURL)
+					if err != nil {
+						return nil, fmt.Errorf("error generating SAS URL for etcd snapshot: %w", err)
+					}
+					p.log.Infof("Generated SAS URL for Azure Blob snapshot for HostedCluster restore")
+					snapshotURL = signed
 				}
 
 				hc := &hyperv1.HostedCluster{}
@@ -267,6 +287,116 @@ func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*v
 	}
 
 	return velero.NewRestoreItemActionExecuteOutput(input.Item), nil
+}
+
+// presignAzBlobUrl converts an Azure Blob Storage URL into a SAS-signed URL
+// using credentials from the Velero BackupStorageLocation.
+func (p *RestorePlugin) presignAzBlobUrl(ctx context.Context, backup *velerov1api.Backup, azURL string) (string, error) {
+	account, container, blob, err := azblobsas.ParseAzBlobURL(azURL)
+	if err != nil {
+		return "", fmt.Errorf("error parsing Azure Blob URL %q: %w", azURL, err)
+	}
+
+	bsl := &velerov1api.BackupStorageLocation{}
+	oadpNS, err := common.GetCurrentNamespace()
+	if err != nil {
+		return "", fmt.Errorf("error getting current namespace: %w", err)
+	}
+
+	bslName := backup.Spec.StorageLocation
+	if err := p.client.Get(ctx, types.NamespacedName{Name: bslName, Namespace: oadpNS}, bsl); err != nil {
+		return "", fmt.Errorf("error getting BackupStorageLocation %q: %w", bslName, err)
+	}
+
+	endpoint := bsl.Spec.Config["storageAccountURI"]
+
+	credRef := bsl.Spec.Credential
+	if credRef == nil {
+		if bsl.Spec.Config["useAAD"] == "true" {
+			p.log.Infof("BSL %q has no credential reference, using Azure Workload Identity from pod environment", bsl.Name)
+			return p.presignAzBlobUrlWithAAD(ctx, account, container, blob, nil, endpoint)
+		}
+		credRef = &corev1.SecretKeySelector{
+			LocalObjectReference: corev1.LocalObjectReference{Name: common.DefaultCredentialSecretName},
+			Key:                  common.DefaultCredentialSecretKey,
+		}
+		p.log.Infof("BSL %q has no credential reference, using fallback %s (key: %s)", bsl.Name, credRef.Name, credRef.Key)
+	}
+
+	secret := &corev1.Secret{}
+	if err := p.client.Get(ctx, types.NamespacedName{Name: credRef.Name, Namespace: oadpNS}, secret); err != nil {
+		return "", fmt.Errorf("error getting credential secret %q: %w", credRef.Name, err)
+	}
+
+	credData, ok := secret.Data[credRef.Key]
+	if !ok {
+		return "", fmt.Errorf("key %q not found in secret %q", credRef.Key, credRef.Name)
+	}
+
+	if bsl.Spec.Config["useAAD"] == "true" {
+		return p.presignAzBlobUrlWithAAD(ctx, account, container, blob, credData, endpoint)
+	}
+
+	keyEnvVar := bsl.Spec.Config["storageAccountKeyEnvVar"]
+	creds, err := azblobsas.ParseAzureCredentials(credData, keyEnvVar)
+	if err != nil {
+		return "", fmt.Errorf("error parsing Azure credentials: %w", err)
+	}
+
+	return azblobsas.GenerateSASBlobURL(azblobsas.SASOptions{
+		Account:    account,
+		Container:  container,
+		Blob:       blob,
+		AccountKey: creds.StorageAccountAccessKey,
+		Expiry:     azblobsas.DefaultSASExpiry,
+		Endpoint:   endpoint,
+	})
+}
+
+func (p *RestorePlugin) presignAzBlobUrlWithAAD(ctx context.Context, account, container, blob string, credData []byte, endpoint string) (string, error) {
+	var aadCreds *azblobsas.AADCredentials
+	var err error
+	if credData != nil {
+		aadCreds, err = azblobsas.ParseAzureAADCredentials(credData)
+		if err != nil {
+			return "", fmt.Errorf("error parsing Azure AAD credentials: %w", err)
+		}
+	} else {
+		aadCreds = &azblobsas.AADCredentials{
+			TenantID:  os.Getenv("AZURE_TENANT_ID"),
+			ClientID:  os.Getenv("AZURE_CLIENT_ID"),
+			CloudName: os.Getenv("AZURE_CLOUD_NAME"),
+		}
+		if aadCreds.TenantID == "" || aadCreds.ClientID == "" {
+			return "", fmt.Errorf("AZURE_TENANT_ID and AZURE_CLIENT_ID env vars are required when no credential data is provided")
+		}
+	}
+
+	tokenProvider, err := p.newTokenProvider(aadCreds)
+	if err != nil {
+		return "", fmt.Errorf("error creating AAD token provider: %w", err)
+	}
+
+	scope := azblobsas.StorageScopeForCloud(aadCreds.CloudName)
+	token, err := tokenProvider.GetToken(ctx, scope)
+	if err != nil {
+		return "", fmt.Errorf("error acquiring AAD token for storage: %w", err)
+	}
+
+	now := time.Now().UTC()
+	delegationKey, err := azblobsas.GetUserDelegationKey(ctx, account, token, now, now.Add(azblobsas.DefaultSASExpiry), endpoint)
+	if err != nil {
+		return "", fmt.Errorf("error getting user delegation key: %w", err)
+	}
+
+	return azblobsas.GenerateUserDelegationSASBlobURL(azblobsas.UserDelegationSASOptions{
+		Account:       account,
+		Container:     container,
+		Blob:          blob,
+		DelegationKey: delegationKey,
+		Expiry:        azblobsas.DefaultSASExpiry,
+		Endpoint:      endpoint,
+	})
 }
 
 // presignS3URL converts an s3:// URL into a pre-signed HTTPS GET URL using
@@ -340,15 +470,14 @@ func (p *RestorePlugin) presignS3URL(ctx context.Context, backup *velerov1api.Ba
 	}
 
 	return s3presign.GeneratePresignedGetURL(s3presign.PresignOptions{
-		Bucket:         bucket,
-		Key:            key,
-		Region:         region,
-		AccessKeyID:    creds.AccessKeyID,
+		Bucket:          bucket,
+		Key:             key,
+		Region:          region,
+		AccessKeyID:     creds.AccessKeyID,
 		SecretAccessKey: creds.SecretAccessKey,
-		SessionToken:   creds.SessionToken,
-		Expiry:         s3presign.DefaultPresignExpiry,
-		Endpoint:       endpoint,
-		ForcePathStyle: forcePathStyle,
+		SessionToken:    creds.SessionToken,
+		Expiry:          s3presign.DefaultPresignExpiry,
+		Endpoint:        endpoint,
+		ForcePathStyle:  forcePathStyle,
 	})
 }
-
