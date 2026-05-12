@@ -588,6 +588,124 @@ func newHCPUnstructured(t *testing.T, name, namespace string, annotations map[st
 	return &unstructured.Unstructured{Object: raw}
 }
 
+func newStatefulSetUnstructured(name, namespace string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "apps/v1",
+			"kind":       "StatefulSet",
+			"metadata": map[string]any{
+				"name":      name,
+				"namespace": namespace,
+			},
+			"spec": map[string]any{
+				"replicas": int64(3),
+				"selector": map[string]any{
+					"matchLabels": map[string]any{"app": "etcd"},
+				},
+				"template": map[string]any{
+					"metadata": map[string]any{
+						"labels": map[string]any{"app": "etcd"},
+					},
+					"spec": map[string]any{
+						"containers": []any{
+							map[string]any{
+								"name":  "etcd",
+								"image": "etcd:latest",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func TestRestoreExecuteEtcdStatefulSet(t *testing.T) {
+	s := common.CustomScheme
+
+	hcpCRD := &apiextensionsv1.CustomResourceDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "hostedcontrolplanes.hypershift.openshift.io"},
+	}
+
+	backup := &velerov1api.Backup{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-backup", Namespace: "openshift-adp"},
+		Spec: velerov1api.BackupSpec{
+			StorageLocation:    "default",
+			IncludedNamespaces: []string{"clusters", "clusters-test"},
+		},
+	}
+	restore := &velerov1api.Restore{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-restore", Namespace: "openshift-adp"},
+		Spec:       velerov1api.RestoreSpec{BackupName: "test-backup"},
+	}
+
+	origSAPath := common.DefaultK8sSAFilePath
+	nsDir := t.TempDir()
+	if err := os.WriteFile(nsDir+"/namespace", []byte("openshift-adp"), 0644); err != nil {
+		t.Fatalf("failed to write namespace file: %v", err)
+	}
+	common.SetK8sSAFilePath(nsDir)
+	t.Cleanup(func() { common.SetK8sSAFilePath(origSAPath) })
+
+	tests := []struct {
+		name            string
+		stsName         string
+		etcdBackupMethod string
+		wantSkipped     bool
+	}{
+		{
+			name:            "When etcdSnapshot method and etcd StatefulSet, it should skip restore",
+			stsName:         "etcd",
+			etcdBackupMethod: common.EtcdBackupMethodEtcdSnapshot,
+			wantSkipped:     true,
+		},
+		{
+			name:            "When volumeSnapshot method and etcd StatefulSet, it should restore normally",
+			stsName:         "etcd",
+			etcdBackupMethod: common.EtcdBackupMethodVolume,
+			wantSkipped:     false,
+		},
+		{
+			name:            "When etcdSnapshot method and non-etcd StatefulSet, it should restore normally",
+			stsName:         "other-sts",
+			etcdBackupMethod: common.EtcdBackupMethodEtcdSnapshot,
+			wantSkipped:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fakeClient := fake.NewClientBuilder().
+				WithScheme(s).
+				WithObjects(hcpCRD, backup).
+				Build()
+			plugin := &RestorePlugin{
+				log:       logrus.New(),
+				ctx:       context.Background(),
+				client:    fakeClient,
+				validator: &mockRestoreValidator{},
+				config: map[string]string{
+					common.ConfigKeyEtcdBackupMethod: tt.etcdBackupMethod,
+				},
+			}
+
+			sts := newStatefulSetUnstructured(tt.stsName, "clusters-test")
+
+			output, err := plugin.Execute(&veleroapiv1.RestoreItemActionExecuteInput{
+				Item:    sts,
+				Restore: restore,
+			})
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if output.SkipRestore != tt.wantSkipped {
+				t.Errorf("expected SkipRestore=%v, got %v", tt.wantSkipped, output.SkipRestore)
+			}
+		})
+	}
+}
+
 func TestRestoreExecuteSnapshotURL(t *testing.T) {
 	s := common.CustomScheme
 
