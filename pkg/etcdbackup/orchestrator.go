@@ -3,6 +3,7 @@ package etcdbackup
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/openshift/hypershift-oadp-plugin/pkg/common"
@@ -23,6 +24,11 @@ const (
 	verifyTimeout     = 30 * time.Second
 	completionTimeout = 10 * time.Minute
 	pollInterval      = 5 * time.Second
+
+	// maxLabelValueLen is the maximum length of a Kubernetes label value (RFC 1123).
+	// The HyperShift hcpetcdbackup controller sets the CR name as a label value on
+	// the Job it creates, so the CR name must stay within this limit.
+	maxLabelValueLen = 63
 )
 
 // Orchestrator manages the lifecycle of HCPEtcdBackup CRs during OADP backup.
@@ -89,7 +95,7 @@ func (o *Orchestrator) CreateEtcdBackup(ctx context.Context, backup *velerov1.Ba
 		setEncryptionFields(storage, hc)
 	}
 
-	crName := fmt.Sprintf("oadp-%s-%s", backup.Name, utilrand.String(4))
+	crName := safeResourceName("oadp-", backup.Name, 4)
 	etcdBackup := &hyperv1.HCPEtcdBackup{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      crName,
@@ -352,6 +358,20 @@ func setEncryptionFields(storage *hyperv1.HCPEtcdBackupStorage, hc *hyperv1.Host
 			storage.AzureBlob.EncryptionKeyURL = backupConfig.Azure.EncryptionKeyURL
 		}
 	}
+}
+
+// safeResourceName builds a resource name that fits within the Kubernetes label value limit (63 bytes).
+// Layout: {prefix}{name}-{rand}. If name is too long, it is truncated and trailing hyphens are trimmed.
+func safeResourceName(prefix, name string, randLen int) string {
+	overhead := len(prefix) + 1 + randLen
+	maxNameLen := maxLabelValueLen - overhead
+
+	if len(name) > maxNameLen {
+		name = name[:maxNameLen]
+	}
+	name = strings.TrimRight(name, "-")
+
+	return fmt.Sprintf("%s%s-%s", prefix, name, utilrand.String(randLen))
 }
 
 // pollCondition polls the HCPEtcdBackup's BackupCompleted condition until the check function
