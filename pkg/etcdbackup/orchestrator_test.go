@@ -49,6 +49,68 @@ const (
 
 // TestMapBSLToStorage covers mapBSLToStorage (AWS, Azure, unsupported, key prefixes) and
 // mapAWSBSLToStorage / mapAzureBSLToStorage in one table.
+func TestSafeResourceName(t *testing.T) {
+	tests := []struct {
+		name       string
+		prefix     string
+		inputName  string
+		randLen    int
+		wantMaxLen int
+		wantPrefix string
+	}{
+		{
+			name:       "When name is short, It Should not truncate",
+			prefix:     "oadp-",
+			inputName:  "test-backup",
+			randLen:    4,
+			wantMaxLen: 63,
+			wantPrefix: "oadp-test-backup-",
+		},
+		{
+			name:       "When name is exactly at limit, It Should not truncate",
+			prefix:     "oadp-",
+			inputName:  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", // 53 chars
+			randLen:    4,
+			wantMaxLen: 63,
+			wantPrefix: "oadp-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-",
+		},
+		{
+			name:       "When name exceeds limit by one, It Should truncate to 53",
+			prefix:     "oadp-",
+			inputName:  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaX", // 54 chars
+			randLen:    4,
+			wantMaxLen: 63,
+			wantPrefix: "oadp-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-",
+		},
+		{
+			name:       "When name is very long schedule-style, It Should truncate to fit 63 bytes",
+			prefix:     "oadp-",
+			inputName:  "2q8dk2uepjpfcvm4lqg92rlpjshj219a-hourly-20260512140053",
+			randLen:    4,
+			wantMaxLen: 63,
+			wantPrefix: "oadp-",
+		},
+		{
+			name:       "When truncation leaves trailing hyphen, It Should trim it",
+			prefix:     "oadp-",
+			inputName:  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbb", // hyphen at position 53
+			randLen:    4,
+			wantMaxLen: 63,
+			wantPrefix: "oadp-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+			result := safeResourceName(tt.prefix, tt.inputName, tt.randLen)
+			g.Expect(len(result)).To(BeNumerically("<=", tt.wantMaxLen), "result %q is %d bytes, exceeds %d", result, len(result), tt.wantMaxLen)
+			g.Expect(result).To(HavePrefix(tt.wantPrefix))
+			g.Expect(result).NotTo(HaveSuffix("--"), "should not have double hyphen before random suffix")
+		})
+	}
+}
+
 func TestMapBSLToStorage(t *testing.T) {
 	o := &Orchestrator{log: logrus.New()}
 	tests := []struct {
@@ -761,6 +823,38 @@ func TestCreateEtcdBackup(t *testing.T) {
 			assert: func(g *GomegaWithT, o *Orchestrator) {
 				g.Expect(o.IsCreated()).To(BeTrue())
 				g.Expect(o.CredSecretName).To(Equal("etcd-backup-creds-test-backup"))
+			},
+		},
+		{
+			name: "When CreateEtcdBackup runs with long schedule-triggered backup name, It Should produce HCPEtcdBackup name within 63 bytes",
+			objects: []crclient.Object{
+				&corev1.Secret{
+					ObjectMeta: metav1.ObjectMeta{Name: "cloud-credentials", Namespace: "openshift-adp"},
+					Data:       map[string][]byte{"cloud": []byte("aws-creds")},
+				},
+				&velerov1.BackupStorageLocation{
+					ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: "openshift-adp"},
+					Spec: velerov1.BackupStorageLocationSpec{
+						Provider: "aws",
+						StorageType: velerov1.StorageType{
+							ObjectStorage: &velerov1.ObjectStorageLocation{Bucket: "my-bucket"},
+						},
+						Config: map[string]string{"region": "us-east-1"},
+						Credential: &corev1.SecretKeySelector{
+							LocalObjectReference: corev1.LocalObjectReference{Name: "cloud-credentials"},
+							Key:                  "cloud",
+						},
+					},
+				},
+			},
+			backup: &velerov1.Backup{
+				ObjectMeta: metav1.ObjectMeta{Name: "2q8dk2uepjpfcvm4lqg92rlpjshj219a-hourly-20260512140053", Namespace: "openshift-adp"},
+				Spec:       velerov1.BackupSpec{StorageLocation: "default"},
+			},
+			assert: func(g *GomegaWithT, o *Orchestrator) {
+				g.Expect(o.IsCreated()).To(BeTrue())
+				g.Expect(len(o.BackupName)).To(BeNumerically("<=", 63), "HCPEtcdBackup name %q is %d bytes, exceeds 63-byte label limit", o.BackupName, len(o.BackupName))
+				g.Expect(o.BackupName).To(HavePrefix("oadp-"))
 			},
 		},
 		{
