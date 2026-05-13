@@ -38,6 +38,7 @@ type RestorePlugin struct {
 	hasDPA    bool // true when OADP+DPA is detected, false for standalone Velero
 
 	newTokenProvider func(creds *azblobsas.AADCredentials) (azblobsas.TokenProvider, error)
+	newSTSClient    func() s3presign.STSAssumeRoler
 
 	*plugtypes.RestoreOptions
 }
@@ -111,6 +112,7 @@ func NewRestorePlugin(logger logrus.FieldLogger) (*RestorePlugin, error) {
 		config:           pluginConfig.Data,
 		validator:        validator,
 		newTokenProvider: azblobsas.NewAADTokenProvider,
+		newSTSClient:    func() s3presign.STSAssumeRoler { return s3presign.NewSTSClient() },
 	}
 
 	if rp.RestoreOptions, err = rp.validator.ValidatePluginConfig(rp.config); err != nil {
@@ -190,20 +192,9 @@ func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*v
 		annotations := metadata.GetAnnotations()
 		snapshotURL := annotations[common.EtcdSnapshotURLAnnotation]
 		if snapshotURL != "" {
-			if strings.HasPrefix(snapshotURL, "s3://") {
-				presigned, err := p.presignS3URL(ctx, backup, snapshotURL, hcp.Name)
-				if err != nil {
-					return nil, fmt.Errorf("error generating pre-signed URL for etcd snapshot: %w", err)
-				}
-				p.log.Infof("Converted s3:// URL to pre-signed HTTPS URL for HostedControlPlane restore")
-				snapshotURL = presigned
-			} else if azblobsas.IsAzBlobURL(snapshotURL) {
-				signed, err := p.presignAzBlobUrl(ctx, backup, snapshotURL)
-				if err != nil {
-					return nil, fmt.Errorf("error generating SAS URL for etcd snapshot: %w", err)
-				}
-				p.log.Infof("Generated SAS URL for Azure Blob snapshot for HostedControlPlane restore")
-				snapshotURL = signed
+			snapshotURL, err = p.signSnapshotURL(ctx, backup, snapshotURL, hcp.Name)
+			if err != nil {
+				return nil, err
 			}
 
 			if hcp.Spec.Etcd.Managed != nil {
@@ -247,21 +238,9 @@ func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*v
 			annotations := metadata.GetAnnotations()
 			snapshotURL := annotations[common.EtcdSnapshotURLAnnotation]
 			if snapshotURL != "" {
-				// Convert s3:// to pre-signed HTTPS URL
-				if strings.HasPrefix(snapshotURL, "s3://") {
-					presigned, err := p.presignS3URL(ctx, backup, snapshotURL, hcName)
-					if err != nil {
-						return nil, fmt.Errorf("error generating pre-signed URL for etcd snapshot: %w", err)
-					}
-					p.log.Infof("Converted s3:// URL to pre-signed HTTPS URL for HostedCluster restore")
-					snapshotURL = presigned
-				} else if azblobsas.IsAzBlobURL(snapshotURL) {
-					signed, err := p.presignAzBlobUrl(ctx, backup, snapshotURL)
-					if err != nil {
-						return nil, fmt.Errorf("error generating SAS URL for etcd snapshot: %w", err)
-					}
-					p.log.Infof("Generated SAS URL for Azure Blob snapshot for HostedCluster restore")
-					snapshotURL = signed
+				snapshotURL, err = p.signSnapshotURL(ctx, backup, snapshotURL, hcName)
+				if err != nil {
+					return nil, err
 				}
 
 				hc := &hyperv1.HostedCluster{}
@@ -299,6 +278,62 @@ func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*v
 	return velero.NewRestoreItemActionExecuteOutput(input.Item), nil
 }
 
+// signSnapshotURL converts a raw snapshot URL (s3:// or Azure Blob https://) into a
+// signed HTTPS URL. If the URL is already an HTTPS URL that is not Azure Blob, it is
+// returned as-is.
+func (p *RestorePlugin) signSnapshotURL(ctx context.Context, backup *velerov1api.Backup, rawURL, resourceName string) (string, error) {
+	if strings.HasPrefix(rawURL, "s3://") {
+		signed, err := p.presignS3URL(ctx, backup, rawURL, resourceName)
+		if err != nil {
+			return "", fmt.Errorf("error generating pre-signed URL for etcd snapshot: %w", err)
+		}
+		p.log.Infof("Converted s3:// URL to pre-signed HTTPS URL for %s restore", resourceName)
+		return signed, nil
+	}
+	if azblobsas.IsAzBlobURL(rawURL) {
+		signed, err := p.presignAzBlobUrl(ctx, backup, rawURL)
+		if err != nil {
+			return "", fmt.Errorf("error generating SAS URL for etcd snapshot: %w", err)
+		}
+		p.log.Infof("Generated SAS URL for Azure Blob snapshot for %s restore", resourceName)
+		return signed, nil
+	}
+	return rawURL, nil
+}
+
+// fetchBSLCredentials fetches the BackupStorageLocation and its credential secret data.
+func (p *RestorePlugin) fetchBSLCredentials(ctx context.Context, backup *velerov1api.Backup) (
+	bsl *velerov1api.BackupStorageLocation, credData []byte, oadpNS string, err error,
+) {
+	oadpNS, err = common.GetCurrentNamespace()
+	if err != nil {
+		return nil, nil, "", fmt.Errorf("error getting current namespace: %w", err)
+	}
+
+	bsl = &velerov1api.BackupStorageLocation{}
+	bslName := backup.Spec.StorageLocation
+	if err := p.client.Get(ctx, types.NamespacedName{Name: bslName, Namespace: oadpNS}, bsl); err != nil {
+		return nil, nil, "", fmt.Errorf("error getting BackupStorageLocation %q: %w", bslName, err)
+	}
+
+	credRef := common.ResolveCredentialRef(bsl)
+	if bsl.Spec.Credential == nil {
+		p.log.Infof("BSL %q has no credential reference, using fallback %s/%s (key: %s)", bsl.Name, oadpNS, credRef.Name, credRef.Key)
+	}
+
+	secret := &corev1.Secret{}
+	if err := p.client.Get(ctx, types.NamespacedName{Name: credRef.Name, Namespace: oadpNS}, secret); err != nil {
+		return bsl, nil, oadpNS, fmt.Errorf("error getting credential secret %q: %w", credRef.Name, err)
+	}
+
+	credData, ok := secret.Data[credRef.Key]
+	if !ok {
+		return bsl, nil, oadpNS, fmt.Errorf("key %q not found in secret %q", credRef.Key, credRef.Name)
+	}
+
+	return bsl, credData, oadpNS, nil
+}
+
 // presignAzBlobUrl converts an Azure Blob Storage URL into a SAS-signed URL
 // using credentials from the Velero BackupStorageLocation.
 func (p *RestorePlugin) presignAzBlobUrl(ctx context.Context, backup *velerov1api.Backup, azURL string) (string, error) {
@@ -307,41 +342,21 @@ func (p *RestorePlugin) presignAzBlobUrl(ctx context.Context, backup *velerov1ap
 		return "", fmt.Errorf("error parsing Azure Blob URL %q: %w", azURL, err)
 	}
 
-	bsl := &velerov1api.BackupStorageLocation{}
-	oadpNS, err := common.GetCurrentNamespace()
+	bsl, credData, _, err := p.fetchBSLCredentials(ctx, backup)
 	if err != nil {
-		return "", fmt.Errorf("error getting current namespace: %w", err)
-	}
-
-	bslName := backup.Spec.StorageLocation
-	if err := p.client.Get(ctx, types.NamespacedName{Name: bslName, Namespace: oadpNS}, bsl); err != nil {
-		return "", fmt.Errorf("error getting BackupStorageLocation %q: %w", bslName, err)
+		if bsl == nil {
+			return "", err
+		}
+		// fetchBSLCredentials failed at the secret level; for Azure WI without
+		// a credential secret this is expected when useAAD=true and BSL has no ref.
+		if bsl.Spec.Credential == nil && bsl.Spec.Config["useAAD"] == "true" {
+			p.log.Infof("BSL %q has no credential reference, using Azure Workload Identity from pod environment", bsl.Name)
+			return p.presignAzBlobUrlWithAAD(ctx, account, container, blob, nil, bsl.Spec.Config["storageAccountURI"])
+		}
+		return "", err
 	}
 
 	endpoint := bsl.Spec.Config["storageAccountURI"]
-
-	credRef := bsl.Spec.Credential
-	if credRef == nil {
-		if bsl.Spec.Config["useAAD"] == "true" {
-			p.log.Infof("BSL %q has no credential reference, using Azure Workload Identity from pod environment", bsl.Name)
-			return p.presignAzBlobUrlWithAAD(ctx, account, container, blob, nil, endpoint)
-		}
-		credRef = &corev1.SecretKeySelector{
-			LocalObjectReference: corev1.LocalObjectReference{Name: common.DefaultCredentialSecretName},
-			Key:                  common.DefaultCredentialSecretKey,
-		}
-		p.log.Infof("BSL %q has no credential reference, using fallback %s (key: %s)", bsl.Name, credRef.Name, credRef.Key)
-	}
-
-	secret := &corev1.Secret{}
-	if err := p.client.Get(ctx, types.NamespacedName{Name: credRef.Name, Namespace: oadpNS}, secret); err != nil {
-		return "", fmt.Errorf("error getting credential secret %q: %w", credRef.Name, err)
-	}
-
-	credData, ok := secret.Data[credRef.Key]
-	if !ok {
-		return "", fmt.Errorf("key %q not found in secret %q", credRef.Key, credRef.Name)
-	}
 
 	if bsl.Spec.Config["useAAD"] == "true" {
 		return p.presignAzBlobUrlWithAAD(ctx, account, container, blob, credData, endpoint)
@@ -417,42 +432,14 @@ func (p *RestorePlugin) presignS3URL(ctx context.Context, backup *velerov1api.Ba
 		return "", fmt.Errorf("error parsing S3 URL %q: %w", s3URL, err)
 	}
 
-	// Fetch BSL
-	bsl := &velerov1api.BackupStorageLocation{}
-	oadpNS, err := common.GetCurrentNamespace()
+	bsl, credData, _, err := p.fetchBSLCredentials(ctx, backup)
 	if err != nil {
-		return "", fmt.Errorf("error getting current namespace: %w", err)
+		return "", err
 	}
 
-	bslName := backup.Spec.StorageLocation
-	if err := p.client.Get(ctx, types.NamespacedName{Name: bslName, Namespace: oadpNS}, bsl); err != nil {
-		return "", fmt.Errorf("error getting BackupStorageLocation %q: %w", bslName, err)
-	}
-
-	// Read BSL config
 	region := bsl.Spec.Config["region"]
 	endpoint := bsl.Spec.Config["s3Url"]
 	forcePathStyle := bsl.Spec.Config["s3ForcePathStyle"] == "true"
-
-	// Resolve credential reference: use BSL's explicit ref or fall back to well-known secret
-	credRef := bsl.Spec.Credential
-	if credRef == nil {
-		credRef = &corev1.SecretKeySelector{
-			LocalObjectReference: corev1.LocalObjectReference{Name: common.DefaultCredentialSecretName},
-			Key:                  common.DefaultCredentialSecretKey,
-		}
-		p.log.Infof("BSL %q has no credential reference, using fallback %s/%s (key: %s)", bsl.Name, oadpNS, credRef.Name, credRef.Key)
-	}
-
-	secret := &corev1.Secret{}
-	if err := p.client.Get(ctx, types.NamespacedName{Name: credRef.Name, Namespace: oadpNS}, secret); err != nil {
-		return "", fmt.Errorf("error getting credential secret %q: %w", credRef.Name, err)
-	}
-
-	credData, ok := secret.Data[credRef.Key]
-	if !ok {
-		return "", fmt.Errorf("key %q not found in secret %q", credRef.Key, credRef.Name)
-	}
 
 	parsed, err := s3presign.ParseAWSCredentialData(credData, "default")
 	if err != nil {
@@ -462,9 +449,10 @@ func (p *RestorePlugin) presignS3URL(ctx context.Context, backup *velerov1api.Ba
 	var creds *s3presign.AWSCredentials
 	switch parsed.Type {
 	case s3presign.STSRoleCredentialType:
-		stsClient := s3presign.NewSTSClient()
+		stsClient := p.newSTSClient()
 		sessionName := fmt.Sprintf("oadp-restore-%s", hcName)
 		creds, err = stsClient.AssumeRoleWithWebIdentity(
+			ctx,
 			parsed.STSRole.RoleARN,
 			parsed.STSRole.WebIdentityTokenFile,
 			sessionName,

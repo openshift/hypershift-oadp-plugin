@@ -1,10 +1,12 @@
 package s3presign
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -54,6 +56,7 @@ func TestAssumeRoleWithWebIdentity(t *testing.T) {
 		}
 
 		creds, err := client.AssumeRoleWithWebIdentity(
+			context.Background(),
 			"arn:aws:iam::123456789012:role/test",
 			tokenFile,
 			"test-session",
@@ -88,6 +91,7 @@ func TestAssumeRoleWithWebIdentity(t *testing.T) {
 		}
 
 		_, err := client.AssumeRoleWithWebIdentity(
+			context.Background(),
 			"arn:aws:iam::123456789012:role/test",
 			tokenFile,
 			"test-session",
@@ -95,7 +99,7 @@ func TestAssumeRoleWithWebIdentity(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error for HTTP 403")
 		}
-		if !contains(err.Error(), "403") {
+		if !strings.Contains(err.Error(), "403") {
 			t.Errorf("error should mention HTTP status code, got: %v", err)
 		}
 	})
@@ -115,6 +119,7 @@ func TestAssumeRoleWithWebIdentity(t *testing.T) {
 		}
 
 		_, err := client.AssumeRoleWithWebIdentity(
+			context.Background(),
 			"arn:aws:iam::123456789012:role/test",
 			tokenFile,
 			"test-session",
@@ -147,6 +152,7 @@ func TestAssumeRoleWithWebIdentity(t *testing.T) {
 		}
 
 		_, err := client.AssumeRoleWithWebIdentity(
+			context.Background(),
 			"arn:aws:iam::123456789012:role/test",
 			tokenFile,
 			"test-session",
@@ -159,6 +165,7 @@ func TestAssumeRoleWithWebIdentity(t *testing.T) {
 	t.Run("missing token file returns error", func(t *testing.T) {
 		client := NewSTSClient()
 		_, err := client.AssumeRoleWithWebIdentity(
+			context.Background(),
 			"arn:aws:iam::123456789012:role/test",
 			"/nonexistent/path/token",
 			"test-session",
@@ -173,6 +180,7 @@ func TestAssumeRoleWithWebIdentity(t *testing.T) {
 
 		client := NewSTSClient()
 		_, err := client.AssumeRoleWithWebIdentity(
+			context.Background(),
 			"arn:aws:iam::123456789012:role/test",
 			tokenFile,
 			"test-session",
@@ -184,7 +192,7 @@ func TestAssumeRoleWithWebIdentity(t *testing.T) {
 
 	t.Run("empty roleARN returns error", func(t *testing.T) {
 		client := NewSTSClient()
-		_, err := client.AssumeRoleWithWebIdentity("", "/some/token", "session")
+		_, err := client.AssumeRoleWithWebIdentity(context.Background(), "", "/some/token", "session")
 		if err == nil {
 			t.Fatal("expected error for empty roleARN")
 		}
@@ -192,7 +200,7 @@ func TestAssumeRoleWithWebIdentity(t *testing.T) {
 
 	t.Run("empty tokenFile path returns error", func(t *testing.T) {
 		client := NewSTSClient()
-		_, err := client.AssumeRoleWithWebIdentity("arn:aws:iam::123:role/r", "", "session")
+		_, err := client.AssumeRoleWithWebIdentity(context.Background(), "arn:aws:iam::123:role/r", "", "session")
 		if err == nil {
 			t.Fatal("expected error for empty tokenFile")
 		}
@@ -223,6 +231,7 @@ func TestAssumeRoleWithWebIdentity(t *testing.T) {
 		}
 
 		_, err := client.AssumeRoleWithWebIdentity(
+			context.Background(),
 			"arn:aws:iam::123456789012:role/test",
 			tokenFile,
 			"",
@@ -255,17 +264,4 @@ func writeTokenFile(t *testing.T, content string) string {
 		t.Fatalf("failed to write token file: %v", err)
 	}
 	return path
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && searchSubstring(s, substr)
-}
-
-func searchSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

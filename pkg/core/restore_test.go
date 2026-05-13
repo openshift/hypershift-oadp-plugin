@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -432,6 +433,43 @@ AZURE_CLOUD_NAME=AzurePublicCloud
 					log:    logrus.New(),
 					ctx:    context.Background(),
 					client: client,
+				}, backup
+			},
+			azURL:   "https://myaccount.blob.core.windows.net/mycontainer/path/to/snapshot.db",
+			wantErr: true,
+		},
+		{
+			name: "When AAD token acquisition fails, it should return error",
+			setup: func() (*RestorePlugin, *velerov1api.Backup) {
+				bsl := &velerov1api.BackupStorageLocation{
+					ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: "openshift-adp"},
+					Spec: velerov1api.BackupStorageLocationSpec{
+						Config: map[string]string{
+							"useAAD":            "true",
+							"storageAccountURI": delegationServer.URL,
+						},
+						Credential: &corev1.SecretKeySelector{
+							LocalObjectReference: corev1.LocalObjectReference{Name: "cloud-credentials"},
+							Key:                  "cloud",
+						},
+					},
+				}
+				secret := &corev1.Secret{
+					ObjectMeta: metav1.ObjectMeta{Name: "cloud-credentials", Namespace: "openshift-adp"},
+					Data:       map[string][]byte{"cloud": aadCredentialData},
+				}
+				backup := &velerov1api.Backup{
+					ObjectMeta: metav1.ObjectMeta{Name: "test-backup", Namespace: "openshift-adp"},
+					Spec:       velerov1api.BackupSpec{StorageLocation: "default"},
+				}
+				client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bsl, secret).Build()
+				return &RestorePlugin{
+					log:    logrus.New(),
+					ctx:    context.Background(),
+					client: client,
+					newTokenProvider: func(_ *azblobsas.AADCredentials) (azblobsas.TokenProvider, error) {
+						return &mockTokenProvider{err: fmt.Errorf("token acquisition failed")}, nil
+					},
 				}, backup
 			},
 			azURL:   "https://myaccount.blob.core.windows.net/mycontainer/path/to/snapshot.db",

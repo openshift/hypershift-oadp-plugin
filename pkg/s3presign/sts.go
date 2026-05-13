@@ -1,6 +1,8 @@
 package s3presign
 
 import (
+	"bytes"
+	"context"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -16,6 +18,12 @@ const (
 	defaultSessionName   = "hypershift-oadp"
 	defaultDurationSecs  = 3600
 )
+
+// STSAssumeRoler abstracts the STS AssumeRoleWithWebIdentity operation
+// so callers can inject a mock for testing.
+type STSAssumeRoler interface {
+	AssumeRoleWithWebIdentity(ctx context.Context, roleARN, tokenFile, sessionName string) (*AWSCredentials, error)
+}
 
 // STSClient performs STS API calls using pure stdlib (no AWS SDK).
 type STSClient struct {
@@ -34,7 +42,7 @@ func NewSTSClient() *STSClient {
 // AssumeRoleWithWebIdentity calls the STS AssumeRoleWithWebIdentity API
 // using the projected SA token on disk. This API does not require SigV4
 // signing because the web identity token itself serves as authentication.
-func (c *STSClient) AssumeRoleWithWebIdentity(roleARN, tokenFile, sessionName string) (*AWSCredentials, error) {
+func (c *STSClient) AssumeRoleWithWebIdentity(ctx context.Context, roleARN, tokenFile, sessionName string) (*AWSCredentials, error) {
 	if roleARN == "" {
 		return nil, fmt.Errorf("roleARN is required")
 	}
@@ -68,7 +76,13 @@ func (c *STSClient) AssumeRoleWithWebIdentity(roleARN, tokenFile, sessionName st
 		endpoint = defaultSTSEndpoint
 	}
 
-	resp, err := c.HTTPClient.PostForm(endpoint, params)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewBufferString(params.Encode()))
+	if err != nil {
+		return nil, fmt.Errorf("creating STS request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("STS request failed: %w", err)
 	}
