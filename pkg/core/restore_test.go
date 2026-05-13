@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/openshift/hypershift-oadp-plugin/pkg/azblobsas"
 	common "github.com/openshift/hypershift-oadp-plugin/pkg/common"
+	"github.com/openshift/hypershift-oadp-plugin/pkg/s3presign"
 	plugtypes "github.com/openshift/hypershift-oadp-plugin/pkg/core/types"
 	hyperv1 "github.com/openshift/hypershift/api/hypershift/v1beta1"
 	"github.com/sirupsen/logrus"
@@ -25,6 +27,21 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
+
+type mockSTSClient struct {
+	creds       *s3presign.AWSCredentials
+	err         error
+	receivedCtx context.Context
+	receivedARN string
+	receivedSession string
+}
+
+func (m *mockSTSClient) AssumeRoleWithWebIdentity(ctx context.Context, roleARN, tokenFile, sessionName string) (*s3presign.AWSCredentials, error) {
+	m.receivedCtx = ctx
+	m.receivedARN = roleARN
+	m.receivedSession = sessionName
+	return m.creds, m.err
+}
 
 type mockRestoreValidator struct {
 	validatePlatformErr error
@@ -194,6 +211,87 @@ aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
 			wantErr: true,
 		},
 		{
+			name: "Given IRSA credentials with role_arn, When presigning, Then it should assume role via STS and produce a pre-signed URL with security token",
+			setup: func() (*RestorePlugin, *velerov1api.Backup) {
+				tokenFile := writeTempFile(t, "irsa-token-content")
+				irsaCreds := []byte(fmt.Sprintf("[default]\nrole_arn = arn:aws:iam::123456789012:role/irsa-test\nweb_identity_token_file = %s\n", tokenFile))
+				irsaSecret := &corev1.Secret{
+					ObjectMeta: metav1.ObjectMeta{Name: "irsa-credentials", Namespace: "openshift-adp"},
+					Data:       map[string][]byte{"cloud": irsaCreds},
+				}
+				bsl := defaultBSL.DeepCopy()
+				bsl.Name = "irsa-bsl"
+				bsl.Spec.Credential = &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: "irsa-credentials"},
+					Key:                  "cloud",
+				}
+				client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bsl, irsaSecret).Build()
+				backup := defaultBackup.DeepCopy()
+				backup.Spec.StorageLocation = "irsa-bsl"
+
+				mock := &mockSTSClient{
+					creds: &s3presign.AWSCredentials{
+						AccessKeyID:     "ASIASTSTESTKEY",
+						SecretAccessKey: "stsSecretKey",
+						SessionToken:    "stsSessionToken",
+					},
+				}
+				plugin := &RestorePlugin{
+					log:    logrus.New(),
+					ctx:    context.Background(),
+					client: client,
+					newSTSClient: func() s3presign.STSAssumeRoler { return mock },
+				}
+				return plugin, backup
+			},
+			s3URL: "s3://my-bucket/path/to/snapshot.db",
+			assert: func(t *testing.T, result string) {
+				parsed, err := url.Parse(result)
+				if err != nil {
+					t.Fatalf("failed to parse result URL: %v", err)
+				}
+				if parsed.Scheme != "https" {
+					t.Errorf("expected https scheme, got %s", parsed.Scheme)
+				}
+				if parsed.Query().Get("X-Amz-Security-Token") == "" {
+					t.Error("expected X-Amz-Security-Token param for STS credentials")
+				}
+			},
+		},
+		{
+			name: "Given IRSA credentials, When STS assume role fails, Then it should return error",
+			setup: func() (*RestorePlugin, *velerov1api.Backup) {
+				tokenFile := writeTempFile(t, "irsa-token-content")
+				irsaCreds := []byte(fmt.Sprintf("[default]\nrole_arn = arn:aws:iam::123456789012:role/irsa-test\nweb_identity_token_file = %s\n", tokenFile))
+				irsaSecret := &corev1.Secret{
+					ObjectMeta: metav1.ObjectMeta{Name: "irsa-credentials", Namespace: "openshift-adp"},
+					Data:       map[string][]byte{"cloud": irsaCreds},
+				}
+				bsl := defaultBSL.DeepCopy()
+				bsl.Name = "irsa-fail-bsl"
+				bsl.Spec.Credential = &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: "irsa-credentials"},
+					Key:                  "cloud",
+				}
+				client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bsl, irsaSecret).Build()
+				backup := defaultBackup.DeepCopy()
+				backup.Spec.StorageLocation = "irsa-fail-bsl"
+
+				mock := &mockSTSClient{
+					err: fmt.Errorf("AccessDenied: not authorized to assume role"),
+				}
+				plugin := &RestorePlugin{
+					log:    logrus.New(),
+					ctx:    context.Background(),
+					client: client,
+					newSTSClient: func() s3presign.STSAssumeRoler { return mock },
+				}
+				return plugin, backup
+			},
+			s3URL:   "s3://bucket/key",
+			wantErr: true,
+		},
+		{
 			name: "When BSL has custom endpoint, it should use that endpoint in the pre-signed URL",
 			setup: func() (*RestorePlugin, *velerov1api.Backup) {
 				bsl := defaultBSL.DeepCopy()
@@ -242,6 +340,19 @@ type mockTokenProvider struct {
 
 func (m *mockTokenProvider) GetToken(_ context.Context, _ string) (string, error) {
 	return m.token, m.err
+}
+
+func writeTempFile(t *testing.T, content string) string {
+	t.Helper()
+	f, err := os.CreateTemp(t.TempDir(), "token-*")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	if _, err := f.WriteString(content); err != nil {
+		t.Fatalf("failed to write temp file: %v", err)
+	}
+	f.Close()
+	return f.Name()
 }
 
 func TestPresignAzBlobUrlWithAAD(t *testing.T) {
@@ -432,6 +543,43 @@ AZURE_CLOUD_NAME=AzurePublicCloud
 					log:    logrus.New(),
 					ctx:    context.Background(),
 					client: client,
+				}, backup
+			},
+			azURL:   "https://myaccount.blob.core.windows.net/mycontainer/path/to/snapshot.db",
+			wantErr: true,
+		},
+		{
+			name: "When AAD token acquisition fails, it should return error",
+			setup: func() (*RestorePlugin, *velerov1api.Backup) {
+				bsl := &velerov1api.BackupStorageLocation{
+					ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: "openshift-adp"},
+					Spec: velerov1api.BackupStorageLocationSpec{
+						Config: map[string]string{
+							"useAAD":            "true",
+							"storageAccountURI": delegationServer.URL,
+						},
+						Credential: &corev1.SecretKeySelector{
+							LocalObjectReference: corev1.LocalObjectReference{Name: "cloud-credentials"},
+							Key:                  "cloud",
+						},
+					},
+				}
+				secret := &corev1.Secret{
+					ObjectMeta: metav1.ObjectMeta{Name: "cloud-credentials", Namespace: "openshift-adp"},
+					Data:       map[string][]byte{"cloud": aadCredentialData},
+				}
+				backup := &velerov1api.Backup{
+					ObjectMeta: metav1.ObjectMeta{Name: "test-backup", Namespace: "openshift-adp"},
+					Spec:       velerov1api.BackupSpec{StorageLocation: "default"},
+				}
+				client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bsl, secret).Build()
+				return &RestorePlugin{
+					log:    logrus.New(),
+					ctx:    context.Background(),
+					client: client,
+					newTokenProvider: func(_ *azblobsas.AADCredentials) (azblobsas.TokenProvider, error) {
+						return &mockTokenProvider{err: fmt.Errorf("token acquisition failed")}, nil
+					},
 				}, backup
 			},
 			azURL:   "https://myaccount.blob.core.windows.net/mycontainer/path/to/snapshot.db",

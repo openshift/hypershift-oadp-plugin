@@ -1,10 +1,13 @@
 package s3presign
 
 import (
+	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -54,6 +57,7 @@ func TestAssumeRoleWithWebIdentity(t *testing.T) {
 		}
 
 		creds, err := client.AssumeRoleWithWebIdentity(
+			context.Background(),
 			"arn:aws:iam::123456789012:role/test",
 			tokenFile,
 			"test-session",
@@ -88,6 +92,7 @@ func TestAssumeRoleWithWebIdentity(t *testing.T) {
 		}
 
 		_, err := client.AssumeRoleWithWebIdentity(
+			context.Background(),
 			"arn:aws:iam::123456789012:role/test",
 			tokenFile,
 			"test-session",
@@ -95,7 +100,7 @@ func TestAssumeRoleWithWebIdentity(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error for HTTP 403")
 		}
-		if !contains(err.Error(), "403") {
+		if !strings.Contains(err.Error(), "403") {
 			t.Errorf("error should mention HTTP status code, got: %v", err)
 		}
 	})
@@ -115,6 +120,7 @@ func TestAssumeRoleWithWebIdentity(t *testing.T) {
 		}
 
 		_, err := client.AssumeRoleWithWebIdentity(
+			context.Background(),
 			"arn:aws:iam::123456789012:role/test",
 			tokenFile,
 			"test-session",
@@ -124,41 +130,69 @@ func TestAssumeRoleWithWebIdentity(t *testing.T) {
 		}
 	})
 
-	t.Run("response missing credentials returns error", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`<AssumeRoleWithWebIdentityResponse>
-  <AssumeRoleWithWebIdentityResult>
-    <Credentials>
-      <AccessKeyId></AccessKeyId>
-      <SecretAccessKey></SecretAccessKey>
-      <SessionToken></SessionToken>
-    </Credentials>
-  </AssumeRoleWithWebIdentityResult>
-</AssumeRoleWithWebIdentityResponse>`))
-		}))
-		defer server.Close()
+	missingCredTests := []struct {
+		name           string
+		accessKeyID    string
+		secretAccessKey string
+		sessionToken   string
+	}{
+		{
+			name:            "Given all credentials empty, When STS responds, Then it should return error",
+			accessKeyID:     "",
+			secretAccessKey: "",
+			sessionToken:    "",
+		},
+		{
+			name:            "Given valid keys but empty session token, When STS responds, Then it should return error",
+			accessKeyID:     "ASIATESTACCESSKEY",
+			secretAccessKey: "testSecretKey123",
+			sessionToken:    "",
+		},
+		{
+			name:            "Given valid session token but empty access key, When STS responds, Then it should return error",
+			accessKeyID:     "",
+			secretAccessKey: "testSecretKey123",
+			sessionToken:    "testSessionToken456",
+		},
+		{
+			name:            "Given valid session token but empty secret key, When STS responds, Then it should return error",
+			accessKeyID:     "ASIATESTACCESSKEY",
+			secretAccessKey: "",
+			sessionToken:    "testSessionToken456",
+		},
+	}
 
-		tokenFile := writeTokenFile(t, "my-token")
+	for _, tt := range missingCredTests {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte(buildSTSCredentialResponse(tt.accessKeyID, tt.secretAccessKey, tt.sessionToken)))
+			}))
+			defer server.Close()
 
-		client := &STSClient{
-			HTTPClient: server.Client(),
-			Endpoint:   server.URL,
-		}
+			tokenFile := writeTokenFile(t, "my-token")
 
-		_, err := client.AssumeRoleWithWebIdentity(
-			"arn:aws:iam::123456789012:role/test",
-			tokenFile,
-			"test-session",
-		)
-		if err == nil {
-			t.Fatal("expected error for empty credentials")
-		}
-	})
+			client := &STSClient{
+				HTTPClient: server.Client(),
+				Endpoint:   server.URL,
+			}
+
+			_, err := client.AssumeRoleWithWebIdentity(
+				context.Background(),
+				"arn:aws:iam::123456789012:role/test",
+				tokenFile,
+				"test-session",
+			)
+			if err == nil {
+				t.Fatal("expected error for missing credentials")
+			}
+		})
+	}
 
 	t.Run("missing token file returns error", func(t *testing.T) {
 		client := NewSTSClient()
 		_, err := client.AssumeRoleWithWebIdentity(
+			context.Background(),
 			"arn:aws:iam::123456789012:role/test",
 			"/nonexistent/path/token",
 			"test-session",
@@ -173,6 +207,7 @@ func TestAssumeRoleWithWebIdentity(t *testing.T) {
 
 		client := NewSTSClient()
 		_, err := client.AssumeRoleWithWebIdentity(
+			context.Background(),
 			"arn:aws:iam::123456789012:role/test",
 			tokenFile,
 			"test-session",
@@ -184,7 +219,7 @@ func TestAssumeRoleWithWebIdentity(t *testing.T) {
 
 	t.Run("empty roleARN returns error", func(t *testing.T) {
 		client := NewSTSClient()
-		_, err := client.AssumeRoleWithWebIdentity("", "/some/token", "session")
+		_, err := client.AssumeRoleWithWebIdentity(context.Background(), "", "/some/token", "session")
 		if err == nil {
 			t.Fatal("expected error for empty roleARN")
 		}
@@ -192,7 +227,7 @@ func TestAssumeRoleWithWebIdentity(t *testing.T) {
 
 	t.Run("empty tokenFile path returns error", func(t *testing.T) {
 		client := NewSTSClient()
-		_, err := client.AssumeRoleWithWebIdentity("arn:aws:iam::123:role/r", "", "session")
+		_, err := client.AssumeRoleWithWebIdentity(context.Background(), "arn:aws:iam::123:role/r", "", "session")
 		if err == nil {
 			t.Fatal("expected error for empty tokenFile")
 		}
@@ -223,6 +258,7 @@ func TestAssumeRoleWithWebIdentity(t *testing.T) {
 		}
 
 		_, err := client.AssumeRoleWithWebIdentity(
+			context.Background(),
 			"arn:aws:iam::123456789012:role/test",
 			tokenFile,
 			"",
@@ -246,6 +282,18 @@ func TestNewSTSClient(t *testing.T) {
 	}
 }
 
+func buildSTSCredentialResponse(accessKeyID, secretAccessKey, sessionToken string) string {
+	return fmt.Sprintf(`<AssumeRoleWithWebIdentityResponse>
+  <AssumeRoleWithWebIdentityResult>
+    <Credentials>
+      <AccessKeyId>%s</AccessKeyId>
+      <SecretAccessKey>%s</SecretAccessKey>
+      <SessionToken>%s</SessionToken>
+    </Credentials>
+  </AssumeRoleWithWebIdentityResult>
+</AssumeRoleWithWebIdentityResponse>`, accessKeyID, secretAccessKey, sessionToken)
+}
+
 // writeTokenFile creates a temporary file with the given content and returns its path.
 func writeTokenFile(t *testing.T, content string) string {
 	t.Helper()
@@ -255,17 +303,4 @@ func writeTokenFile(t *testing.T, content string) string {
 		t.Fatalf("failed to write token file: %v", err)
 	}
 	return path
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && searchSubstring(s, substr)
-}
-
-func searchSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
