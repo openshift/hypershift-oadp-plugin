@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/url"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -34,6 +35,29 @@ type AWSCredentials struct {
 	AccessKeyID     string
 	SecretAccessKey  string
 	SessionToken    string
+}
+
+// CredentialType identifies whether credentials are static or STS-based.
+type CredentialType string
+
+const (
+	// StaticCredentialType indicates static AWS access key credentials.
+	StaticCredentialType CredentialType = "static"
+	// STSRoleCredentialType indicates STS/IRSA role-based credentials.
+	STSRoleCredentialType CredentialType = "sts"
+)
+
+// STSRoleCredentials holds the role ARN and token file path for STS/IRSA.
+type STSRoleCredentials struct {
+	RoleARN              string
+	WebIdentityTokenFile string
+}
+
+// ParsedAWSCredentials wraps the detected credential type and its data.
+type ParsedAWSCredentials struct {
+	Type    CredentialType
+	Static  *AWSCredentials
+	STSRole *STSRoleCredentials
 }
 
 // ParseS3URL parses "s3://bucket/path/to/key" into bucket and key components.
@@ -122,6 +146,127 @@ func ParseAWSCredentials(data []byte, profile string) (*AWSCredentials, error) {
 	}
 
 	return creds, nil
+}
+
+// ParseAWSCredentialData inspects raw credential data and returns the detected
+// credential type along with the parsed credentials.
+//
+// It supports three formats:
+//  1. Bare ARN string (e.g. "arn:aws:iam::123456789012:role/my-role") — STS/IRSA
+//  2. INI profile with role_arn + web_identity_token_file keys — STS/IRSA
+//  3. INI profile with aws_access_key_id + aws_secret_access_key — static credentials
+func ParseAWSCredentialData(data []byte, profile string) (*ParsedAWSCredentials, error) {
+	content := strings.TrimSpace(string(data))
+	if content == "" {
+		return nil, fmt.Errorf("empty credential data")
+	}
+
+	// Case 1: Bare ARN string (not an INI file).
+	// IRSA credentials stored in Velero BSL Secrets can be a raw ARN.
+	if isBareARN(content) {
+		tokenFile := os.Getenv("AWS_WEB_IDENTITY_TOKEN_FILE")
+		if tokenFile == "" {
+			return nil, fmt.Errorf(
+				"credential data is a bare IAM role ARN (%s) but AWS_WEB_IDENTITY_TOKEN_FILE is not set: "+
+					"IRSA requires a projected service account token",
+				content,
+			)
+		}
+		return &ParsedAWSCredentials{
+			Type: STSRoleCredentialType,
+			STSRole: &STSRoleCredentials{
+				RoleARN:              content,
+				WebIdentityTokenFile: tokenFile,
+			},
+		}, nil
+	}
+
+	// Case 2: INI profile with role_arn — STS/IRSA via profile config.
+	// Only classified as STS if web_identity_token_file is explicitly available
+	// (in INI or env). Profiles using source_profile or credential_source are
+	// not supported — return a clear error so users know what format to use.
+	roleARN, tokenFile := parseSTSProfile(data, profile)
+	if roleARN != "" {
+		if tokenFile == "" {
+			tokenFile = os.Getenv("AWS_WEB_IDENTITY_TOKEN_FILE")
+		}
+		if tokenFile == "" {
+			return nil, fmt.Errorf(
+				"credential file has role_arn (%s) but no web_identity_token_file: "+
+					"assume-role via source_profile or credential_source is not supported; "+
+					"use static credentials (aws_access_key_id/aws_secret_access_key) or "+
+					"IRSA format (role_arn + web_identity_token_file)",
+				roleARN,
+			)
+		}
+		return &ParsedAWSCredentials{
+			Type: STSRoleCredentialType,
+			STSRole: &STSRoleCredentials{
+				RoleARN:              roleARN,
+				WebIdentityTokenFile: tokenFile,
+			},
+		}, nil
+	}
+
+	// Case 3: Static credentials
+	creds, err := ParseAWSCredentials(data, profile)
+	if err != nil {
+		return nil, fmt.Errorf("unable to parse credential data as static or STS credentials: %w", err)
+	}
+	return &ParsedAWSCredentials{
+		Type:   StaticCredentialType,
+		Static: creds,
+	}, nil
+}
+
+// isBareARN returns true if s looks like a bare IAM role ARN string
+// (e.g. "arn:aws:iam::123456789012:role/my-role").
+func isBareARN(s string) bool {
+	return strings.HasPrefix(s, "arn:") &&
+		strings.Contains(s, ":iam:") &&
+		strings.Contains(s, ":role/") &&
+		!strings.Contains(s, "\n")
+}
+
+// parseSTSProfile looks for role_arn (and optionally web_identity_token_file)
+// in the given INI profile. Returns empty strings if not found.
+func parseSTSProfile(data []byte, profile string) (roleARN, tokenFile string) {
+	if profile == "" {
+		profile = "default"
+	}
+
+	lines := strings.Split(string(data), "\n")
+	target := fmt.Sprintf("[%s]", profile)
+	var inProfile bool
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";") {
+			continue
+		}
+		if strings.HasPrefix(line, "[") {
+			inProfile = line == target
+			continue
+		}
+		if !inProfile {
+			continue
+		}
+
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		k := strings.TrimSpace(parts[0])
+		v := strings.TrimSpace(parts[1])
+
+		switch k {
+		case "role_arn":
+			roleARN = v
+		case "web_identity_token_file":
+			tokenFile = v
+		}
+	}
+	return roleARN, tokenFile
 }
 
 // GeneratePresignedGetURL creates a pre-signed HTTPS GET URL using AWS SigV4.

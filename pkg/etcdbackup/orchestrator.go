@@ -3,8 +3,10 @@ package etcdbackup
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/openshift/hypershift-oadp-plugin/pkg/common"
 	hyperv1 "github.com/openshift/hypershift/api/hypershift/v1beta1"
 	"github.com/sirupsen/logrus"
 	velerov1 "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
@@ -22,6 +24,11 @@ const (
 	verifyTimeout     = 30 * time.Second
 	completionTimeout = 10 * time.Minute
 	pollInterval      = 5 * time.Second
+
+	// maxLabelValueLen is the maximum length of a Kubernetes label value (RFC 1123).
+	// The HyperShift hcpetcdbackup controller sets the CR name as a label value on
+	// the Job it creates, so the CR name must stay within this limit.
+	maxLabelValueLen = 63
 )
 
 // Orchestrator manages the lifecycle of HCPEtcdBackup CRs during OADP backup.
@@ -65,7 +72,12 @@ func (o *Orchestrator) CreateEtcdBackup(ctx context.Context, backup *velerov1.Ba
 		return fmt.Errorf("failed to map BSL to HCPEtcdBackup storage: %w", err)
 	}
 
-	credSecretName, err := o.copyCredentialSecret(ctx, bsl, o.OADPNamespace, o.HONamespace, backup.Name)
+	credRef := common.ResolveCredentialRef(bsl)
+	if bsl.Spec.Credential == nil {
+		o.log.Infof("BSL %q has no credential reference, using fallback %s/%s (key: %s)", bsl.Name, o.OADPNamespace, credRef.Name, credRef.Key)
+	}
+
+	credSecretName, err := o.copyCredentialSecret(ctx, credRef, o.OADPNamespace, o.HONamespace, backup.Name)
 	if err != nil {
 		return fmt.Errorf("failed to copy credential Secret: %w", err)
 	}
@@ -79,7 +91,7 @@ func (o *Orchestrator) CreateEtcdBackup(ctx context.Context, backup *velerov1.Ba
 		setEncryptionFields(storage, hc)
 	}
 
-	crName := fmt.Sprintf("oadp-%s-%s", backup.Name, utilrand.String(4))
+	crName := safeResourceName("oadp-", backup.Name, 4)
 	etcdBackup := &hyperv1.HCPEtcdBackup{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      crName,
@@ -259,16 +271,11 @@ func mapAzureBSLToStorage(bsl *velerov1.BackupStorageLocation, keyPrefix string)
 	}
 }
 
-// copyCredentialSecret copies the BSL credential Secret to the HO namespace,
-// remapping the data key from the BSL's key (typically "cloud") to "credentials"
-// as expected by the HCPEtcdBackup controller.
+// copyCredentialSecret copies the credential Secret identified by credRef to the HO namespace,
+// remapping the data key to "credentials" as expected by the HCPEtcdBackup controller.
 // If the destination Secret already exists, it is reused. The credential data
 // contains an STS IAM Role ARN (not rotatable keys), so it is safe to reuse.
-func (o *Orchestrator) copyCredentialSecret(ctx context.Context, bsl *velerov1.BackupStorageLocation, fromNS, toNS, backupName string) (string, error) {
-	if bsl.Spec.Credential == nil {
-		return "", fmt.Errorf("BSL %q has no credential reference", bsl.Name)
-	}
-
+func (o *Orchestrator) copyCredentialSecret(ctx context.Context, credRef *corev1.SecretKeySelector, fromNS, toNS, backupName string) (string, error) {
 	dstName := fmt.Sprintf("etcd-backup-creds-%s", backupName)
 
 	// Check if the destination Secret already exists
@@ -279,19 +286,25 @@ func (o *Orchestrator) copyCredentialSecret(ctx context.Context, bsl *velerov1.B
 
 	srcSecret := &corev1.Secret{}
 	if err := o.client.Get(ctx, types.NamespacedName{
-		Name:      bsl.Spec.Credential.Name,
+		Name:      credRef.Name,
 		Namespace: fromNS,
 	}, srcSecret); err != nil {
-		return "", fmt.Errorf("failed to get BSL credential Secret %s/%s: %w", fromNS, bsl.Spec.Credential.Name, err)
+		return "", fmt.Errorf("failed to get credential Secret %s/%s: %w", fromNS, credRef.Name, err)
 	}
 
-	// The BSL references a specific key in the Secret (e.g. "cloud").
-	// The HCPEtcdBackup controller mounts the Secret as a volume and reads
-	// the file at /etc/etcd-backup-creds/credentials, so we remap the key.
-	srcKey := bsl.Spec.Credential.Key
+	srcKey := credRef.Key
 	credData, ok := srcSecret.Data[srcKey]
 	if !ok {
-		return "", fmt.Errorf("BSL credential Secret %s/%s does not contain key %q", fromNS, bsl.Spec.Credential.Name, srcKey)
+		return "", fmt.Errorf("credential Secret %s/%s does not contain key %q", fromNS, credRef.Name, srcKey)
+	}
+
+	dstData := map[string][]byte{
+		"credentials": credData,
+	}
+	// Preserve the original key alongside "credentials" so the controller
+	// can auto-detect credential type by key name (e.g., "cloud" for Azure WI).
+	if srcKey != "credentials" {
+		dstData[srcKey] = credData
 	}
 
 	dstSecret := &corev1.Secret{
@@ -302,9 +315,7 @@ func (o *Orchestrator) copyCredentialSecret(ctx context.Context, bsl *velerov1.B
 				"hypershift.openshift.io/etcd-backup": "true",
 			},
 		},
-		Data: map[string][]byte{
-			"credentials": credData,
-		},
+		Data: dstData,
 	}
 
 	if err := o.client.Create(ctx, dstSecret); err != nil {
@@ -343,6 +354,20 @@ func setEncryptionFields(storage *hyperv1.HCPEtcdBackupStorage, hc *hyperv1.Host
 			storage.AzureBlob.EncryptionKeyURL = backupConfig.Azure.EncryptionKeyURL
 		}
 	}
+}
+
+// safeResourceName builds a resource name that fits within the Kubernetes label value limit (63 bytes).
+// Layout: {prefix}{name}-{rand}. If name is too long, it is truncated and trailing hyphens are trimmed.
+func safeResourceName(prefix, name string, randLen int) string {
+	overhead := len(prefix) + 1 + randLen
+	maxNameLen := maxLabelValueLen - overhead
+
+	if len(name) > maxNameLen {
+		name = name[:maxNameLen]
+	}
+	name = strings.TrimRight(name, "-")
+
+	return fmt.Sprintf("%s%s-%s", prefix, name, utilrand.String(randLen))
 }
 
 // pollCondition polls the HCPEtcdBackup's BackupCompleted condition until the check function
