@@ -72,12 +72,8 @@ func (o *Orchestrator) CreateEtcdBackup(ctx context.Context, backup *velerov1.Ba
 		return fmt.Errorf("failed to map BSL to HCPEtcdBackup storage: %w", err)
 	}
 
-	credRef := bsl.Spec.Credential
-	if credRef == nil {
-		credRef = &corev1.SecretKeySelector{
-			LocalObjectReference: corev1.LocalObjectReference{Name: common.DefaultCredentialSecretName},
-			Key:                  common.DefaultCredentialSecretKey,
-		}
+	credRef := common.ResolveCredentialRef(bsl)
+	if bsl.Spec.Credential == nil {
 		o.log.Infof("BSL %q has no credential reference, using fallback %s/%s (key: %s)", bsl.Name, o.OADPNamespace, credRef.Name, credRef.Key)
 	}
 
