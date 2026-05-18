@@ -34,19 +34,32 @@ type MachinePool struct {
 	// +optional
 	OnHostMaintenance string `json:"onHostMaintenance,omitempty"`
 
+	// ServiceAccount is the email of a gcp service account to be attached to worker nodes
+	// in order to provide the permissions required by the cloud provider. For the default
+	// worker MachinePool, it is the user's responsibility to match this to the value
+	// provided in the install-config.
+	//
+	// +optional
+	ServiceAccount string `json:"serviceAccount,omitempty"`
+
 	// userTags has additional keys and values that we will add as tags to the providerSpec of
 	// MachineSets that we creates on GCP. Tag key and tag value should be the shortnames of the
 	// tag key and tag value resource. Consumer is responsible for using this only for spokes
 	// where custom tags are supported.
 	UserTags []UserTag `json:"userTags,omitempty"`
+
+	// Tags defines a set of network tags which will be added to instances in the machineset.
+	// Not to be confused with UserTags.
+	//
+	// +optional
+	Tags []string `json:"tags,omitempty"`
 }
 
 // OSDisk defines the disk for machines on GCP.
 type OSDisk struct {
 	// DiskType defines the type of disk.
-	// The valid values are pd-standard and pd-ssd.
+	// The valid values at this time are: pd-standard, pd-ssd, local-ssd, pd-balanced, hyperdisk-balanced.
 	// Defaulted internally to pd-ssd.
-	// +kubebuilder:validation:Enum=pd-ssd;pd-standard
 	// +optional
 	DiskType string `json:"diskType,omitempty"`
 
