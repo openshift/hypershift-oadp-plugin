@@ -167,6 +167,10 @@ const (
 	// key if specified.
 	ServiceAccountSigningKeySecretKey = "key"
 
+	// ServiceAccountOldPublicKeySecretKey is the name of the secret key that should contain the old service account public
+	// key if specified.
+	ServiceAccountOldPublicKeySecretKey = "old-key.pub"
+
 	// DisableProfilingAnnotation is the annotation that allows disabling profiling for control plane components.
 	// Any components specified in this list will have profiling disabled. Profiling is disabled by default for etcd and konnectivity.
 	// Components this annotation can apply to: kube-scheduler, kube-controller-manager, kube-apiserver.
@@ -267,6 +271,10 @@ const (
 	// DisableMonitoringServices introduces an option to disable monitor services IBM Cloud do not use.
 	DisableMonitoringServices = "hypershift.openshift.io/disable-monitoring-services"
 
+	// EnableMetricsForwarding enables metrics forwarding from the management cluster to hosted clusters.
+	// When present, components like the endpoint-resolver and metrics-proxy will be deployed.
+	EnableMetricsForwarding = "hypershift.openshift.io/enable-metrics-forwarding"
+
 	// JSONPatchAnnotation allow modifying the kubevirt VM template using jsonpatch
 	JSONPatchAnnotation = "hypershift.openshift.io/kubevirt-vm-jsonpatch"
 
@@ -327,6 +335,11 @@ const (
 	// This annotation is only set by the hypershift-operator on HosterControlPlanes.
 	// It is not set by the end-user.
 	DisableClusterAutoscalerAnnotation = "hypershift.openshift.io/disable-cluster-autoscaler"
+
+	// DisableAWSNodeTerminationHandlerAnnotation allows disabling the AWS Node Termination Handler for a hosted cluster.
+	// This annotation is only set by the hypershift-operator on HostedControlPlanes.
+	// It is not set by the end-user.
+	DisableAWSNodeTerminationHandlerAnnotation = "hypershift.openshift.io/disable-aws-node-termination-handler"
 
 	// AroHCP represents the ARO HCP managed service offering
 	AroHCP = "ARO-HCP"
@@ -407,6 +420,12 @@ const (
 	// AWSMachinePublicIPs, if set to "true", results in an AWS machine template that creates machines with public IPs
 	// WARNING: This option is for development and testing purposes only
 	AWSMachinePublicIPs = "hypershift.openshift.io/aws-machine-public-ips"
+
+	// AWSKarpenterDefaultInstanceProfile specifies the default IAM instance profile
+	// for EC2 instances created by Karpenter. This will be set directly on the
+	// EC2NodeClass. The instance profile must already exist in AWS.
+	// This is platform-controlled and bypasses OpenshiftEC2NodeClass.
+	AWSKarpenterDefaultInstanceProfile = "hypershift.openshift.io/aws-karpenter-default-instance-profile"
 
 	// HostedClusterRestoredFromBackupAnnotation is set to true when the HostedCluster is restored from a backup using Hypershift
 	// OADP plugin. This annotation is set by the Hypershift OADP plugin during the Backup/Restore process. The annotation will trigger
@@ -500,11 +519,12 @@ type Capabilities struct {
 
 // +kubebuilder:validation:XValidation:rule="self.platform.type == 'IBMCloud' ? size(self.services) >= 3 : size(self.services) >= 4",message="spec.services in body should have at least 4 items or 3 for IBMCloud"
 // +kubebuilder:validation:XValidation:rule=`self.platform.type != "IBMCloud" ? self.services == oldSelf.services : true`, message="Services is immutable. Changes might result in unpredictable and disruptive behavior."
-// +kubebuilder:validation:XValidation:rule=`self.platform.type == "Azure" ? self.services.exists(s, s.service == "OAuthServer" && s.servicePublishingStrategy.type == "Route") : true`,message="Azure platform requires OAuthServer to use Route service publishing strategy"
+// +kubebuilder:validation:XValidation:rule=`self.platform.type != "Azure" || self.platform.?azure.azureAuthenticationConfig.azureAuthenticationConfigType.orValue("") == "WorkloadIdentities" || self.services.exists(s, s.service == "OAuthServer" && s.servicePublishingStrategy.type == "Route")`,message="Azure managed platform (ARO HCP) requires OAuthServer to use Route"
+// +kubebuilder:validation:XValidation:rule=`self.platform.type != "Azure" || self.platform.?azure.azureAuthenticationConfig.azureAuthenticationConfigType.orValue("") != "WorkloadIdentities" || self.services.exists(s, s.service == "OAuthServer" && (s.servicePublishingStrategy.type == "Route" || s.servicePublishingStrategy.type == "LoadBalancer"))`,message="Self-managed Azure requires OAuthServer to use Route or LoadBalancer"
 // +kubebuilder:validation:XValidation:rule=`self.platform.type == "Azure" ? self.services.exists(s, s.service == "Konnectivity" && s.servicePublishingStrategy.type == "Route") : true`,message="Azure platform requires Konnectivity to use Route service publishing strategy"
 // +kubebuilder:validation:XValidation:rule=`self.platform.type == "Azure" ? self.services.exists(s, s.service == "Ignition" && s.servicePublishingStrategy.type == "Route") : true`,message="Azure platform requires Ignition to use Route service publishing strategy"
 // +kubebuilder:validation:XValidation:rule=`has(self.issuerURL) || !has(self.serviceAccountSigningKey)`,message="If serviceAccountSigningKey is set, issuerURL must be set"
-// +kubebuilder:validation:XValidation:rule=`!self.services.exists(s, s.service == 'APIServer' && has(s.servicePublishingStrategy.loadBalancer) && s.servicePublishingStrategy.loadBalancer.hostname != "" && has(self.configuration) && has(self.configuration.apiServer) && self.configuration.apiServer.servingCerts.namedCertificates.exists(cert, cert.names.exists(n, n == s.servicePublishingStrategy.loadBalancer.hostname)))`, message="APIServer loadBalancer hostname cannot be in ClusterConfiguration.apiserver.servingCerts.namedCertificates[]"
+// +kubebuilder:validation:XValidation:rule=`!self.services.exists(s, s.service == 'APIServer' && has(s.servicePublishingStrategy.loadBalancer) && s.servicePublishingStrategy.loadBalancer.hostname != "" && has(self.configuration) && has(self.configuration.apiServer) && has(self.configuration.apiServer.servingCerts) && has(self.configuration.apiServer.servingCerts.namedCertificates) && self.configuration.apiServer.servingCerts.namedCertificates.exists(cert, has(cert.names) && cert.names.exists(n, n == s.servicePublishingStrategy.loadBalancer.hostname)))`, message="APIServer loadBalancer hostname cannot be in ClusterConfiguration.apiserver.servingCerts.namedCertificates[]"
 // +kubebuilder:validation:XValidation:rule="!has(self.operatorConfiguration) || !has(self.operatorConfiguration.clusterNetworkOperator) || !has(self.operatorConfiguration.clusterNetworkOperator.disableMultiNetwork) || !self.operatorConfiguration.clusterNetworkOperator.disableMultiNetwork || self.networking.networkType == 'Other'",message="disableMultiNetwork can only be set to true when networkType is 'Other'"
 // +kubebuilder:validation:XValidation:rule="self.networking.networkType == 'OVNKubernetes' || !has(self.operatorConfiguration) || !has(self.operatorConfiguration.clusterNetworkOperator) || !has(self.operatorConfiguration.clusterNetworkOperator.ovnKubernetesConfig)", message="ovnKubernetesConfig is forbidden when networkType is not OVNKubernetes"
 type HostedClusterSpec struct {
@@ -619,10 +639,11 @@ type HostedClusterSpec struct {
 	// +optional
 	Autoscaling ClusterAutoscaling `json:"autoscaling,omitempty"`
 
-	// autoNode specifies the configuration for the autoNode feature.
-	// +openshift:enable:FeatureGate=AutoNodeKarpenter
+	// autoNode specifies the configuration for automatic node provisioning and lifecycle management.
+	// When set, the provisioner(e.g. Karpenter) will be used to provision nodes for targeted workloads.
+	//
 	// +optional
-	AutoNode *AutoNode `json:"autoNode,omitempty"`
+	AutoNode AutoNode `json:"autoNode,omitzero"`
 
 	// etcd specifies configuration for the control plane etcd cluster. The
 	// default managementType is Managed. Once set, the managementType cannot be
@@ -652,10 +673,11 @@ type HostedClusterSpec struct {
 	// pullSecret is a local reference to a Secret that must have a ".dockerconfigjson" key whose content must be a valid Openshift pull secret JSON.
 	// If the reference is set but none of the above requirements are met, the HostedCluster will enter a degraded state.
 	// TODO(alberto): Signal this in a condition.
-	// This pull secret will be part of every payload generated by the controllers for any NodePool of the HostedCluster
-	// and it will be injected into the container runtime of all NodePools.
-	// Changing this value will trigger a rollout for all existing NodePools in the cluster.
-	// Changing the content of the secret inplace will not trigger a rollout and might result in unpredictable behaviour.
+	// This pull secret is included in NodePool ignition/bootstrap payloads and applied to the container runtime when nodes provision.
+	// Changing this value will trigger a rollout for all existing NodePools in the cluster (for both replace and inplace upgrade types).
+	// Updating the referenced Secret's data in place (without changing this reference) does not trigger that rollout.
+	// In AWS and Azure NodePools using the Replace upgrade strategy, the Secret's data in place changes
+	// will still propagate the updated credentials down to the guest cluster and kubelet config.
 	// +required
 	// +rollout
 	// TODO(alberto): have our own local reference type to include our opinions and avoid transparent changes.
@@ -695,7 +717,10 @@ type HostedClusterSpec struct {
 	// If the reference is set but none of the above requirements are met, the HostedCluster will enter a degraded state.
 	// TODO(alberto): Signal this in a condition.
 	//
-	// +immutable
+	// For key rotation, the secret may optionally contain an "old-key.pub" key whose content is the PEM-encoded
+	// public key of the previous signing key. When present, the kube-apiserver will accept tokens signed by
+	// both the current and previous keys, allowing for graceful key rotation without invalidating existing tokens.
+	//
 	// +optional
 	ServiceAccountSigningKey *corev1.LocalObjectReference `json:"serviceAccountSigningKey,omitempty"`
 
@@ -1022,9 +1047,17 @@ type DNSSpec struct {
 	// publicZoneID is the Hosted Zone ID where all the DNS records that are publicly accessible to the internet exist.
 	// This field is optional and mainly leveraged in cloud environments where the DNS records for the .baseDomain are created by controllers in this zone.
 	// Once set, this value is immutable.
+	//
+	// On Azure, this is a full Azure resource ID for a DNS Zone in the format:
+	//   /subscriptions/{subscriptionID}/resourceGroups/{resourceGroup}/providers/Microsoft.Network/dnsZones/{zoneName}
+	// The maximum length of 258 is derived from Azure resource naming limits
+	// (see https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/resource-name-rules):
+	//   /subscriptions/ (15) + UUID (36) + /resourceGroups/ (16) + resource group name (90)
+	//   + /providers/Microsoft.Network/dnsZones/ (38) + zone name (63) = 258
+	//
 	// +optional
 	// +kubebuilder:validation:XValidation:rule=`oldSelf == "" || self == oldSelf`, message="publicZoneID is immutable"
-	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:MaxLength=258
 	// +kubebuilder:validation:MinLength=1
 	// +immutable
 	PublicZoneID string `json:"publicZoneID,omitempty"`
@@ -1032,9 +1065,17 @@ type DNSSpec struct {
 	// privateZoneID is the Hosted Zone ID where all the DNS records that are only available internally to the cluster exist.
 	// This field is optional and mainly leveraged in cloud environments where the DNS records for the .baseDomain are created by controllers in this zone.
 	// Once set, this value is immutable.
+	//
+	// On Azure, this is a full Azure resource ID for a Private DNS Zone in the format:
+	//   /subscriptions/{subscriptionID}/resourceGroups/{resourceGroup}/providers/Microsoft.Network/privateDnsZones/{zoneName}
+	// The maximum length of 265 is derived from Azure resource naming limits
+	// (see https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/resource-name-rules):
+	//   /subscriptions/ (15) + UUID (36) + /resourceGroups/ (16) + resource group name (90)
+	//   + /providers/Microsoft.Network/privateDnsZones/ (45) + zone name (63) = 265
+	//
 	// +optional
 	// +kubebuilder:validation:XValidation:rule=`oldSelf == "" || self == oldSelf`, message="privateZoneID is immutable"
-	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:MaxLength=265
 	// +kubebuilder:validation:MinLength=1
 	// +immutable
 	PrivateZoneID string `json:"privateZoneID,omitempty"`
@@ -1046,6 +1087,7 @@ type DNSSpec struct {
 // TODO this is available in vanilla kube from 1.31 API servers and in Openshift from 4.16.
 // TODO(alberto): Use CEL cidr library for all these validation when all management clusters are >= 1.31.
 // +kubebuilder:validation:XValidation:rule="(!has(self.machineNetwork) && self.clusterNetwork.all(c, self.serviceNetwork.all(s, c.cidr != s.cidr)) || (has(self.machineNetwork) && (self.machineNetwork.all(m, self.clusterNetwork.all(c, m.cidr != c.cidr)) && self.machineNetwork.all(m, self.serviceNetwork.all(s, m.cidr != s.cidr)) && self.clusterNetwork.all(c, self.serviceNetwork.all(s, c.cidr != s.cidr)))))",message="CIDR ranges in machineNetwork, clusterNetwork, and serviceNetwork must be unique and non-overlapping"
+// +kubebuilder:validation:XValidation:rule="has(self.allocateNodeCIDRs) && self.allocateNodeCIDRs == 'Enabled' ? self.networkType == 'Other' : true",message="allocateNodeCIDRs can only be set to Enabled when networkType is 'Other'"
 type ClusterNetworking struct {
 	// machineNetwork is the list of IP address pools for machines.
 	// This might be used among other things to generate appropriate networking security groups in some clouds providers.
@@ -1096,6 +1138,17 @@ type ClusterNetworking struct {
 	//
 	// +optional
 	APIServer *APIServerNetworking `json:"apiServer,omitempty"`
+
+	// allocateNodeCIDRs controls whether the kube-controller-manager manages node CIDR allocation.
+	// When using networkType=Other, it is recommended to set this field to "Enabled"
+	// if Flannel is used as the CNI, as it relies on this behavior.
+	// Default is "Disabled".
+	// This field can only be set to "Enabled" when NetworkType is "Other". Setting it to "Enabled"
+	// with any other NetworkType will result in a validation error during cluster creation.
+	//
+	// +optional
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="allocateNodeCIDRs is immutable and cannot be modified once set."
+	AllocateNodeCIDRs *AllocateNodeCIDRsMode `json:"allocateNodeCIDRs,omitempty"`
 }
 
 // MachineNetworkEntry is a single IP address block for node IP blocks.
@@ -1184,6 +1237,18 @@ const (
 	Other NetworkType = "Other"
 )
 
+// AllocateNodeCIDRsMode specifies whether the KCM manages node CIDR allocation.
+// +kubebuilder:validation:Enum=Enabled;Disabled
+type AllocateNodeCIDRsMode string
+
+const (
+	// AllocateNodeCIDRsEnabled enables node CIDR allocation by the KCM
+	AllocateNodeCIDRsEnabled AllocateNodeCIDRsMode = "Enabled"
+
+	// AllocateNodeCIDRsDisabled disables node CIDR allocation by the KCM
+	AllocateNodeCIDRsDisabled AllocateNodeCIDRsMode = "Disabled"
+)
+
 // PlatformType is a specific supported infrastructure provider.
 // +kubebuilder:validation:MaxLength=100
 type PlatformType string
@@ -1266,7 +1331,7 @@ type PlatformSpec struct {
 	Azure *AzurePlatformSpec `json:"azure,omitempty"`
 
 	// powervs specifies configuration for clusters running on IBMCloud Power VS Service.
-	// This field is immutable. Once set, It can't be changed.
+	// This field is immutable. Once set, it cannot be changed.
 	//
 	// +optional
 	// +immutable
@@ -1309,46 +1374,302 @@ type Release struct {
 	Image string `json:"image"`
 }
 
-// We expose here internal configuration knobs that won't be exposed to the service.
+// AutoNode specifies the configuration for automatic node provisioning and lifecycle management.
 type AutoNode struct {
-	// provisionerConfig is the implementation used for Node auto provisioning.
+	// provisionerConfig specifies the provisioner used for automatic node management.
 	// +required
-	Provisioner *ProvisionerConfig `json:"provisionerConfig"`
+	Provisioner ProvisionerConfig `json:"provisionerConfig,omitzero"`
 }
 
-// ProvisionerConfig is a enum specifying the strategy for auto managing Nodes.
+// ProvisionerConfig specifies the provisioner used for automatic node management
+// and its associated configuration.
+//
+// +kubebuilder:validation:XValidation:rule="self.name == 'Karpenter' ? has(self.karpenter) : !has(self.karpenter)",message="karpenter is required when name is Karpenter, and forbidden otherwise"
+// +union
 type ProvisionerConfig struct {
-	// name specifies the name of the provisioner to use.
+	// name specifies the name of the provisioner to use for automatic node management.
+	//
 	// +required
+	// +unionDiscriminator
 	// +kubebuilder:validation:Enum=Karpenter
-	Name Provisioner `json:"name"`
+	Name Provisioner `json:"name,omitempty"`
+
 	// karpenter specifies the configuration for the Karpenter provisioner.
+	//
 	// +optional
-	Karpenter *KarpenterConfig `json:"karpenter,omitempty"`
+	// +unionMember
+	Karpenter KarpenterConfig `json:"karpenter,omitzero"`
 }
 
+// KarpenterConfig specifies the configuration for the Karpenter provisioner
+// including the target platform and platform-specific settings.
+//
+// +kubebuilder:validation:XValidation:rule="self.platform == 'AWS' ? has(self.aws) : !has(self.aws)",message="aws is required when platform is AWS, and forbidden otherwise"
+// +union
 type KarpenterConfig struct {
-	// platform specifies the platform-specific configuration for Karpenter.
+	// platform specifies the infrastructure platform that Karpenter should provision nodes on.
+	//
 	// +required
-	Platform PlatformType `json:"platform"`
+	// +unionDiscriminator
+	// +kubebuilder:validation:Enum=AWS
+	Platform PlatformType `json:"platform,omitempty"`
+
 	// aws specifies the AWS-specific configuration for Karpenter.
+	//
 	// +optional
-	AWS *KarpenterAWSConfig `json:"aws,omitempty"`
+	// +unionMember
+	AWS KarpenterAWSConfig `json:"aws,omitzero"`
 }
 
+// KarpenterAWSConfig specifies AWS-specific configuration for the Karpenter provisioner.
 type KarpenterAWSConfig struct {
-	// roleARN specifies the ARN of the Karpenter provisioner.
+	// roleARN specifies the ARN of the IAM role that Karpenter assumes to provision
+	// and manage EC2 instances in the hosted cluster's AWS account.
+	//
+	// The referenced role must have a trust relationship that allows it to be assumed
+	// by the karpenter service account in the hosted cluster via OIDC.
+	// Example:
+	// {
+	// 	"Version": "2012-10-17",
+	// 	"Statement": [
+	// 		{
+	// 			"Effect": "Allow",
+	// 			"Principal": {
+	// 				"Federated": "<oidc-provider-arn>"
+	// 			},
+	// 			"Action": "sts:AssumeRoleWithWebIdentity",
+	// 			"Condition": {
+	// 				"StringEquals": {
+	// 					"<oidc-provider-name>:sub": "system:serviceaccount:kube-system:karpenter"
+	// 				}
+	// 			}
+	// 		}
+	// 	]
+	// }
+	//
+	// The following is an example of the policy document for this role.
+	//
+	// {
+	// 	"Version": "2012-10-17",
+	// 	"Statement": [
+	// 		{
+	// 			"Sid": "AllowScopedEC2InstanceAccessActions",
+	// 			"Effect": "Allow",
+	// 			"Resource": [
+	// 				"arn:*:ec2:*::image/*",
+	// 				"arn:*:ec2:*::snapshot/*",
+	// 				"arn:*:ec2:*:*:security-group/*",
+	// 				"arn:*:ec2:*:*:subnet/*"
+	// 			],
+	// 			"Action": [
+	// 				"ec2:RunInstances",
+	// 				"ec2:CreateFleet"
+	// 			]
+	// 		},
+	// 		{
+	// 			"Sid": "AllowScopedEC2LaunchTemplateAccessActions",
+	// 			"Effect": "Allow",
+	// 			"Resource": "arn:*:ec2:*:*:launch-template/*",
+	// 			"Action": [
+	// 				"ec2:RunInstances",
+	// 				"ec2:CreateFleet"
+	// 			]
+	// 		},
+	// 		{
+	// 			"Sid": "AllowScopedEC2InstanceActionsWithTags",
+	// 			"Effect": "Allow",
+	// 			"Resource": [
+	// 				"arn:*:ec2:*:*:fleet/*",
+	// 				"arn:*:ec2:*:*:instance/*",
+	// 				"arn:*:ec2:*:*:volume/*",
+	// 				"arn:*:ec2:*:*:network-interface/*",
+	// 				"arn:*:ec2:*:*:launch-template/*",
+	// 				"arn:*:ec2:*:*:spot-instances-request/*"
+	// 			],
+	// 			"Action": [
+	// 				"ec2:RunInstances",
+	// 				"ec2:CreateFleet",
+	// 				"ec2:CreateLaunchTemplate"
+	// 			],
+	// 			"Condition": {
+	// 				"StringLike": {
+	// 					"aws:RequestTag/karpenter.sh/nodepool": "*"
+	// 				}
+	// 			}
+	// 		},
+	// 		{
+	// 			"Sid": "AllowScopedResourceCreationTagging",
+	// 			"Effect": "Allow",
+	// 			"Resource": [
+	// 				"arn:*:ec2:*:*:fleet/*",
+	// 				"arn:*:ec2:*:*:instance/*",
+	// 				"arn:*:ec2:*:*:volume/*",
+	// 				"arn:*:ec2:*:*:network-interface/*",
+	// 				"arn:*:ec2:*:*:launch-template/*",
+	// 				"arn:*:ec2:*:*:spot-instances-request/*"
+	// 			],
+	// 			"Action": "ec2:CreateTags",
+	// 			"Condition": {
+	// 				"StringEquals": {
+	// 					"ec2:CreateAction": [
+	// 						"RunInstances",
+	// 						"CreateFleet",
+	// 						"CreateLaunchTemplate"
+	// 					]
+	// 				},
+	// 				"StringLike": {
+	// 					"aws:RequestTag/karpenter.sh/nodepool": "*"
+	// 				}
+	// 			}
+	// 		},
+	// 		{
+	// 			"Sid": "AllowScopedResourceTagging",
+	// 			"Effect": "Allow",
+	// 			"Resource": "arn:*:ec2:*:*:instance/*",
+	// 			"Action": "ec2:CreateTags",
+	// 			"Condition": {
+	// 				"StringLike": {
+	// 					"aws:ResourceTag/karpenter.sh/nodepool": "*"
+	// 				}
+	// 			}
+	// 		},
+	// 		{
+	// 			"Sid": "AllowScopedDeletion",
+	// 			"Effect": "Allow",
+	// 			"Resource": [
+	// 				"arn:*:ec2:*:*:instance/*",
+	// 				"arn:*:ec2:*:*:launch-template/*"
+	// 			],
+	// 			"Action": [
+	// 				"ec2:TerminateInstances",
+	// 				"ec2:DeleteLaunchTemplate"
+	// 			],
+	// 			"Condition": {
+	// 				"StringLike": {
+	// 					"aws:ResourceTag/karpenter.sh/nodepool": "*"
+	// 				}
+	// 			}
+	// 		},
+	// 		{
+	// 			"Sid": "AllowRegionalReadActions",
+	// 			"Effect": "Allow",
+	// 			"Resource": "*",
+	// 			"Action": [
+	// 				"ec2:DescribeImages",
+	// 				"ec2:DescribeInstances",
+	// 				"ec2:DescribeInstanceTypeOfferings",
+	// 				"ec2:DescribeInstanceTypes",
+	// 				"ec2:DescribeLaunchTemplates",
+	// 				"ec2:DescribeSecurityGroups",
+	// 				"ec2:DescribeSpotPriceHistory",
+	// 				"ec2:DescribeSubnets"
+	// 			]
+	// 		},
+	// 		{
+	// 			"Sid": "AllowSSMReadActions",
+	// 			"Effect": "Allow",
+	// 			"Resource": "arn:*:ssm:*::parameter/aws/service/*",
+	// 			"Action": "ssm:GetParameter"
+	// 		},
+	// 		{
+	// 			"Sid": "AllowPricingReadActions",
+	// 			"Effect": "Allow",
+	// 			"Resource": "*",
+	// 			"Action": "pricing:GetProducts"
+	// 		},
+	// 		{
+	// 			"Sid": "AllowInterruptionQueueActions",
+	// 			"Effect": "Allow",
+	// 			"Resource": "*",
+	// 			"Action": [
+	// 				"sqs:DeleteMessage",
+	// 				"sqs:GetQueueUrl",
+	// 				"sqs:ReceiveMessage"
+	// 			]
+	// 		},
+	// 		{
+	// 			"Sid": "AllowPassingInstanceRole",
+	// 			"Effect": "Allow",
+	// 			"Resource": "arn:*:iam::*:role/*",
+	// 			"Action": "iam:PassRole",
+	// 			"Condition": {
+	// 				"StringEquals": {
+	// 					"iam:PassedToService": [
+	// 						"ec2.amazonaws.com",
+	// 						"ec2.amazonaws.com.cn"
+	// 					]
+	// 				}
+	// 			}
+	// 		},
+	// 		{
+	// 			"Sid": "AllowScopedInstanceProfileCreationActions",
+	// 			"Effect": "Allow",
+	// 			"Resource": "arn:*:iam::*:instance-profile/*",
+	// 			"Action": [
+	// 				"iam:CreateInstanceProfile"
+	// 			],
+	// 			"Condition": {
+	// 				"StringLike": {
+	// 					"aws:RequestTag/karpenter.k8s.aws/ec2nodeclass": "*"
+	// 				}
+	// 			}
+	// 		},
+	// 		{
+	// 			"Sid": "AllowScopedInstanceProfileTagActions",
+	// 			"Effect": "Allow",
+	// 			"Resource": "arn:*:iam::*:instance-profile/*",
+	// 			"Action": [
+	// 				"iam:TagInstanceProfile"
+	// 			],
+	// 			"Condition": {
+	// 				"StringLike": {
+	// 					"aws:ResourceTag/karpenter.k8s.aws/ec2nodeclass": "*",
+	// 					"aws:RequestTag/karpenter.k8s.aws/ec2nodeclass": "*"
+	// 				}
+	// 			}
+	// 		},
+	// 		{
+	// 			"Sid": "AllowScopedInstanceProfileActions",
+	// 			"Effect": "Allow",
+	// 			"Resource": "arn:*:iam::*:instance-profile/*",
+	// 			"Action": [
+	// 				"iam:AddRoleToInstanceProfile",
+	// 				"iam:RemoveRoleFromInstanceProfile",
+	// 				"iam:DeleteInstanceProfile"
+	// 			],
+	// 			"Condition": {
+	// 				"StringLike": {
+	// 					"aws:ResourceTag/karpenter.k8s.aws/ec2nodeclass": "*"
+	// 				}
+	// 			}
+	// 		},
+	// 		{
+	// 			"Sid": "AllowInstanceProfileReadActions",
+	// 			"Effect": "Allow",
+	// 			"Resource": "arn:*:iam::*:instance-profile/*",
+	// 			"Action": "iam:GetInstanceProfile"
+	// 		},
+	// 		{
+	// 			"Sid": "AllowUnscopedInstanceProfileListAction",
+	// 			"Effect": "Allow",
+	// 			"Resource": "*",
+	// 			"Action": "iam:ListInstanceProfiles"
+	// 		}
+	// 	]
+	// }
+	//
 	// +required
-	// +kubebuilder:validation:MaxLength=255
-	RoleARN string `json:"roleARN"`
+	// +kubebuilder:validation:XValidation:rule="self.matches('^arn:(aws|aws-cn|aws-us-gov):iam::[0-9]{12}:role/.+$')",message="roleARN must be a valid AWS IAM role ARN (e.g. arn:aws:iam::123456789012:role/MyRole)"
+	// +kubebuilder:validation:MaxLength=2048
+	RoleARN string `json:"roleARN,omitempty"`
 }
 
 const (
+	// ProvisionerKarpenter indicates that Karpenter is used for automatic node provisioning.
 	ProvisionerKarpenter Provisioner = "Karpenter"
 )
 
-// provisioner is a enum specifying the strategy for auto managing Nodes.
-// +kubebuilder:validation:Enum=Karpenter
+// Provisioner is the name of a supported node provisioner.
 type Provisioner string
 
 // Configures when and how to scale down cluster nodes.
@@ -1580,7 +1901,15 @@ type EtcdSpec struct {
 type ManagedEtcdSpec struct {
 	// storage specifies how etcd data is persisted.
 	// +required
+	// +kubebuilder:validation:XValidation:rule="has(self.restoreSnapshotURL) == has(oldSelf.restoreSnapshotURL)",message="restoreSnapshotURL cannot be added or removed after creation"
 	Storage ManagedEtcdStorageSpec `json:"storage"`
+
+	// backup defines the backup configuration for managed etcd, including
+	// optional KMS key settings for artifact encryption in cloud storage.
+	// This configuration is only used when an HCPEtcdBackup CR exists.
+	// +optional
+	// +openshift:enable:FeatureGate=HCPEtcdBackup
+	Backup HCPEtcdBackupConfig `json:"backup,omitzero"`
 }
 
 // ManagedEtcdStorageType is a storage type for an etcd cluster.
@@ -1624,6 +1953,8 @@ type ManagedEtcdStorageSpec struct {
 	// +kubebuilder:validation:MaxItems=1
 	// +kubebuilder:validation:items:MaxLength=1024
 	// +kubebuilder:validation:XValidation:rule="self.size() <= 1", message="RestoreSnapshotURL shouldn't contain more than 1 entry"
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf", message="restoreSnapshotURL is immutable"
+	// +kubebuilder:validation:XValidation:rule="self.size() == 0 || self[0].matches('^(https|s3)://.*')", message="restoreSnapshotURL must be a valid URL with scheme https or s3"
 	RestoreSnapshotURL []string `json:"restoreSnapshotURL,omitempty"`
 }
 
@@ -1786,6 +2117,12 @@ type HostedClusterStatus struct {
 	// +kubebuilder:validation:MaxItems=100
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
+	// controlPlaneVersion tracks the rollout status of the control plane
+	// components running on the management cluster, independently from
+	// the data-plane version reported in the version field.
+	// +optional
+	ControlPlaneVersion ControlPlaneVersionStatus `json:"controlPlaneVersion,omitzero"`
+
 	// version is the status of the release version applied to the
 	// HostedCluster.
 	// +optional
@@ -1836,9 +2173,49 @@ type HostedClusterStatus struct {
 	// +optional
 	Platform *PlatformStatus `json:"platform,omitempty"`
 
+	// autoNode contains the observed state of the autoNode (Karpenter) provisioner.
+	// +optional
+	AutoNode AutoNodeStatus `json:"autoNode,omitzero"`
+
 	// configuration contains the cluster configuration status of the HostedCluster
 	// +optional
 	Configuration *ConfigurationStatus `json:"configuration,omitempty"`
+
+	// lastSuccessfulEtcdBackupURL is the cloud storage URL of the most recent
+	// successful etcd backup snapshot. Persisted here because HCPEtcdBackup CRs
+	// are ephemeral and may be deleted by retention policies.
+	// +openshift:enable:FeatureGate=HCPEtcdBackup
+	// +optional
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=2048
+	// +kubebuilder:validation:XValidation:rule="self.matches('^(https|s3)://.*')",message="lastSuccessfulEtcdBackupURL must be a valid URL with scheme https or s3"
+	LastSuccessfulEtcdBackupURL string `json:"lastSuccessfulEtcdBackupURL,omitempty"`
+}
+
+// AutoNodeStatus contains the observed state of the AutoNode provisioner.
+// +kubebuilder:validation:MinProperties=1
+type AutoNodeStatus struct {
+	// nodeCount is the number of nodes fully provisioned by Karpenter.
+	// These are node objects that exist in the cluster and carry the karpenter.sh/nodepool label.
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	NodeCount *int32 `json:"nodeCount,omitempty"`
+
+	// nodeClaimCount is the total number of NodeClaims managed by Karpenter.
+	// This represents what Karpenter intends to provision, whether or not the node object exists yet.
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	NodeClaimCount *int32 `json:"nodeClaimCount,omitempty"`
+
+	// vcpus is the total number of virtual CPUs across all Karpenter-managed nodes
+	// that have registered and reported capacity. This is the sum of CPU capacity
+	// from each NodeClaim whose corresponding node exists (status.nodeName is set).
+	// This value is 0 when no Karpenter nodes are provisioned.
+	// Used by the metrics collector for billing aggregation.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=1000000
+	// +optional
+	VCPUs *int32 `json:"vcpus,omitempty"`
 }
 
 // PlatformStatus contains platform-specific status
@@ -2017,11 +2394,14 @@ type OperatorConfiguration struct {
 // +kubebuilder:storageversion
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Version",type="string",JSONPath=".status.version.history[?(@.state==\"Completed\")].version",description="Version"
+// +kubebuilder:printcolumn:name="CP Version",type="string",JSONPath=".status.controlPlaneVersion.history[?(@.state==\"Completed\")].version",description="Control Plane Version"
 // +kubebuilder:printcolumn:name="KubeConfig",type="string",JSONPath=".status.kubeconfig.name",description="KubeConfig Secret"
 // +kubebuilder:printcolumn:name="Progress",type="string",JSONPath=".status.version.history[?(@.state!=\"\")].state",description="Progress"
 // +kubebuilder:printcolumn:name="Available",type="string",JSONPath=".status.conditions[?(@.type==\"Available\")].status",description="Available"
 // +kubebuilder:printcolumn:name="Progressing",type="string",JSONPath=".status.conditions[?(@.type==\"Progressing\")].status",description="Progressing"
 // +kubebuilder:printcolumn:name="Message",type="string",JSONPath=".status.conditions[?(@.type==\"Available\")].message",description="Message"
+// +kubebuilder:printcolumn:name="CP Progress",type="string",JSONPath=".status.controlPlaneVersion.history[0].state",description="Control Plane Progress",priority=1
+// +kubebuilder:printcolumn:name="DP Progress",type="string",JSONPath=".status.version.history[0].state",description="Data Plane Progress",priority=1
 type HostedCluster struct {
 	metav1.TypeMeta `json:",inline"`
 	// metadata is the metadata for the HostedCluster.
