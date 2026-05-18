@@ -212,8 +212,8 @@ github.com/openshift/hive/apis v0.0.0-20241220022629-3f49f26197ff h1:6C1z4xMAruy
 github.com/openshift/hive/apis v0.0.0-20241220022629-3f49f26197ff/go.mod h1:1vBNCcWNpQyFCz83PWYT/lHUFJ9ost2t5FijHElh6gQ=
 github.com/openshift/hypershift/api v0.0.0-20260318164553-2d4aedcf7899 h1:Da2btnE0P0Y1y0VX0YYKns3vu0yIxTCcU5bYY+gqcTM=
 github.com/openshift/hypershift/api v0.0.0-20260318164553-2d4aedcf7899/go.mod h1:dN8V9JjUjvvJaF3SJFSkb5p2H3CkjwcFDMlABEkQyuU=
-github.com/openshift/velero v0.10.2-0.20250514165055-8fbcf3a8da11 h1:/BjkW8HljIX96clCuv/V+PzShD3coVcNilCXd/Axlfo=
-github.com/openshift/velero v0.10.2-0.20250514165055-8fbcf3a8da11/go.mod h1:+wInt9pLqlRiUZAWsO5eSxLZK9Q3jSV9MFaUrBfvGN0=
+github.com/openshift/velero v0.10.2-0.20260501155251-e8ffd8d87b42 h1:pPH6ZdfNSRFHZKOWnYFK2zRF6PrBtUiKwZ42lg2nA+Q=
+github.com/openshift/velero v0.10.2-0.20260501155251-e8ffd8d87b42/go.mod h1:KEpTfFgye9RJEXdq5BpYS2e07GEQiI/8IBKpnQp1X54=
 github.com/pkg/errors v0.9.1 h1:FEBLx1zS214owpjy7qsBeixbURkuhQAwrK5UwLGTwt4=
 github.com/pkg/errors v0.9.1/go.mod h1:bwawxfHBFNV+L2hUp1rHADufV3IMtnDRdf1r5NINEl0=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
