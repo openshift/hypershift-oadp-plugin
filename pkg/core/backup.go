@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	common "github.com/openshift/hypershift-oadp-plugin/pkg/common"
@@ -27,10 +28,11 @@ type BackupPlugin struct {
 	log logrus.FieldLogger
 	ctx context.Context
 
-	client    crclient.Client
-	config    map[string]string
-	validator validation.BackupValidator
-	hcp       *hyperv1.HostedControlPlane
+	client      crclient.Client
+	config      map[string]string
+	validator   validation.BackupValidator
+	hcp         *hyperv1.HostedControlPlane
+	hcpNotFound bool
 	*plugtypes.BackupOptions
 
 	// Etcd backup orchestration
@@ -118,7 +120,17 @@ func (p *BackupPlugin) Name() string {
 }
 
 func (p *BackupPlugin) AppliesTo() (velero.ResourceSelector, error) {
-	return velero.ResourceSelector{}, nil
+	return velero.ResourceSelector{
+		IncludedResources: slices.Concat(
+			plugtypes.BackupCommonResources,
+			plugtypes.BackupAWSResources,
+			plugtypes.BackupAzureResources,
+			plugtypes.BackupIBMPowerVSResources,
+			plugtypes.BackupOpenStackResources,
+			plugtypes.BackupKubevirtResources,
+			plugtypes.BackupAgentResources,
+		),
+	}, nil
 }
 
 // Execute allows the ItemAction to perform arbitrary logic with the item being backed up,
@@ -131,12 +143,17 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 		return item, nil, nil
 	}
 
+	if p.hcpNotFound {
+		return item, nil, nil
+	}
+
 	if p.hcp == nil {
 		var err error
 		p.hcp, err = common.GetHCP(ctx, backup.Spec.IncludedNamespaces, p.client, p.log)
 		if err != nil {
 			if apierrors.IsNotFound(err) {
-				p.log.Infof("HCP not found, assuming not hypershift cluster to backup")
+				p.log.Infof("HCP not found in included namespaces, skipping plugin")
+				p.hcpNotFound = true
 				return item, nil, nil
 			}
 			return nil, nil, fmt.Errorf("error getting HCP namespace: %v", err)

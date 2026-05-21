@@ -89,6 +89,65 @@ func newTestBackup() *velerov1.Backup {
 	}
 }
 
+func TestAppliesToReturnsSpecificResources(t *testing.T) {
+	g := NewWithT(t)
+	bp := newTestBackupPlugin()
+
+	selector, err := bp.AppliesTo()
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(selector.IncludedResources).NotTo(BeEmpty(), "AppliesTo must not return an empty resource selector")
+	g.Expect(selector.IncludedResources).To(ContainElement("hostedcontrolplanes"))
+	g.Expect(selector.IncludedResources).To(ContainElement("hostedclusters"))
+	g.Expect(selector.IncludedResources).To(ContainElement("pods"))
+}
+
+func TestExecuteSkipsWhenHCPNotFound(t *testing.T) {
+	g := NewWithT(t)
+
+	scheme := common.CustomScheme
+
+	hcpCRD := &apiextensionsv1.CustomResourceDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "hostedcontrolplanes.hypershift.openshift.io"},
+	}
+
+	client := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithRuntimeObjects(hcpCRD).
+		Build()
+
+	bp := &BackupPlugin{
+		log:              logrus.New(),
+		ctx:              context.Background(),
+		client:           client,
+		config:           map[string]string{},
+		validator:        &mockValidator{},
+		BackupOptions:    &plugtypes.BackupOptions{},
+		hoNamespace:      "hypershift",
+		etcdBackupMethod: common.EtcdBackupMethodVolume,
+	}
+
+	backup := &velerov1.Backup{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-backup", Namespace: "openshift-adp"},
+		Spec: velerov1.BackupSpec{
+			IncludedNamespaces: []string{"clusters-test"},
+			IncludedResources:  []string{"hostedcontrolplanes"},
+		},
+	}
+
+	item := newUnstructuredItem("Secret", "v1", "my-secret", "clusters-test")
+
+	// First call should gracefully skip (no HCP in namespace)
+	result, _, err := bp.Execute(item, backup)
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(result).NotTo(BeNil(), "should return item, not error")
+	g.Expect(bp.hcpNotFound).To(BeTrue(), "should cache hcpNotFound=true")
+
+	// Second call should return immediately without re-querying
+	result2, _, err2 := bp.Execute(item, backup)
+	g.Expect(err2).NotTo(HaveOccurred())
+	g.Expect(result2).NotTo(BeNil())
+}
+
 func TestExecute(t *testing.T) {
 	falseVal := false
 
