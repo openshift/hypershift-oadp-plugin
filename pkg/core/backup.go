@@ -143,6 +143,7 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 		return item, nil, nil
 	}
 
+	// set to true below when GetHCP returns NotFound for this backup's namespaces
 	if p.hcpNotFound {
 		return item, nil, nil
 	}
