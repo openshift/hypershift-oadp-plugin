@@ -174,7 +174,7 @@ func GetHCP(ctx context.Context, nsList []string, c crclient.Client, log logrus.
 	}
 	return nil, apierrors.NewNotFound(
 		hyperv1.Resource("hostedcontrolplanes"),
-		"no HostedControlPlane found in provided namespaces",
+		strings.Join(nsList, ","),
 	)
 }
 
