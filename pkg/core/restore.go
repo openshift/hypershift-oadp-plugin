@@ -3,7 +3,6 @@ package core
 import (
 	"context"
 	"fmt"
-	"slices"
 	"strings"
 
 	hive "github.com/openshift/hive/apis/hive/v1"
@@ -110,15 +109,7 @@ func (p *RestorePlugin) Name() string {
 
 func (p *RestorePlugin) AppliesTo() (velero.ResourceSelector, error) {
 	return velero.ResourceSelector{
-		IncludedResources: slices.Concat(
-			plugtypes.BackupCommonResources,
-			plugtypes.BackupAWSResources,
-			plugtypes.BackupAzureResources,
-			plugtypes.BackupIBMPowerVSResources,
-			plugtypes.BackupOpenStackResources,
-			plugtypes.BackupKubevirtResources,
-			plugtypes.BackupAgentResources,
-		),
+		IncludedResources: plugtypes.AllPluginResources,
 	}, nil
 }
 

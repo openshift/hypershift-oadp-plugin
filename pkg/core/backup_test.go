@@ -96,9 +96,31 @@ func TestAppliesToReturnsSpecificResources(t *testing.T) {
 	selector, err := bp.AppliesTo()
 	g.Expect(err).NotTo(HaveOccurred())
 	g.Expect(selector.IncludedResources).NotTo(BeEmpty(), "AppliesTo must not return an empty resource selector")
-	g.Expect(selector.IncludedResources).To(ContainElement("hostedcontrolplanes"))
-	g.Expect(selector.IncludedResources).To(ContainElement("hostedclusters"))
-	g.Expect(selector.IncludedResources).To(ContainElement("pods"))
+
+	// Per-provider happy-path assertions: at least one representative resource per platform.
+	// These ensure that accidentally dropping a platform slice is caught immediately.
+	for _, tc := range []struct {
+		provider  string
+		resources []string
+	}{
+		{"common", plugtypes.BackupCommonResources},
+		{"aws", plugtypes.BackupAWSResources},
+		{"azure", plugtypes.BackupAzureResources},
+		{"ibmpowervs", plugtypes.BackupIBMPowerVSResources},
+		{"openstack", plugtypes.BackupOpenStackResources},
+		{"kubevirt", plugtypes.BackupKubevirtResources},
+		{"agent", plugtypes.BackupAgentResources},
+	} {
+		for _, r := range tc.resources {
+			g.Expect(selector.IncludedResources).To(
+				ContainElement(r),
+				"provider %q resource %q must appear in AppliesTo", tc.provider, r,
+			)
+		}
+	}
+
+	// Sad-path assertion: unknown resources must NOT appear.
+	g.Expect(selector.IncludedResources).NotTo(ContainElement("completelyunknownresource"))
 }
 
 func TestExecuteSkipsWhenHCPNotFound(t *testing.T) {

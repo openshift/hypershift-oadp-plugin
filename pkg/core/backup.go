@@ -3,7 +3,6 @@ package core
 import (
 	"context"
 	"fmt"
-	"slices"
 	"strings"
 
 	common "github.com/openshift/hypershift-oadp-plugin/pkg/common"
@@ -121,15 +120,7 @@ func (p *BackupPlugin) Name() string {
 
 func (p *BackupPlugin) AppliesTo() (velero.ResourceSelector, error) {
 	return velero.ResourceSelector{
-		IncludedResources: slices.Concat(
-			plugtypes.BackupCommonResources,
-			plugtypes.BackupAWSResources,
-			plugtypes.BackupAzureResources,
-			plugtypes.BackupIBMPowerVSResources,
-			plugtypes.BackupOpenStackResources,
-			plugtypes.BackupKubevirtResources,
-			plugtypes.BackupAgentResources,
-		),
+		IncludedResources: plugtypes.AllPluginResources,
 	}, nil
 }
 
@@ -157,7 +148,7 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 				p.hcpNotFound = true
 				return item, nil, nil
 			}
-			return nil, nil, fmt.Errorf("error getting HCP namespace: %v", err)
+			return nil, nil, fmt.Errorf("error getting HCP namespace: %w", err)
 		}
 	}
 
