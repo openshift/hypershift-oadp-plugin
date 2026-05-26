@@ -17,7 +17,7 @@ var (
 	BackupIBMPowerVSResources = []string{"ibmpowervsmachines", "ibmpowervsmachinetemplates", "ibmpowervsclusters", "ibmpowervsclustertemplates"}
 	BackupOpenStackResources  = []string{"openstackmachines", "openstackmachinetemplates", "openstackclusters", "openstackclustertemplates"}
 	BackupKubevirtResources   = []string{"kubevirtcluster", "kubevirtmachinetemplate", "datavolume"}
-	BackupAgentResources      = []string{"agents", "agentmachines", "agentmachinetemplates", "agentmachinepools", "agentclusters", "nmstateconfigs", "nmstateconfig", "infraenvs", "infraenv"}
+	BackupAgentResources      = []string{"agents", "agentmachines", "agentmachinetemplates", "agentmachinepools", "agentclusters", "clusterdeployments", "clusterdeployment", "nmstateconfigs", "nmstateconfig", "infraenvs", "infraenv"}
 
 	// AllPluginResources is the combined set of all per-platform resource lists.
 	// Use this single source of truth in AppliesTo() for both backup and restore plugins.
