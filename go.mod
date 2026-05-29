@@ -7,8 +7,8 @@ toolchain go1.26.3
 require (
 	github.com/kubernetes-csi/external-snapshotter/client/v8 v8.4.0
 	github.com/onsi/gomega v1.41.0
-	github.com/openshift/hive/apis v0.0.0-20260519181045-ab4b2490385a
-	github.com/openshift/hypershift/api v0.0.0-20260524140149-6d994e441608
+	github.com/openshift/hive/apis v0.0.0-20260529063700-91d3589f67fc
+	github.com/openshift/hypershift/api v0.0.0-20260529071121-9b67f7bb2879
 	github.com/sirupsen/logrus v1.9.4
 	github.com/vmware-tanzu/velero v1.18.1
 	k8s.io/api v0.35.4
@@ -37,7 +37,7 @@ require (
 	github.com/google/gnostic-models v0.7.1 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/openshift/api v0.0.0-20260521125114-09730f85d883 // indirect
+	github.com/openshift/api v0.0.0-20260528061300-9f553042f9ae // indirect
 	github.com/openshift/installer v1.4.22-ec5 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/client_golang v1.23.2 // indirect
@@ -84,7 +84,7 @@ require (
 	golang.org/x/term v0.43.0 // indirect
 	golang.org/x/text v0.37.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260523011958-0a33c5d7ca68 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect
 	google.golang.org/grpc v1.81.1 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
