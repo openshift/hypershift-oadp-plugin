@@ -8,6 +8,7 @@ import (
 
 	. "github.com/onsi/gomega"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	hyperv1 "github.com/openshift/hypershift/api/hypershift/v1beta1"
@@ -321,6 +322,21 @@ func TestGetHCP(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGetHCPReturnsNotFoundError(t *testing.T) {
+	g := NewWithT(t)
+
+	scheme := runtime.NewScheme()
+	_ = hyperv1.AddToScheme(scheme)
+
+	c := fake.NewClientBuilder().WithScheme(scheme).Build()
+	log := logrus.New()
+
+	hcp, err := GetHCP(context.TODO(), []string{"ns1", "ns2"}, c, log)
+	g.Expect(hcp).To(BeNil())
+	g.Expect(err).To(HaveOccurred())
+	g.Expect(apierrors.IsNotFound(err)).To(BeTrue(), "GetHCP should return a NotFound API error when no HCP exists")
 }
 
 func TestAddLabel(t *testing.T) {

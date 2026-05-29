@@ -89,6 +89,87 @@ func newTestBackup() *velerov1.Backup {
 	}
 }
 
+func TestAppliesToReturnsSpecificResources(t *testing.T) {
+	g := NewWithT(t)
+	bp := newTestBackupPlugin()
+
+	selector, err := bp.AppliesTo()
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(selector.IncludedResources).NotTo(BeEmpty(), "AppliesTo must not return an empty resource selector")
+
+	// Per-provider happy-path assertions: at least one representative resource per platform.
+	// These ensure that accidentally dropping a platform slice is caught immediately.
+	for _, tc := range []struct {
+		provider  string
+		resources []string
+	}{
+		{"common", plugtypes.BackupCommonResources},
+		{"aws", plugtypes.BackupAWSResources},
+		{"azure", plugtypes.BackupAzureResources},
+		{"ibmpowervs", plugtypes.BackupIBMPowerVSResources},
+		{"openstack", plugtypes.BackupOpenStackResources},
+		{"kubevirt", plugtypes.BackupKubevirtResources},
+		{"agent", plugtypes.BackupAgentResources},
+	} {
+		for _, r := range tc.resources {
+			g.Expect(selector.IncludedResources).To(
+				ContainElement(r),
+				"provider %q resource %q must appear in AppliesTo", tc.provider, r,
+			)
+		}
+	}
+
+	// Sad-path assertion: unknown resources must NOT appear.
+	g.Expect(selector.IncludedResources).NotTo(ContainElement("completelyunknownresource"))
+}
+
+func TestExecuteSkipsWhenHCPNotFound(t *testing.T) {
+	g := NewWithT(t)
+
+	scheme := common.CustomScheme
+
+	hcpCRD := &apiextensionsv1.CustomResourceDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "hostedcontrolplanes.hypershift.openshift.io"},
+	}
+
+	client := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithRuntimeObjects(hcpCRD).
+		Build()
+
+	bp := &BackupPlugin{
+		log:              logrus.New(),
+		ctx:              context.Background(),
+		client:           client,
+		config:           map[string]string{},
+		validator:        &mockValidator{},
+		BackupOptions:    &plugtypes.BackupOptions{},
+		hoNamespace:      "hypershift",
+		etcdBackupMethod: common.EtcdBackupMethodVolume,
+	}
+
+	backup := &velerov1.Backup{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-backup", Namespace: "openshift-adp"},
+		Spec: velerov1.BackupSpec{
+			IncludedNamespaces: []string{"clusters-test"},
+			IncludedResources:  []string{"hostedcontrolplanes"},
+		},
+	}
+
+	item := newUnstructuredItem("Secret", "v1", "my-secret", "clusters-test")
+
+	// First call should gracefully skip (no HCP in namespace)
+	result, _, err := bp.Execute(item, backup)
+	g.Expect(err).NotTo(HaveOccurred())
+	g.Expect(result).NotTo(BeNil(), "should return item, not error")
+	g.Expect(bp.hcpNotFound).To(BeTrue(), "should cache hcpNotFound=true")
+
+	// Second call should return immediately without re-querying
+	result2, _, err2 := bp.Execute(item, backup)
+	g.Expect(err2).NotTo(HaveOccurred())
+	g.Expect(result2).NotTo(BeNil())
+}
+
 func TestExecute(t *testing.T) {
 	falseVal := false
 
