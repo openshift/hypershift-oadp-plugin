@@ -161,13 +161,13 @@ github.com/onsi/gomega/matchers/support/goraph/edge
 github.com/onsi/gomega/matchers/support/goraph/node
 github.com/onsi/gomega/matchers/support/goraph/util
 github.com/onsi/gomega/types
-# github.com/openshift/api v0.0.0-20260521125114-09730f85d883
+# github.com/openshift/api v0.0.0-20260528061300-9f553042f9ae
 ## explicit; go 1.25.0
 github.com/openshift/api/config/v1
 github.com/openshift/api/machine/v1
 github.com/openshift/api/machine/v1beta1
 github.com/openshift/api/operator/v1
-# github.com/openshift/hive/apis v0.0.0-20260519181045-ab4b2490385a
+# github.com/openshift/hive/apis v0.0.0-20260529063700-91d3589f67fc
 ## explicit; go 1.25.0
 github.com/openshift/hive/apis/hive/v1
 github.com/openshift/hive/apis/hive/v1/agent
@@ -182,7 +182,7 @@ github.com/openshift/hive/apis/hive/v1/nutanix
 github.com/openshift/hive/apis/hive/v1/openstack
 github.com/openshift/hive/apis/hive/v1/vsphere
 github.com/openshift/hive/apis/scheme
-# github.com/openshift/hypershift/api v0.0.0-20260524140149-6d994e441608
+# github.com/openshift/hypershift/api v0.0.0-20260529071121-9b67f7bb2879
 ## explicit; go 1.25.7
 github.com/openshift/hypershift/api/hypershift/v1beta1
 github.com/openshift/hypershift/api/ibmcapi
@@ -334,7 +334,7 @@ golang.org/x/time/rate
 # gomodules.xyz/jsonpatch/v2 v2.5.0
 ## explicit; go 1.20
 gomodules.xyz/jsonpatch/v2
-# google.golang.org/genproto/googleapis/rpc v0.0.0-20260523011958-0a33c5d7ca68
+# google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa
 ## explicit; go 1.25.0
 google.golang.org/genproto/googleapis/rpc/status
 # google.golang.org/grpc v1.81.1
