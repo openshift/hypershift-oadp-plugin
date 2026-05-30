@@ -1,8 +1,6 @@
 module github.com/openshift/hypershift-oadp-plugin
 
-go 1.25.0
-
-toolchain go1.25.8
+go 1.25.8
 
 require (
 	github.com/kubernetes-csi/external-snapshotter/client/v8 v8.2.0
@@ -92,4 +90,4 @@ require (
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
 
-replace github.com/vmware-tanzu/velero => github.com/openshift/velero v0.10.2-0.20250514165055-8fbcf3a8da11
+replace github.com/vmware-tanzu/velero => github.com/openshift/velero v0.10.2-0.20260501155251-e8ffd8d87b42
