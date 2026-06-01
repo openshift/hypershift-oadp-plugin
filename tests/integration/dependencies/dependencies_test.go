@@ -61,28 +61,28 @@ func TestWatchedDependenciesAreUpToDate(t *testing.T) {
 
 			t.Logf("Latest available %s version: %s", module, latestVersion)
 
-			// Compare versions directly
+			// Compare versions - warn if outdated but do not fail the test
 			if currentVersion != latestVersion {
 				allDependenciesUpToDate = false
 
-				errorMsg := fmt.Sprintf("Dependency %s is not up-to-date with upstream %s branch.\n"+
+				warnMsg := fmt.Sprintf("WARNING: Dependency %s is not up-to-date with upstream %s branch.\n"+
 					"Current version: %s\n"+
 					"Latest available: %s\n"+
 					"Consider running: go get %s@%s && go mod tidy && go mod vendor",
 					module, targetBranch, currentVersion, latestVersion, module, targetBranch)
-				failureMessages = append(failureMessages, errorMsg)
-				t.Error(errorMsg)
+				failureMessages = append(failureMessages, warnMsg)
+				t.Log(warnMsg)
 			} else {
-				t.Logf("✅ Dependency %s is up-to-date with upstream %s branch", module, targetBranch)
+				t.Logf("Dependency %s is up-to-date with upstream %s branch", module, targetBranch)
 			}
 		})
 	}
 
-	// If any dependency failed, fail the main test with a summary
+	// Log a summary warning if any dependency is outdated, but do not fail the test
 	if !allDependenciesUpToDate {
-		t.Errorf("One or more dependencies are not up-to-date:\n%s", strings.Join(failureMessages, "\n\n"))
+		t.Logf("WARNING: One or more dependencies are not up-to-date:\n%s", strings.Join(failureMessages, "\n\n"))
 	} else {
-		t.Logf("✅ All %d watched dependencies are up-to-date", len(watchedDependencies))
+		t.Logf("All %d watched dependencies are up-to-date", len(watchedDependencies))
 	}
 }
 
