@@ -49,6 +49,68 @@ const (
 
 // TestMapBSLToStorage covers mapBSLToStorage (AWS, Azure, unsupported, key prefixes) and
 // mapAWSBSLToStorage / mapAzureBSLToStorage in one table.
+func TestSafeResourceName(t *testing.T) {
+	tests := []struct {
+		name       string
+		prefix     string
+		inputName  string
+		randLen    int
+		wantMaxLen int
+		wantPrefix string
+	}{
+		{
+			name:       "When name is short, It Should not truncate",
+			prefix:     "oadp-",
+			inputName:  "test-backup",
+			randLen:    4,
+			wantMaxLen: 63,
+			wantPrefix: "oadp-test-backup-",
+		},
+		{
+			name:       "When name is exactly at limit, It Should not truncate",
+			prefix:     "oadp-",
+			inputName:  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", // 53 chars
+			randLen:    4,
+			wantMaxLen: 63,
+			wantPrefix: "oadp-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-",
+		},
+		{
+			name:       "When name exceeds limit by one, It Should truncate to 53",
+			prefix:     "oadp-",
+			inputName:  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaX", // 54 chars
+			randLen:    4,
+			wantMaxLen: 63,
+			wantPrefix: "oadp-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-",
+		},
+		{
+			name:       "When name is very long schedule-style, It Should truncate to fit 63 bytes",
+			prefix:     "oadp-",
+			inputName:  "2q8dk2uepjpfcvm4lqg92rlpjshj219a-hourly-20260512140053",
+			randLen:    4,
+			wantMaxLen: 63,
+			wantPrefix: "oadp-",
+		},
+		{
+			name:       "When truncation leaves trailing hyphen, It Should trim it",
+			prefix:     "oadp-",
+			inputName:  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbb", // hyphen at position 53
+			randLen:    4,
+			wantMaxLen: 63,
+			wantPrefix: "oadp-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+			result := safeResourceName(tt.prefix, tt.inputName, tt.randLen)
+			g.Expect(len(result)).To(BeNumerically("<=", tt.wantMaxLen), "result %q is %d bytes, exceeds %d", result, len(result), tt.wantMaxLen)
+			g.Expect(result).To(HavePrefix(tt.wantPrefix))
+			g.Expect(result).NotTo(HaveSuffix("--"), "should not have double hyphen before random suffix")
+		})
+	}
+}
+
 func TestMapBSLToStorage(t *testing.T) {
 	o := &Orchestrator{log: logrus.New()}
 	tests := []struct {
@@ -271,27 +333,22 @@ func TestCopyCredentialSecret(t *testing.T) {
 	tests := []struct {
 		name      string
 		objects   []crclient.Object
-		bsl       *velerov1.BackupStorageLocation
+		credRef   *corev1.SecretKeySelector
 		wantErr   bool
 		errSubstr string
 		assert    func(*GomegaWithT, string, crclient.Client)
 	}{
 		{
-			name: "When copyCredentialSecret runs with BSL credential key cloud, It Should remap to credentials key in destination",
+			name: "When copyCredentialSecret runs with credential key cloud, It Should remap to credentials key in destination",
 			objects: []crclient.Object{
 				&corev1.Secret{
 					ObjectMeta: metav1.ObjectMeta{Name: "cloud-credentials", Namespace: "openshift-adp"},
 					Data:       map[string][]byte{"cloud": []byte("aws-creds-data")},
 				},
 			},
-			bsl: &velerov1.BackupStorageLocation{
-				ObjectMeta: metav1.ObjectMeta{Name: "default"},
-				Spec: velerov1.BackupStorageLocationSpec{
-					Credential: &corev1.SecretKeySelector{
-						LocalObjectReference: corev1.LocalObjectReference{Name: "cloud-credentials"},
-						Key:                  "cloud",
-					},
-				},
+			credRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: "cloud-credentials"},
+				Key:                  "cloud",
 			},
 			assert: func(g *GomegaWithT, dstName string, client crclient.Client) {
 				g.Expect(dstName).To(Equal("etcd-backup-creds-my-backup"))
@@ -300,7 +357,10 @@ func TestCopyCredentialSecret(t *testing.T) {
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(copied.Data).To(HaveKey("credentials"))
 				g.Expect(copied.Data["credentials"]).To(Equal([]byte("aws-creds-data")))
-				g.Expect(copied.Data).NotTo(HaveKey("cloud"))
+				// Original key "cloud" is preserved alongside "credentials"
+				// so the controller can auto-detect credential type.
+				g.Expect(copied.Data).To(HaveKey("cloud"))
+				g.Expect(copied.Data["cloud"]).To(Equal([]byte("aws-creds-data")))
 				g.Expect(copied.Labels["hypershift.openshift.io/etcd-backup"]).To(Equal("true"))
 			},
 		},
@@ -312,47 +372,59 @@ func TestCopyCredentialSecret(t *testing.T) {
 					Data:       map[string][]byte{"credentials": []byte("existing-data")},
 				},
 			},
-			bsl: &velerov1.BackupStorageLocation{
-				ObjectMeta: metav1.ObjectMeta{Name: "default"},
-				Spec: velerov1.BackupStorageLocationSpec{
-					Credential: &corev1.SecretKeySelector{
-						LocalObjectReference: corev1.LocalObjectReference{Name: "cloud-credentials"},
-						Key:                  "cloud",
-					},
-				},
+			credRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: "cloud-credentials"},
+				Key:                  "cloud",
 			},
 			assert: func(g *GomegaWithT, dstName string, _ crclient.Client) {
 				g.Expect(dstName).To(Equal("etcd-backup-creds-my-backup"))
 			},
 		},
 		{
-			name: "When copyCredentialSecret runs and source secret lacks the BSL key, It Should return error",
+			name: "When copyCredentialSecret runs with credential key credentials, It Should not duplicate the key",
+			objects: []crclient.Object{
+				&corev1.Secret{
+					ObjectMeta: metav1.ObjectMeta{Name: "cloud-credentials", Namespace: "openshift-adp"},
+					Data:       map[string][]byte{"credentials": []byte("creds-data")},
+				},
+			},
+			credRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: "cloud-credentials"},
+				Key:                  "credentials",
+			},
+			assert: func(g *GomegaWithT, dstName string, client crclient.Client) {
+				copied := &corev1.Secret{}
+				err := client.Get(context.TODO(), types.NamespacedName{Name: dstName, Namespace: "hypershift"}, copied)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(copied.Data).To(HaveKey("credentials"))
+				g.Expect(copied.Data["credentials"]).To(Equal([]byte("creds-data")))
+				// When srcKey is already "credentials", no extra key should be added
+				g.Expect(copied.Data).To(HaveLen(1))
+			},
+		},
+		{
+			name: "When copyCredentialSecret runs and source secret lacks the expected key, It Should return error",
 			objects: []crclient.Object{
 				&corev1.Secret{
 					ObjectMeta: metav1.ObjectMeta{Name: "cloud-credentials", Namespace: "openshift-adp"},
 					Data:       map[string][]byte{"wrong-key": []byte("data")},
 				},
 			},
-			bsl: &velerov1.BackupStorageLocation{
-				ObjectMeta: metav1.ObjectMeta{Name: "default"},
-				Spec: velerov1.BackupStorageLocationSpec{
-					Credential: &corev1.SecretKeySelector{
-						LocalObjectReference: corev1.LocalObjectReference{Name: "cloud-credentials"},
-						Key:                  "cloud",
-					},
-				},
+			credRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: "cloud-credentials"},
+				Key:                  "cloud",
 			},
 			wantErr:   true,
 			errSubstr: "does not contain key",
 		},
 		{
-			name: "When copyCredentialSecret runs without BSL credential reference, It Should return error",
-			bsl: &velerov1.BackupStorageLocation{
-				ObjectMeta: metav1.ObjectMeta{Name: "default"},
-				Spec:       velerov1.BackupStorageLocationSpec{},
+			name: "When copyCredentialSecret runs and source secret does not exist, It Should return error",
+			credRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: "nonexistent-secret"},
+				Key:                  "cloud",
 			},
 			wantErr:   true,
-			errSubstr: "no credential reference",
+			errSubstr: "failed to get credential Secret",
 		},
 	}
 
@@ -362,7 +434,7 @@ func TestCopyCredentialSecret(t *testing.T) {
 			client := testClient(scheme, tt.objects...)
 			o := &Orchestrator{log: logrus.New(), client: client}
 
-			dstName, err := o.copyCredentialSecret(context.TODO(), tt.bsl, "openshift-adp", "hypershift", "my-backup")
+			dstName, err := o.copyCredentialSecret(context.TODO(), tt.credRef, "openshift-adp", "hypershift", "my-backup")
 			if tt.wantErr {
 				g.Expect(err).To(HaveOccurred())
 				g.Expect(err.Error()).To(ContainSubstring(tt.errSubstr))
@@ -725,6 +797,86 @@ func TestCreateEtcdBackup(t *testing.T) {
 			},
 			wantErr:   true,
 			errSubstr: "failed to map BSL",
+		},
+		{
+			name: "When CreateEtcdBackup runs with BSL without credential ref, It Should use fallback cloud-credentials",
+			objects: []crclient.Object{
+				&corev1.Secret{
+					ObjectMeta: metav1.ObjectMeta{Name: "cloud-credentials", Namespace: "openshift-adp"},
+					Data:       map[string][]byte{"cloud": []byte("arn:aws:iam::123456789012:role/my-role")},
+				},
+				&velerov1.BackupStorageLocation{
+					ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: "openshift-adp"},
+					Spec: velerov1.BackupStorageLocationSpec{
+						Provider: "aws",
+						StorageType: velerov1.StorageType{
+							ObjectStorage: &velerov1.ObjectStorageLocation{Bucket: "my-bucket", Prefix: "velero"},
+						},
+						Config: map[string]string{"region": "us-east-1"},
+					},
+				},
+			},
+			backup: &velerov1.Backup{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-backup", Namespace: "openshift-adp"},
+				Spec:       velerov1.BackupSpec{StorageLocation: "default"},
+			},
+			assert: func(g *GomegaWithT, o *Orchestrator) {
+				g.Expect(o.IsCreated()).To(BeTrue())
+				g.Expect(o.CredSecretName).To(Equal("etcd-backup-creds-test-backup"))
+			},
+		},
+		{
+			name: "When CreateEtcdBackup runs with long schedule-triggered backup name, It Should produce HCPEtcdBackup name within 63 bytes",
+			objects: []crclient.Object{
+				&corev1.Secret{
+					ObjectMeta: metav1.ObjectMeta{Name: "cloud-credentials", Namespace: "openshift-adp"},
+					Data:       map[string][]byte{"cloud": []byte("aws-creds")},
+				},
+				&velerov1.BackupStorageLocation{
+					ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: "openshift-adp"},
+					Spec: velerov1.BackupStorageLocationSpec{
+						Provider: "aws",
+						StorageType: velerov1.StorageType{
+							ObjectStorage: &velerov1.ObjectStorageLocation{Bucket: "my-bucket"},
+						},
+						Config: map[string]string{"region": "us-east-1"},
+						Credential: &corev1.SecretKeySelector{
+							LocalObjectReference: corev1.LocalObjectReference{Name: "cloud-credentials"},
+							Key:                  "cloud",
+						},
+					},
+				},
+			},
+			backup: &velerov1.Backup{
+				ObjectMeta: metav1.ObjectMeta{Name: "2q8dk2uepjpfcvm4lqg92rlpjshj219a-hourly-20260512140053", Namespace: "openshift-adp"},
+				Spec:       velerov1.BackupSpec{StorageLocation: "default"},
+			},
+			assert: func(g *GomegaWithT, o *Orchestrator) {
+				g.Expect(o.IsCreated()).To(BeTrue())
+				g.Expect(len(o.BackupName)).To(BeNumerically("<=", 63), "HCPEtcdBackup name %q is %d bytes, exceeds 63-byte label limit", o.BackupName, len(o.BackupName))
+				g.Expect(o.BackupName).To(HavePrefix("oadp-"))
+			},
+		},
+		{
+			name: "When CreateEtcdBackup runs with BSL without credential ref and fallback secret missing, It Should return error",
+			objects: []crclient.Object{
+				&velerov1.BackupStorageLocation{
+					ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: "openshift-adp"},
+					Spec: velerov1.BackupStorageLocationSpec{
+						Provider: "aws",
+						StorageType: velerov1.StorageType{
+							ObjectStorage: &velerov1.ObjectStorageLocation{Bucket: "b"},
+						},
+						Config: map[string]string{"region": "us-east-1"},
+					},
+				},
+			},
+			backup: &velerov1.Backup{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-backup"},
+				Spec:       velerov1.BackupSpec{StorageLocation: "default"},
+			},
+			wantErr:   true,
+			errSubstr: "failed to copy credential Secret",
 		},
 	}
 

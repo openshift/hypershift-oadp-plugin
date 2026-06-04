@@ -40,6 +40,14 @@ const (
 	EtcdBackupMethodVolume       string = "volumeSnapshot"
 	EtcdBackupMethodEtcdSnapshot string = "etcdSnapshot"
 
+	// Fallback credential secret for standalone Velero (no DPA).
+	// Both ARO (Azure WI) and future ROSA (IRSA) use this convention.
+	DefaultCredentialSecretName string = "cloud-credentials"
+	DefaultCredentialSecretKey  string = "cloud"
+
+	// DPA CRD name used to detect OADP+DPA vs standalone Velero
+	DPACRDName string = "dataprotectionapplications.oadp.openshift.io"
+
 	// Velero annotation to exclude specific volumes from backup
 	BackupVolumesExcludesAnnotation string = "backup.velero.io/backup-volumes-excludes"
 	// Etcd data volume name in the StatefulSet pod
