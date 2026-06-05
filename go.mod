@@ -1,6 +1,6 @@
 module github.com/openshift/hypershift-oadp-plugin
 
-go 1.25.7
+go 1.26.0
 
 toolchain go1.26.3
 
@@ -13,8 +13,8 @@ require (
 	github.com/openshift/hypershift/api v0.0.0-20260524140149-6d994e441608
 	github.com/sirupsen/logrus v1.9.4
 	github.com/vmware-tanzu/velero v1.18.1
-	k8s.io/api v0.35.4
-	k8s.io/apiextensions-apiserver v0.35.3
+	k8s.io/api v0.36.1
+	k8s.io/apiextensions-apiserver v0.36.1
 	sigs.k8s.io/controller-runtime v0.23.3
 )
 
@@ -94,11 +94,11 @@ require (
 	golang.org/x/time v0.15.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260523011958-0a33c5d7ca68 // indirect
 	google.golang.org/grpc v1.81.1 // indirect
-	google.golang.org/protobuf v1.36.11 // indirect
+	google.golang.org/protobuf v1.36.12-0.20260120151049-f2248ac996af // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	k8s.io/apimachinery v0.35.4
-	k8s.io/client-go v0.35.3
+	k8s.io/apimachinery v0.36.1
+	k8s.io/client-go v0.36.1
 	k8s.io/klog/v2 v2.140.0 // indirect
 	k8s.io/kube-openapi v0.0.0-20260330154417-16be699c7b31 // indirect
 	k8s.io/utils v0.0.0-20260319190234-28399d86e0b5 // indirect
