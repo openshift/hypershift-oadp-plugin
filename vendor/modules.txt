@@ -226,7 +226,7 @@ github.com/spf13/cobra
 # github.com/spf13/pflag v1.0.10
 ## explicit; go 1.12
 github.com/spf13/pflag
-# github.com/vmware-tanzu/velero v1.18.1 => github.com/openshift/velero v0.10.2-0.20260601183324-af1b4409d3db
+# github.com/vmware-tanzu/velero v1.18.1 => github.com/openshift/velero v0.10.2-0.20260623201227-3da6a7a30d21
 ## explicit; go 1.25.0
 github.com/vmware-tanzu/velero/internal/credentials
 github.com/vmware-tanzu/velero/internal/resourcepolicies
@@ -970,4 +970,4 @@ sigs.k8s.io/structured-merge-diff/v6/value
 # sigs.k8s.io/yaml v1.6.0
 ## explicit; go 1.22
 sigs.k8s.io/yaml
-# github.com/vmware-tanzu/velero => github.com/openshift/velero v0.10.2-0.20260601183324-af1b4409d3db
+# github.com/vmware-tanzu/velero => github.com/openshift/velero v0.10.2-0.20260623201227-3da6a7a30d21
