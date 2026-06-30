@@ -7,6 +7,7 @@ approvers:
 - jparrill
 - celebdor
 - kaovilai
+- jvaikath
 options: {}
 reviewers:
 - enxebre
@@ -18,4 +19,5 @@ reviewers:
 - celebdor
 - devguyio
 - kaovilai
+- jvaikath
 component: hypershift-oadp-plugin
