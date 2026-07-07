@@ -780,6 +780,7 @@ func TestRestoreExecuteEtcdStatefulSet(t *testing.T) {
 		Spec: velerov1api.BackupSpec{
 			StorageLocation:    "default",
 			IncludedNamespaces: []string{"clusters", "clusters-test"},
+			IncludedResources:  testHCPResources,
 		},
 	}
 	restore := &velerov1api.Restore{
@@ -882,6 +883,7 @@ func TestRestoreExecuteSnapshotURL(t *testing.T) {
 		Spec: velerov1api.BackupSpec{
 			StorageLocation:    "default",
 			IncludedNamespaces: []string{"clusters", "clusters-test"},
+			IncludedResources:  testHCPResources,
 		},
 	}
 	restore := &velerov1api.Restore{
@@ -1092,6 +1094,7 @@ func TestRestoreExecuteHCPSnapshotURL(t *testing.T) {
 		Spec: velerov1api.BackupSpec{
 			StorageLocation:    "default",
 			IncludedNamespaces: []string{"clusters", "clusters-test"},
+			IncludedResources:  testHCPResources,
 		},
 	}
 	restore := &velerov1api.Restore{

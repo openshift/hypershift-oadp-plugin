@@ -19,6 +19,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
+var testHCPResources = []string{"hostedcontrolplane", "hostedcluster", "nodepool"}
+
 // mockValidator implements validation.BackupValidator for testing.
 type mockValidator struct {
 	validatePlatformErr error
@@ -85,6 +87,7 @@ func newTestBackup() *velerov1.Backup {
 		ObjectMeta: metav1.ObjectMeta{Name: "test-backup", Namespace: "openshift-adp"},
 		Spec: velerov1.BackupSpec{
 			IncludedNamespaces: []string{"clusters", "clusters-test"},
+			IncludedResources:  testHCPResources,
 		},
 	}
 }

@@ -500,37 +500,27 @@ func (f *fakeClient) Delete(ctx context.Context, obj client.Object, opts ...clie
 func TestShouldEndPluginExecution(t *testing.T) {
 	tests := []struct {
 		name               string
-		objects            []client.Object
 		includedNamespaces []string
 		includedResources  []string
 		expectedResult     bool
 		expectError        bool
 	}{
 		{
-			name: "CRD exists",
-			objects: []client.Object{
-				&apiextensionsv1.CustomResourceDefinition{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "hostedcontrolplanes.hypershift.openshift.io",
-					},
-				},
-			},
+			name:               "HCP resource types included",
 			includedNamespaces: []string{"test-namespace"},
 			includedResources:  []string{"hostedcontrolplanes", "hostedclusters"},
 			expectedResult:     false,
 			expectError:        false,
 		},
 		{
-			name:               "CRD does not exist",
-			objects:            []client.Object{},
+			name:               "No HCP resource types",
 			includedNamespaces: []string{"test-namespace"},
 			includedResources:  []string{"secrets", "configmaps"},
 			expectedResult:     true,
-			expectError:        true,
+			expectError:        false,
 		},
 		{
 			name:               "No namespaces provided",
-			objects:            []client.Object{},
 			includedNamespaces: []string{},
 			includedResources:  []string{"hostedcontrolplanes", "hostedclusters"},
 			expectedResult:     true,
@@ -538,31 +528,44 @@ func TestShouldEndPluginExecution(t *testing.T) {
 		},
 		{
 			name:               "No resources provided",
-			objects:            []client.Object{},
 			includedNamespaces: []string{"test-namespace"},
 			includedResources:  []string{},
 			expectedResult:     true,
-			expectError:        true,
+			expectError:        false,
+		},
+		{
+			name:               "Wildcard resources",
+			includedNamespaces: []string{"test-namespace"},
+			includedResources:  []string{"*"},
+			expectedResult:     false,
+			expectError:        false,
+		},
+		{
+			name:               "Nodepool only",
+			includedNamespaces: []string{"test-namespace"},
+			includedResources:  []string{"nodepool"},
+			expectedResult:     false,
+			expectError:        false,
+		},
+		{
+			name:               "Full GVR resource name",
+			includedNamespaces: []string{"test-namespace"},
+			includedResources:  []string{"hostedcontrolplanes.hypershift.openshift.io"},
+			expectedResult:     false,
+			expectError:        false,
 		},
 	}
-
-	scheme := runtime.NewScheme()
-	_ = hyperv1.AddToScheme(scheme)
-	_ = apiextensionsv1.AddToScheme(scheme)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			g := NewWithT(t)
 
-			c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tt.objects...).Build()
-			log := logrus.New()
-
-			result, err := ShouldEndPluginExecution(context.TODO(), &veleroapiv1.Backup{
+			result, err := ShouldEndPluginExecution(&veleroapiv1.Backup{
 				Spec: veleroapiv1.BackupSpec{
 					IncludedNamespaces: tt.includedNamespaces,
 					IncludedResources:  tt.includedResources,
 				},
-			}, c, log)
+			})
 			if tt.expectError {
 				g.Expect(err).To(HaveOccurred())
 			} else {

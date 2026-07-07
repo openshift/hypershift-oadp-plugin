@@ -163,15 +163,9 @@ func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*v
 	}
 
 	// if the backup is not a hypershift backup, return early
-	if returnEarly, err := common.ShouldEndPluginExecution(ctx, backup, p.client, p.log); returnEarly {
+	if returnEarly, err := common.ShouldEndPluginExecution(backup); returnEarly {
 		p.log.Infof("Skipping hypershift plugin execution - not a hypershift backup: %v", err)
 		return velero.NewRestoreItemActionExecuteOutput(input.Item), nil
-	}
-
-	// if the IncludedNamespaces field is nil, return error
-	if backup.Spec.IncludedNamespaces == nil {
-		p.log.Error("IncludedNamespaces from backup object is nil")
-		return nil, fmt.Errorf("included namespaces from backup object is nil")
 	}
 
 	kind := input.Item.GetObjectKind().GroupVersionKind().Kind

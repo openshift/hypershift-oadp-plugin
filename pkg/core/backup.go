@@ -138,7 +138,7 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 	p.log.Debug("Entering Hypershift backup plugin")
 	ctx := context.Context(p.ctx)
 
-	if returnEarly, err := common.ShouldEndPluginExecution(ctx, backup, p.client, p.log); returnEarly {
+	if returnEarly, err := common.ShouldEndPluginExecution(backup); returnEarly {
 		p.log.Infof("Skipping hypershift plugin execution - not a hypershift backup: %v", err)
 		return item, nil, nil
 	}
