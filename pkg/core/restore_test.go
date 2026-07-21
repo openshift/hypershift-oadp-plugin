@@ -2,12 +2,18 @@ package core
 
 import (
 	"context"
+	"encoding/base64"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"strings"
 	"testing"
 
+	"github.com/openshift/hypershift-oadp-plugin/pkg/azblobsas"
 	common "github.com/openshift/hypershift-oadp-plugin/pkg/common"
+	"github.com/openshift/hypershift-oadp-plugin/pkg/s3presign"
 	plugtypes "github.com/openshift/hypershift-oadp-plugin/pkg/core/types"
 	hyperv1 "github.com/openshift/hypershift/api/hypershift/v1beta1"
 	"github.com/sirupsen/logrus"
@@ -21,6 +27,21 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
+
+type mockSTSClient struct {
+	creds       *s3presign.AWSCredentials
+	err         error
+	receivedCtx context.Context
+	receivedARN string
+	receivedSession string
+}
+
+func (m *mockSTSClient) AssumeRoleWithWebIdentity(ctx context.Context, roleARN, tokenFile, sessionName string) (*s3presign.AWSCredentials, error) {
+	m.receivedCtx = ctx
+	m.receivedARN = roleARN
+	m.receivedSession = sessionName
+	return m.creds, m.err
+}
 
 type mockRestoreValidator struct {
 	validatePlatformErr error
@@ -124,7 +145,29 @@ aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
 			wantErr: true,
 		},
 		{
-			name: "When BSL has no credential, it should return error",
+			name: "When BSL has no credential ref, it should use fallback cloud-credentials and presign successfully",
+			setup: func() (*RestorePlugin, *velerov1api.Backup) {
+				bsl := defaultBSL.DeepCopy()
+				bsl.Name = "no-cred-bsl"
+				bsl.Spec.Credential = nil
+				client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bsl, defaultSecret).Build()
+				backup := defaultBackup.DeepCopy()
+				backup.Spec.StorageLocation = "no-cred-bsl"
+				return &RestorePlugin{log: logrus.New(), ctx: context.Background(), client: client}, backup
+			},
+			s3URL: "s3://bucket/key",
+			assert: func(t *testing.T, result string) {
+				parsed, err := url.Parse(result)
+				if err != nil {
+					t.Fatalf("failed to parse result URL: %v", err)
+				}
+				if parsed.Scheme != "https" {
+					t.Errorf("expected https scheme, got %s", parsed.Scheme)
+				}
+			},
+		},
+		{
+			name: "When BSL has no credential ref and fallback secret is missing, it should return error",
 			setup: func() (*RestorePlugin, *velerov1api.Backup) {
 				bsl := defaultBSL.DeepCopy()
 				bsl.Name = "no-cred-bsl"
@@ -168,6 +211,87 @@ aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
 			wantErr: true,
 		},
 		{
+			name: "Given IRSA credentials with role_arn, When presigning, Then it should assume role via STS and produce a pre-signed URL with security token",
+			setup: func() (*RestorePlugin, *velerov1api.Backup) {
+				tokenFile := writeTempFile(t, "irsa-token-content")
+				irsaCreds := []byte(fmt.Sprintf("[default]\nrole_arn = arn:aws:iam::123456789012:role/irsa-test\nweb_identity_token_file = %s\n", tokenFile))
+				irsaSecret := &corev1.Secret{
+					ObjectMeta: metav1.ObjectMeta{Name: "irsa-credentials", Namespace: "openshift-adp"},
+					Data:       map[string][]byte{"cloud": irsaCreds},
+				}
+				bsl := defaultBSL.DeepCopy()
+				bsl.Name = "irsa-bsl"
+				bsl.Spec.Credential = &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: "irsa-credentials"},
+					Key:                  "cloud",
+				}
+				client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bsl, irsaSecret).Build()
+				backup := defaultBackup.DeepCopy()
+				backup.Spec.StorageLocation = "irsa-bsl"
+
+				mock := &mockSTSClient{
+					creds: &s3presign.AWSCredentials{
+						AccessKeyID:     "ASIASTSTESTKEY",
+						SecretAccessKey: "stsSecretKey",
+						SessionToken:    "stsSessionToken",
+					},
+				}
+				plugin := &RestorePlugin{
+					log:    logrus.New(),
+					ctx:    context.Background(),
+					client: client,
+					newSTSClient: func() s3presign.STSAssumeRoler { return mock },
+				}
+				return plugin, backup
+			},
+			s3URL: "s3://my-bucket/path/to/snapshot.db",
+			assert: func(t *testing.T, result string) {
+				parsed, err := url.Parse(result)
+				if err != nil {
+					t.Fatalf("failed to parse result URL: %v", err)
+				}
+				if parsed.Scheme != "https" {
+					t.Errorf("expected https scheme, got %s", parsed.Scheme)
+				}
+				if parsed.Query().Get("X-Amz-Security-Token") == "" {
+					t.Error("expected X-Amz-Security-Token param for STS credentials")
+				}
+			},
+		},
+		{
+			name: "Given IRSA credentials, When STS assume role fails, Then it should return error",
+			setup: func() (*RestorePlugin, *velerov1api.Backup) {
+				tokenFile := writeTempFile(t, "irsa-token-content")
+				irsaCreds := []byte(fmt.Sprintf("[default]\nrole_arn = arn:aws:iam::123456789012:role/irsa-test\nweb_identity_token_file = %s\n", tokenFile))
+				irsaSecret := &corev1.Secret{
+					ObjectMeta: metav1.ObjectMeta{Name: "irsa-credentials", Namespace: "openshift-adp"},
+					Data:       map[string][]byte{"cloud": irsaCreds},
+				}
+				bsl := defaultBSL.DeepCopy()
+				bsl.Name = "irsa-fail-bsl"
+				bsl.Spec.Credential = &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: "irsa-credentials"},
+					Key:                  "cloud",
+				}
+				client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bsl, irsaSecret).Build()
+				backup := defaultBackup.DeepCopy()
+				backup.Spec.StorageLocation = "irsa-fail-bsl"
+
+				mock := &mockSTSClient{
+					err: fmt.Errorf("AccessDenied: not authorized to assume role"),
+				}
+				plugin := &RestorePlugin{
+					log:    logrus.New(),
+					ctx:    context.Background(),
+					client: client,
+					newSTSClient: func() s3presign.STSAssumeRoler { return mock },
+				}
+				return plugin, backup
+			},
+			s3URL:   "s3://bucket/key",
+			wantErr: true,
+		},
+		{
 			name: "When BSL has custom endpoint, it should use that endpoint in the pre-signed URL",
 			setup: func() (*RestorePlugin, *velerov1api.Backup) {
 				bsl := defaultBSL.DeepCopy()
@@ -192,7 +316,326 @@ aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			plugin, backup := tt.setup()
-			result, err := plugin.presignS3URL(context.Background(), backup, tt.s3URL)
+			result, err := plugin.presignS3URL(context.Background(), backup, tt.s3URL, "test-hc")
+			if tt.wantErr {
+				if err == nil {
+					t.Error("expected error but got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tt.assert != nil {
+				tt.assert(t, result)
+			}
+		})
+	}
+}
+
+type mockTokenProvider struct {
+	token string
+	err   error
+}
+
+func (m *mockTokenProvider) GetToken(_ context.Context, _ string) (string, error) {
+	return m.token, m.err
+}
+
+func writeTempFile(t *testing.T, content string) string {
+	t.Helper()
+	f, err := os.CreateTemp(t.TempDir(), "token-*")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	if _, err := f.WriteString(content); err != nil {
+		t.Fatalf("failed to write temp file: %v", err)
+	}
+	f.Close()
+	return f.Name()
+}
+
+func TestPresignAzBlobUrlWithAAD(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = hyperv1.AddToScheme(scheme)
+	_ = velerov1api.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
+
+	aadCredentialData := []byte(`AZURE_SUBSCRIPTION_ID=sub123
+AZURE_TENANT_ID=tenant456
+AZURE_CLIENT_ID=client789
+AZURE_RESOURCE_GROUP=rg1
+AZURE_CLOUD_NAME=AzurePublicCloud
+`)
+
+	delegationKeyResponse := `<?xml version="1.0" encoding="utf-8"?>
+<UserDelegationKey>
+    <SignedOid>oid-1234</SignedOid>
+    <SignedTid>tid-5678</SignedTid>
+    <SignedStart>2026-05-08T12:00:00Z</SignedStart>
+    <SignedExpiry>2026-05-08T13:00:00Z</SignedExpiry>
+    <SignedService>b</SignedService>
+    <SignedVersion>2024-11-04</SignedVersion>
+    <Value>` + base64.StdEncoding.EncodeToString([]byte("test-delegation-key-value!!!!")) + `</Value>
+</UserDelegationKey>`
+
+	delegationServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(delegationKeyResponse))
+	}))
+	defer delegationServer.Close()
+
+	origSAPath := common.DefaultK8sSAFilePath
+	nsDir := t.TempDir()
+	if err := os.WriteFile(nsDir+"/namespace", []byte("openshift-adp"), 0644); err != nil {
+		t.Fatalf("failed to write namespace file: %v", err)
+	}
+	common.SetK8sSAFilePath(nsDir)
+	t.Cleanup(func() { common.SetK8sSAFilePath(origSAPath) })
+
+	tests := []struct {
+		name    string
+		setup   func() (*RestorePlugin, *velerov1api.Backup)
+		azURL   string
+		wantErr bool
+		assert  func(*testing.T, string)
+	}{
+		{
+			name: "When useAAD is true and AAD credentials are present, it should produce a User Delegation SAS URL",
+			setup: func() (*RestorePlugin, *velerov1api.Backup) {
+				bsl := &velerov1api.BackupStorageLocation{
+					ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: "openshift-adp"},
+					Spec: velerov1api.BackupStorageLocationSpec{
+						Config: map[string]string{
+							"useAAD":            "true",
+							"storageAccountURI": delegationServer.URL,
+						},
+						Credential: &corev1.SecretKeySelector{
+							LocalObjectReference: corev1.LocalObjectReference{Name: "cloud-credentials"},
+							Key:                  "cloud",
+						},
+					},
+				}
+				secret := &corev1.Secret{
+					ObjectMeta: metav1.ObjectMeta{Name: "cloud-credentials", Namespace: "openshift-adp"},
+					Data:       map[string][]byte{"cloud": aadCredentialData},
+				}
+				backup := &velerov1api.Backup{
+					ObjectMeta: metav1.ObjectMeta{Name: "test-backup", Namespace: "openshift-adp"},
+					Spec:       velerov1api.BackupSpec{StorageLocation: "default"},
+				}
+				client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bsl, secret).Build()
+				return &RestorePlugin{
+					log:    logrus.New(),
+					ctx:    context.Background(),
+					client: client,
+					newTokenProvider: func(_ *azblobsas.AADCredentials) (azblobsas.TokenProvider, error) {
+						return &mockTokenProvider{token: "mock-aad-token"}, nil
+					},
+				}, backup
+			},
+			azURL: "https://myaccount.blob.core.windows.net/mycontainer/path/to/snapshot.db",
+			assert: func(t *testing.T, result string) {
+				parsed, err := url.Parse(result)
+				if err != nil {
+					t.Fatalf("failed to parse result URL: %v", err)
+				}
+				for _, p := range []string{"skoid", "sktid", "skt", "ske", "sks", "skv", "sig"} {
+					if parsed.Query().Get(p) == "" {
+						t.Errorf("missing required User Delegation SAS param %s", p)
+					}
+				}
+				if parsed.Query().Get("skoid") != "oid-1234" {
+					t.Errorf("unexpected skoid: %s", parsed.Query().Get("skoid"))
+				}
+			},
+		},
+		{
+			name: "When useAAD is true but credential has missing AAD fields, it should return error",
+			setup: func() (*RestorePlugin, *velerov1api.Backup) {
+				bsl := &velerov1api.BackupStorageLocation{
+					ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: "openshift-adp"},
+					Spec: velerov1api.BackupStorageLocationSpec{
+						Config: map[string]string{"useAAD": "true"},
+						Credential: &corev1.SecretKeySelector{
+							LocalObjectReference: corev1.LocalObjectReference{Name: "cloud-credentials"},
+							Key:                  "cloud",
+						},
+					},
+				}
+				secret := &corev1.Secret{
+					ObjectMeta: metav1.ObjectMeta{Name: "cloud-credentials", Namespace: "openshift-adp"},
+					Data:       map[string][]byte{"cloud": []byte("AZURE_CLOUD_NAME=AzurePublicCloud\n")},
+				}
+				backup := &velerov1api.Backup{
+					ObjectMeta: metav1.ObjectMeta{Name: "test-backup", Namespace: "openshift-adp"},
+					Spec:       velerov1api.BackupSpec{StorageLocation: "default"},
+				}
+				client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bsl, secret).Build()
+				return &RestorePlugin{
+					log:    logrus.New(),
+					ctx:    context.Background(),
+					client: client,
+				}, backup
+			},
+			azURL:   "https://myaccount.blob.core.windows.net/mycontainer/path/to/snapshot.db",
+			wantErr: true,
+		},
+		{
+			name: "When useAAD is true and BSL has no credential ref, it should use Workload Identity env vars",
+			setup: func() (*RestorePlugin, *velerov1api.Backup) {
+				t.Setenv("AZURE_TENANT_ID", "tenant456")
+				t.Setenv("AZURE_CLIENT_ID", "client789")
+				t.Setenv("AZURE_CLOUD_NAME", "AzurePublicCloud")
+				bsl := &velerov1api.BackupStorageLocation{
+					ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: "openshift-adp"},
+					Spec: velerov1api.BackupStorageLocationSpec{
+						Config: map[string]string{
+							"useAAD":            "true",
+							"storageAccountURI": delegationServer.URL,
+						},
+					},
+				}
+				backup := &velerov1api.Backup{
+					ObjectMeta: metav1.ObjectMeta{Name: "test-backup", Namespace: "openshift-adp"},
+					Spec:       velerov1api.BackupSpec{StorageLocation: "default"},
+				}
+				client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bsl).Build()
+				return &RestorePlugin{
+					log:    logrus.New(),
+					ctx:    context.Background(),
+					client: client,
+					newTokenProvider: func(_ *azblobsas.AADCredentials) (azblobsas.TokenProvider, error) {
+						return &mockTokenProvider{token: "mock-aad-token"}, nil
+					},
+				}, backup
+			},
+			azURL: "https://myaccount.blob.core.windows.net/mycontainer/path/to/snapshot.db",
+			assert: func(t *testing.T, result string) {
+				parsed, err := url.Parse(result)
+				if err != nil {
+					t.Fatalf("failed to parse result URL: %v", err)
+				}
+				for _, p := range []string{"skoid", "sktid", "sig"} {
+					if parsed.Query().Get(p) == "" {
+						t.Errorf("missing required User Delegation SAS param %s", p)
+					}
+				}
+			},
+		},
+		{
+			name: "When useAAD is true and BSL has no credential ref and env vars are missing, it should return error",
+			setup: func() (*RestorePlugin, *velerov1api.Backup) {
+				t.Setenv("AZURE_TENANT_ID", "")
+				t.Setenv("AZURE_CLIENT_ID", "")
+				bsl := &velerov1api.BackupStorageLocation{
+					ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: "openshift-adp"},
+					Spec: velerov1api.BackupStorageLocationSpec{
+						Config: map[string]string{"useAAD": "true"},
+					},
+				}
+				backup := &velerov1api.Backup{
+					ObjectMeta: metav1.ObjectMeta{Name: "test-backup", Namespace: "openshift-adp"},
+					Spec:       velerov1api.BackupSpec{StorageLocation: "default"},
+				}
+				client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bsl).Build()
+				return &RestorePlugin{
+					log:    logrus.New(),
+					ctx:    context.Background(),
+					client: client,
+				}, backup
+			},
+			azURL:   "https://myaccount.blob.core.windows.net/mycontainer/path/to/snapshot.db",
+			wantErr: true,
+		},
+		{
+			name: "When AAD token acquisition fails, it should return error",
+			setup: func() (*RestorePlugin, *velerov1api.Backup) {
+				bsl := &velerov1api.BackupStorageLocation{
+					ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: "openshift-adp"},
+					Spec: velerov1api.BackupStorageLocationSpec{
+						Config: map[string]string{
+							"useAAD":            "true",
+							"storageAccountURI": delegationServer.URL,
+						},
+						Credential: &corev1.SecretKeySelector{
+							LocalObjectReference: corev1.LocalObjectReference{Name: "cloud-credentials"},
+							Key:                  "cloud",
+						},
+					},
+				}
+				secret := &corev1.Secret{
+					ObjectMeta: metav1.ObjectMeta{Name: "cloud-credentials", Namespace: "openshift-adp"},
+					Data:       map[string][]byte{"cloud": aadCredentialData},
+				}
+				backup := &velerov1api.Backup{
+					ObjectMeta: metav1.ObjectMeta{Name: "test-backup", Namespace: "openshift-adp"},
+					Spec:       velerov1api.BackupSpec{StorageLocation: "default"},
+				}
+				client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bsl, secret).Build()
+				return &RestorePlugin{
+					log:    logrus.New(),
+					ctx:    context.Background(),
+					client: client,
+					newTokenProvider: func(_ *azblobsas.AADCredentials) (azblobsas.TokenProvider, error) {
+						return &mockTokenProvider{err: fmt.Errorf("token acquisition failed")}, nil
+					},
+				}, backup
+			},
+			azURL:   "https://myaccount.blob.core.windows.net/mycontainer/path/to/snapshot.db",
+			wantErr: true,
+		},
+		{
+			name: "When useAAD is not set, it should use Account Key SAS path",
+			setup: func() (*RestorePlugin, *velerov1api.Backup) {
+				accountKeyData := []byte("AZURE_STORAGE_ACCOUNT_ACCESS_KEY=" + base64.StdEncoding.EncodeToString([]byte("test-storage-account-key-value!!")) + "\n")
+				bsl := &velerov1api.BackupStorageLocation{
+					ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: "openshift-adp"},
+					Spec: velerov1api.BackupStorageLocationSpec{
+						Config: map[string]string{
+							"storageAccountKeyEnvVar": "AZURE_STORAGE_ACCOUNT_ACCESS_KEY",
+						},
+						Credential: &corev1.SecretKeySelector{
+							LocalObjectReference: corev1.LocalObjectReference{Name: "cloud-credentials"},
+							Key:                  "cloud",
+						},
+					},
+				}
+				secret := &corev1.Secret{
+					ObjectMeta: metav1.ObjectMeta{Name: "cloud-credentials", Namespace: "openshift-adp"},
+					Data:       map[string][]byte{"cloud": accountKeyData},
+				}
+				backup := &velerov1api.Backup{
+					ObjectMeta: metav1.ObjectMeta{Name: "test-backup", Namespace: "openshift-adp"},
+					Spec:       velerov1api.BackupSpec{StorageLocation: "default"},
+				}
+				client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(bsl, secret).Build()
+				return &RestorePlugin{
+					log:    logrus.New(),
+					ctx:    context.Background(),
+					client: client,
+				}, backup
+			},
+			azURL: "https://myaccount.blob.core.windows.net/mycontainer/path/to/snapshot.db",
+			assert: func(t *testing.T, result string) {
+				parsed, err := url.Parse(result)
+				if err != nil {
+					t.Fatalf("failed to parse result URL: %v", err)
+				}
+				if parsed.Query().Get("skoid") != "" {
+					t.Error("Account Key SAS should NOT have skoid param")
+				}
+				if parsed.Query().Get("sig") == "" {
+					t.Error("expected sig param in Account Key SAS")
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			plugin, backup := tt.setup()
+			result, err := plugin.presignAzBlobUrl(context.Background(), backup, tt.azURL)
 			if tt.wantErr {
 				if err == nil {
 					t.Error("expected error but got nil")
@@ -293,6 +736,124 @@ func newHCPUnstructured(t *testing.T, name, namespace string, annotations map[st
 	return &unstructured.Unstructured{Object: raw}
 }
 
+func newStatefulSetUnstructured(name, namespace string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "apps/v1",
+			"kind":       "StatefulSet",
+			"metadata": map[string]any{
+				"name":      name,
+				"namespace": namespace,
+			},
+			"spec": map[string]any{
+				"replicas": int64(3),
+				"selector": map[string]any{
+					"matchLabels": map[string]any{"app": "etcd"},
+				},
+				"template": map[string]any{
+					"metadata": map[string]any{
+						"labels": map[string]any{"app": "etcd"},
+					},
+					"spec": map[string]any{
+						"containers": []any{
+							map[string]any{
+								"name":  "etcd",
+								"image": "etcd:latest",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func TestRestoreExecuteEtcdStatefulSet(t *testing.T) {
+	s := common.CustomScheme
+
+	hcpCRD := &apiextensionsv1.CustomResourceDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "hostedcontrolplanes.hypershift.openshift.io"},
+	}
+
+	backup := &velerov1api.Backup{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-backup", Namespace: "openshift-adp"},
+		Spec: velerov1api.BackupSpec{
+			StorageLocation:    "default",
+			IncludedNamespaces: []string{"clusters", "clusters-test"},
+		},
+	}
+	restore := &velerov1api.Restore{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-restore", Namespace: "openshift-adp"},
+		Spec:       velerov1api.RestoreSpec{BackupName: "test-backup"},
+	}
+
+	origSAPath := common.DefaultK8sSAFilePath
+	nsDir := t.TempDir()
+	if err := os.WriteFile(nsDir+"/namespace", []byte("openshift-adp"), 0644); err != nil {
+		t.Fatalf("failed to write namespace file: %v", err)
+	}
+	common.SetK8sSAFilePath(nsDir)
+	t.Cleanup(func() { common.SetK8sSAFilePath(origSAPath) })
+
+	tests := []struct {
+		name            string
+		stsName         string
+		etcdBackupMethod string
+		wantSkipped     bool
+	}{
+		{
+			name:            "When etcdSnapshot method and etcd StatefulSet, it should skip restore",
+			stsName:         "etcd",
+			etcdBackupMethod: common.EtcdBackupMethodEtcdSnapshot,
+			wantSkipped:     true,
+		},
+		{
+			name:            "When volumeSnapshot method and etcd StatefulSet, it should restore normally",
+			stsName:         "etcd",
+			etcdBackupMethod: common.EtcdBackupMethodVolume,
+			wantSkipped:     false,
+		},
+		{
+			name:            "When etcdSnapshot method and non-etcd StatefulSet, it should restore normally",
+			stsName:         "other-sts",
+			etcdBackupMethod: common.EtcdBackupMethodEtcdSnapshot,
+			wantSkipped:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fakeClient := fake.NewClientBuilder().
+				WithScheme(s).
+				WithObjects(hcpCRD, backup).
+				Build()
+			plugin := &RestorePlugin{
+				log:       logrus.New(),
+				ctx:       context.Background(),
+				client:    fakeClient,
+				validator: &mockRestoreValidator{},
+				config: map[string]string{
+					common.ConfigKeyEtcdBackupMethod: tt.etcdBackupMethod,
+				},
+			}
+
+			sts := newStatefulSetUnstructured(tt.stsName, "clusters-test")
+
+			output, err := plugin.Execute(&veleroapiv1.RestoreItemActionExecuteInput{
+				Item:    sts,
+				Restore: restore,
+			})
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if output.SkipRestore != tt.wantSkipped {
+				t.Errorf("expected SkipRestore=%v, got %v", tt.wantSkipped, output.SkipRestore)
+			}
+		})
+	}
+}
+
 func TestRestoreExecuteSnapshotURL(t *testing.T) {
 	s := common.CustomScheme
 
@@ -349,6 +910,7 @@ func TestRestoreExecuteSnapshotURL(t *testing.T) {
 	tests := []struct {
 		name        string
 		annotations map[string]string
+		setup       func() *RestorePlugin // optional per-test plugin override
 		wantErr     bool
 		assert      func(*testing.T, *veleroapiv1.RestoreItemActionExecuteOutput)
 	}{
@@ -403,20 +965,81 @@ func TestRestoreExecuteSnapshotURL(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "When HC has Azure Blob https annotation, it should generate SAS URL",
+			annotations: map[string]string{
+				common.EtcdSnapshotURLAnnotation: "https://mystorageaccount.blob.core.windows.net/backups/etcd-snapshot/snapshot.db",
+			},
+			setup: func() *RestorePlugin {
+				accountKeyData := []byte("AZURE_STORAGE_ACCOUNT_ACCESS_KEY=" + base64.StdEncoding.EncodeToString([]byte("test-storage-account-key-value!!")) + "\n")
+				azBSL := &velerov1api.BackupStorageLocation{
+					ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: "openshift-adp"},
+					Spec: velerov1api.BackupStorageLocationSpec{
+						Config: map[string]string{
+							"storageAccountKeyEnvVar": "AZURE_STORAGE_ACCOUNT_ACCESS_KEY",
+						},
+						Credential: &corev1.SecretKeySelector{
+							LocalObjectReference: corev1.LocalObjectReference{Name: "cloud-credentials"},
+							Key:                  "cloud",
+						},
+					},
+				}
+				azSecret := &corev1.Secret{
+					ObjectMeta: metav1.ObjectMeta{Name: "cloud-credentials", Namespace: "openshift-adp"},
+					Data:       map[string][]byte{"cloud": accountKeyData},
+				}
+				client := fake.NewClientBuilder().
+					WithScheme(s).
+					WithObjects(hcpCRD, azBSL, azSecret, backup).
+					Build()
+				return &RestorePlugin{
+					log:       logrus.New(),
+					ctx:       context.Background(),
+					client:    client,
+					validator: &mockRestoreValidator{},
+				}
+			},
+			assert: func(t *testing.T, output *veleroapiv1.RestoreItemActionExecuteOutput) {
+				urls, ok := extractRestoreSnapshotURL(output)
+				if !ok || len(urls) == 0 {
+					t.Fatal("expected restoreSnapshotURL to be set for Azure Blob URL")
+				}
+				sasURL, ok := urls[0].(string)
+				if !ok {
+					t.Fatal("expected restoreSnapshotURL[0] to be a string")
+				}
+				parsed, err := url.Parse(sasURL)
+				if err != nil {
+					t.Fatalf("failed to parse SAS URL: %v", err)
+				}
+				if parsed.Host != "mystorageaccount.blob.core.windows.net" {
+					t.Errorf("unexpected host: %s", parsed.Host)
+				}
+				for _, p := range []string{"sig", "sv", "se", "sr"} {
+					if parsed.Query().Get(p) == "" {
+						t.Errorf("missing required SAS param %s in URL %s", p, sasURL)
+					}
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			fakeClient := fake.NewClientBuilder().
-				WithScheme(s).
-				WithObjects(hcpCRD, bsl, secret, backup).
-				Build()
-
-			plugin := &RestorePlugin{
-				log:       logrus.New(),
-				ctx:       context.Background(),
-				client:    fakeClient,
-				validator: &mockRestoreValidator{},
+			var plugin *RestorePlugin
+			if tt.setup != nil {
+				plugin = tt.setup()
+			} else {
+				fakeClient := fake.NewClientBuilder().
+					WithScheme(s).
+					WithObjects(hcpCRD, bsl, secret, backup).
+					Build()
+				plugin = &RestorePlugin{
+					log:       logrus.New(),
+					ctx:       context.Background(),
+					client:    fakeClient,
+					validator: &mockRestoreValidator{},
+				}
 			}
 
 			hc := newHCUnstructured("my-hc", "clusters", tt.annotations)
@@ -497,6 +1120,7 @@ func TestRestoreExecuteHCPSnapshotURL(t *testing.T) {
 		name        string
 		annotations map[string]string
 		missingBSL  bool
+		setup       func() *RestorePlugin // optional per-test plugin override
 		wantErr     bool
 		assert      func(*testing.T, *veleroapiv1.RestoreItemActionExecuteOutput)
 	}{
@@ -559,23 +1183,84 @@ func TestRestoreExecuteHCPSnapshotURL(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "When HCP has Azure Blob https annotation, it should generate SAS URL",
+			annotations: map[string]string{
+				common.EtcdSnapshotURLAnnotation: "https://mystorageaccount.blob.core.windows.net/backups/etcd-snapshot/snapshot.db",
+			},
+			setup: func() *RestorePlugin {
+				accountKeyData := []byte("AZURE_STORAGE_ACCOUNT_ACCESS_KEY=" + base64.StdEncoding.EncodeToString([]byte("test-storage-account-key-value!!")) + "\n")
+				azBSL := &velerov1api.BackupStorageLocation{
+					ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: "openshift-adp"},
+					Spec: velerov1api.BackupStorageLocationSpec{
+						Config: map[string]string{
+							"storageAccountKeyEnvVar": "AZURE_STORAGE_ACCOUNT_ACCESS_KEY",
+						},
+						Credential: &corev1.SecretKeySelector{
+							LocalObjectReference: corev1.LocalObjectReference{Name: "cloud-credentials"},
+							Key:                  "cloud",
+						},
+					},
+				}
+				azSecret := &corev1.Secret{
+					ObjectMeta: metav1.ObjectMeta{Name: "cloud-credentials", Namespace: "openshift-adp"},
+					Data:       map[string][]byte{"cloud": accountKeyData},
+				}
+				client := fake.NewClientBuilder().
+					WithScheme(s).
+					WithObjects(hcpCRD, azBSL, azSecret, backup).
+					Build()
+				return &RestorePlugin{
+					log:       logrus.New(),
+					ctx:       context.Background(),
+					client:    client,
+					validator: &mockRestoreValidator{},
+				}
+			},
+			assert: func(t *testing.T, output *veleroapiv1.RestoreItemActionExecuteOutput) {
+				urls, ok := extractRestoreSnapshotURL(output)
+				if !ok || len(urls) == 0 {
+					t.Fatal("expected restoreSnapshotURL to be set for Azure Blob URL")
+				}
+				sasURL, ok := urls[0].(string)
+				if !ok {
+					t.Fatal("expected restoreSnapshotURL[0] to be a string")
+				}
+				parsed, err := url.Parse(sasURL)
+				if err != nil {
+					t.Fatalf("failed to parse SAS URL: %v", err)
+				}
+				if parsed.Host != "mystorageaccount.blob.core.windows.net" {
+					t.Errorf("unexpected host: %s", parsed.Host)
+				}
+				for _, p := range []string{"sig", "sv", "se", "sr"} {
+					if parsed.Query().Get(p) == "" {
+						t.Errorf("missing required SAS param %s in URL %s", p, sasURL)
+					}
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			builder := fake.NewClientBuilder().
-				WithScheme(s).
-				WithObjects(hcpCRD, backup)
-			if !tt.missingBSL {
-				builder = builder.WithObjects(bsl, secret)
-			}
-			fakeClient := builder.Build()
-
-			plugin := &RestorePlugin{
-				log:       logrus.New(),
-				ctx:       context.Background(),
-				client:    fakeClient,
-				validator: &mockRestoreValidator{},
+			var plugin *RestorePlugin
+			if tt.setup != nil {
+				plugin = tt.setup()
+			} else {
+				builder := fake.NewClientBuilder().
+					WithScheme(s).
+					WithObjects(hcpCRD, backup)
+				if !tt.missingBSL {
+					builder = builder.WithObjects(bsl, secret)
+				}
+				fakeClient := builder.Build()
+				plugin = &RestorePlugin{
+					log:       logrus.New(),
+					ctx:       context.Background(),
+					client:    fakeClient,
+					validator: &mockRestoreValidator{},
+				}
 			}
 
 			hcp := newHCPUnstructured(t, "my-hcp", "clusters-test", tt.annotations)
