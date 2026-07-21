@@ -396,7 +396,7 @@ github.com/vmware-tanzu/velero/pkg/util/logging
 github.com/vmware-tanzu/velero/pkg/util/results
 github.com/vmware-tanzu/velero/pkg/util/wildcard
 github.com/vmware-tanzu/velero/third_party/kubernetes/pkg/kubectl/cmd/util
-# github.com/vmware-tanzu/velero/pkg/apis v0.0.0-20260713215154-c825e3c136bc
+# github.com/vmware-tanzu/velero/pkg/apis v0.0.0-20260713215154-c825e3c136bc => github.com/openshift/velero/pkg/apis v0.0.0-20260716151240-e2178e7e7c29
 ## explicit; go 1.26.0
 github.com/vmware-tanzu/velero/pkg/apis/velero/shared
 github.com/vmware-tanzu/velero/pkg/apis/velero/v1
@@ -1100,3 +1100,4 @@ sigs.k8s.io/structured-merge-diff/v6/value
 ## explicit; go 1.22
 sigs.k8s.io/yaml
 # github.com/vmware-tanzu/velero => github.com/openshift/velero v0.10.2-0.20260716151240-e2178e7e7c29
+# github.com/vmware-tanzu/velero/pkg/apis => github.com/openshift/velero/pkg/apis v0.0.0-20260716151240-e2178e7e7c29
