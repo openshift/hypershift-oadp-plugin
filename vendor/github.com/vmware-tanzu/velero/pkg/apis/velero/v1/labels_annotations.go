@@ -80,6 +80,11 @@ const (
 	// timeout value for backup to plugins.
 	ResourceTimeoutAnnotation = "velero.io/resource-timeout"
 
+	// GlobalBackupVolumePolicyConfigMapAnnotation is the annotation key used to record the
+	// name of the cluster-wide global backup volume policies ConfigMap that contributed to a
+	// backup, so that `velero backup describe` can surface it.
+	GlobalBackupVolumePolicyConfigMapAnnotation = "velero.io/global-backup-volume-policy-configmap"
+
 	// AsyncOperationIDLabel is the label key used to identify the async operation ID
 	AsyncOperationIDLabel = "velero.io/async-operation-id"
 
@@ -101,6 +106,15 @@ const (
 	// ExcludeFromBackupLabel is the label to exclude k8s resource from backup,
 	// even if the resource contains a matching selector label.
 	ExcludeFromBackupLabel = "velero.io/exclude-from-backup"
+
+	// SkipFromBackupAnnotation is the annotation used by internal BackupItemActions
+	// to indicate that a resource should be skipped from backup,
+	// even if it doesn't have the ExcludeFromBackupLabel.
+	// This is used in cases where we want to skip backup of a resource based on some logic in a plugin.
+	//
+	// Notice: SkipFromBackupAnnotation's priority is higher than MustIncludeAdditionalItemAnnotation.
+	// If SkipFromBackupAnnotation is set, the resource will be skipped even if MustIncludeAdditionalItemAnnotation is set.
+	SkipFromBackupAnnotation = "velero.io/skip-from-backup"
 
 	// defaultVGSLabelKey is the default label key used to group PVCs under a VolumeGroupSnapshot
 	DefaultVGSLabelKey = "velero.io/volume-group"
@@ -132,6 +146,7 @@ const (
 	VolumeSnapshotRestoreSize                       = "velero.io/csi-volumesnapshot-restore-size"
 	DriverNameAnnotation                            = "velero.io/csi-driver-name"
 	VSCDeletionPolicyAnnotation                     = "velero.io/csi-vsc-deletion-policy"
+	VolumeGroupSnapshotHandleAnnotation             = "velero.io/csi-volumegroupsnapshot-handle"
 	VolumeSnapshotClassSelectorLabel                = "velero.io/csi-volumesnapshot-class"
 	VolumeSnapshotClassDriverBackupAnnotationPrefix = "velero.io/csi-volumesnapshot-class"
 	VolumeSnapshotClassDriverPVCAnnotation          = "velero.io/csi-volumesnapshot-class"
