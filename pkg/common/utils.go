@@ -81,8 +81,6 @@ func GetConfig() (*rest.Config, error) {
 	return cfg, nil
 }
 
-
-
 // GetCurrentNamespace reads the namespace from the Kubernetes service account
 // token file and returns it as a string. The file is expected to be located at
 // "/var/run/secrets/kubernetes.io/serviceaccount/namespace". If there is an error
@@ -105,7 +103,6 @@ func MatchSuffixKind(kind string, suffixes ...string) bool {
 		}
 	}
 	return false
-
 }
 
 // AddAnnotation adds an annotation to the given metadata object.
@@ -129,7 +126,6 @@ func RemoveAnnotation(metadata metav1.Object, key string) {
 	delete(annotations, key)
 	metadata.SetAnnotations(annotations)
 }
-
 
 // AddLabel adds a label with the specified key and value to the given metadata object.
 // If the metadata object does not have any labels, a new map is created to store the label.
@@ -205,33 +201,24 @@ func GetHostedCluster(ctx context.Context, c crclient.Client, includedNamespaces
 	return nil, nil
 }
 
-// ShouldEndPluginExecution checks if the plugin should end execution by verifying if the required
-// Hypershift resources (HostedControlPlane and HostedCluster) exist in the cluster.
-// Returns true if the plugin should end execution (i.e., if this is not a Hypershift cluster).
-func ShouldEndPluginExecution(ctx context.Context, backup *veleroapiv1.Backup, c crclient.Client, log logrus.FieldLogger) (bool, error) {
+// ShouldEndPluginExecution checks whether this backup targets a hosted control
+// plane. It returns true (skip) when no namespaces are provided or when the
+// backup's includedResources does not contain HCP resource types.
+func ShouldEndPluginExecution(backup *veleroapiv1.Backup) (bool, error) {
 	if len(backup.Spec.IncludedNamespaces) == 0 {
 		return true, fmt.Errorf("no namespaces provided")
 	}
 
-	// Check for both short and full resource names
 	for _, resource := range backup.Spec.IncludedResources {
-		if strings.Contains(resource, "hostedcluster") ||
+		if resource == "*" ||
+			strings.Contains(resource, "hostedcluster") ||
 			strings.Contains(resource, "hostedcontrolplane") ||
 			strings.Contains(resource, "nodepool") {
 			return false, nil
 		}
 	}
 
-	exists, err := CRDExists(ctx, "hostedcontrolplanes.hypershift.openshift.io", c)
-	if err != nil {
-		return true, fmt.Errorf("error checking for HostedControlPlane CRD: %v", err)
-	}
-
-	if exists {
-		return false, nil
-	}
-
-	return true, fmt.Errorf("no HostedControlPlane CRD found")
+	return true, nil
 }
 
 func CRDExists(ctx context.Context, crdName string, c crclient.Client) (bool, error) {
@@ -245,4 +232,3 @@ func CRDExists(ctx context.Context, crdName string, c crclient.Client) (bool, er
 	}
 	return true, nil
 }
-
