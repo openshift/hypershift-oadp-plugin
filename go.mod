@@ -14,7 +14,7 @@ require (
 	github.com/vmware-tanzu/velero/pkg/apis v0.0.0-20260713215154-c825e3c136bc
 	k8s.io/api v0.36.0
 	k8s.io/apiextensions-apiserver v0.36.0
-	sigs.k8s.io/controller-runtime v0.24.0
+	sigs.k8s.io/controller-runtime v0.24.1
 )
 
 require (
