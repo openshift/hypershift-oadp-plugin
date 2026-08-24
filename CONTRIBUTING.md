@@ -14,6 +14,17 @@
    git checkout -b <JIRA-KEY>-short-description upstream/main
    ```
 
+## PR Process
+
+The full lifecycle of a pull request:
+
+1. **Prepare** — create a focused branch, write tests, run `make verify` locally (see [Prior to Submitting](#prior-to-submitting-a-pull-request)).
+2. **Submit** — open a PR with a clear title, Jira reference, and filled-in template (see [Creating a Pull Request](#creating-a-pull-request)).
+3. **CI** — Prow runs `build`, `unit`, `verify`, `security`, and `images` checks automatically. All must pass.
+4. **Review** — a reviewer provides feedback (target: 2 business days). Address comments and push fixups.
+5. **Approve** — an approver from [OWNERS](./OWNERS) gives `/approve`. A reviewer gives `/lgtm`.
+6. **Merge** — Tide merges when `approved` + `lgtm` + `jira/valid-reference` labels are present and CI is green.
+
 ## Prior to Submitting a Pull Request
 
 1. **Keep changes focused**: scope commits to one thing and keep them minimal. Separate refactoring from logic changes, and save additional improvements for separate PRs.
@@ -79,6 +90,7 @@ PRs can be labeled with area labels using Prow commands:
 ## Review Process
 
 - Reviewers and approvers are listed in the [OWNERS](./OWNERS) file. Any reviewer can provide feedback; approvers have merge authority.
+- [`.github/CODEOWNERS`](.github/CODEOWNERS) identifies who GitHub requests reviews from; branch-protection settings enforce required approvals. `OWNERS` controls Prow's `/lgtm` and `/approve` commands. These files serve different systems (Prow vs GitHub) and should be kept consistent where practical, though some drift may exist.
 - CI must pass before merge (see [CI Pipeline](#ci-pipeline) below).
 - Review turnaround: aim to provide initial review feedback within **2 business days**.
 - If assigned as a reviewer and you cannot review, hand over to another reviewer using `/un-cc` yourself and `/cc` a replacement.
@@ -127,9 +139,11 @@ The project uses OpenShift CI (Prow). The following checks must pass before merg
 
 | Check | What It Verifies |
 |-------|------------------|
-| `verify-modules` | `go.mod` and `go.sum` are up to date |
-| `test` | All unit and integration tests pass |
-| `verify` | Combined module verification + tests |
+| `build` | Code compiles successfully |
+| `unit` | All unit and integration tests pass |
+| `verify` | Combined module verification (`go.mod`/`go.sum` up to date) + tests |
+| `security` | Scans for known vulnerabilities in dependencies. Skipped on doc-only PRs (`skip_if_only_changed` in Prow config). |
+| `images` | Container image builds successfully |
 
 ### Debugging CI Failures
 
@@ -162,6 +176,20 @@ Key areas for contributors:
 - `pkg/common/` — shared utilities.
 - `docs/` — technical reference documentation.
 - `examples/` — OADP CR samples per platform.
+
+## Backporting to Release Branches
+
+The project maintains release branches (e.g., `oadp-1.5`). To backport a fix:
+
+1. **Merge to `main` first.** All changes land on `main` before being backported.
+2. **Create a cherry-pick branch** from the target release branch:
+   ```bash
+   git checkout -b bp15/<JIRA-KEY> upstream/oadp-1.5
+   git cherry-pick <commit-sha>
+   ```
+3. **Resolve conflicts** if any. Release branches may have diverged (different Go versions, dependency sets).
+4. **Open a PR** against the release branch (e.g., `oadp-1.5`), not `main`. Use the same Jira key in the title.
+5. **Ensure the Jira issue targets the correct release.** Prow validates the Jira state against the target branch — if the bug is closed or targets the wrong release, the `jira/invalid-bug` label blocks merge.
 
 ## License
 
