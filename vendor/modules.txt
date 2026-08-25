@@ -356,7 +356,7 @@ github.com/spf13/cobra
 # github.com/spf13/pflag v1.0.10
 ## explicit; go 1.12
 github.com/spf13/pflag
-# github.com/vmware-tanzu/velero v1.18.1 => github.com/openshift/velero v0.10.2-0.20260716151240-e2178e7e7c29
+# github.com/vmware-tanzu/velero v1.18.1 => github.com/openshift/velero v0.10.2-0.20260805134104-2091b09b93bb
 ## explicit; go 1.26.0
 github.com/vmware-tanzu/velero/internal/credentials
 github.com/vmware-tanzu/velero/internal/resourcepolicies
@@ -390,13 +390,14 @@ github.com/vmware-tanzu/velero/pkg/types
 github.com/vmware-tanzu/velero/pkg/uploader
 github.com/vmware-tanzu/velero/pkg/util/boolptr
 github.com/vmware-tanzu/velero/pkg/util/collections
+github.com/vmware-tanzu/velero/pkg/util/datamover
 github.com/vmware-tanzu/velero/pkg/util/filesystem
 github.com/vmware-tanzu/velero/pkg/util/kube
 github.com/vmware-tanzu/velero/pkg/util/logging
 github.com/vmware-tanzu/velero/pkg/util/results
 github.com/vmware-tanzu/velero/pkg/util/wildcard
 github.com/vmware-tanzu/velero/third_party/kubernetes/pkg/kubectl/cmd/util
-# github.com/vmware-tanzu/velero/pkg/apis v0.0.0-20260713215154-c825e3c136bc
+# github.com/vmware-tanzu/velero/pkg/apis v0.0.0 => github.com/openshift/velero/pkg/apis v0.0.0-20260805134104-2091b09b93bb
 ## explicit; go 1.26.0
 github.com/vmware-tanzu/velero/pkg/apis/velero/shared
 github.com/vmware-tanzu/velero/pkg/apis/velero/v1
@@ -1099,4 +1100,5 @@ sigs.k8s.io/structured-merge-diff/v6/value
 # sigs.k8s.io/yaml v1.6.0
 ## explicit; go 1.22
 sigs.k8s.io/yaml
-# github.com/vmware-tanzu/velero => github.com/openshift/velero v0.10.2-0.20260716151240-e2178e7e7c29
+# github.com/vmware-tanzu/velero => github.com/openshift/velero v0.10.2-0.20260805134104-2091b09b93bb
+# github.com/vmware-tanzu/velero/pkg/apis => github.com/openshift/velero/pkg/apis v0.0.0-20260805134104-2091b09b93bb
