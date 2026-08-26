@@ -20,6 +20,10 @@ const (
 	// (Velero strips status from items during restore, so we persist it as an annotation)
 	EtcdSnapshotURLAnnotation string = "hypershift.openshift.io/etcd-snapshot-url"
 
+	// CAPIPausedAnnotation is the CAPI annotation that pauses reconciliation of a resource.
+	// Used to prevent the Agent CAPI provider from unbinding agents during backup.
+	CAPIPausedAnnotation string = "cluster.x-k8s.io/paused"
+
 	// hypershift/cluster-api kinds
 	HostedClusterKind         string = "HostedCluster"
 	HostedControlPlaneKind    string = "HostedControlPlane"
@@ -27,6 +31,8 @@ const (
 	PersistentVolumeKind      string = "PersistentVolume"
 	PersistentVolumeClaimKind string = "PersistentVolumeClaim"
 	ClusterDeploymentKind     string = "ClusterDeployment"
+	AgentMachineKind          string = "AgentMachine"
+	AgentClusterKind          string = "AgentCluster"
 	DataVolumeKind            string = "DataVolume"
 	HCPEtcdBackupKind         string = "HCPEtcdBackup"
 

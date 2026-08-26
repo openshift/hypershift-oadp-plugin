@@ -251,6 +251,16 @@ func (p *BackupPlugin) Execute(item runtime.Unstructured, backup *velerov1.Backu
 			}
 		}
 
+	case kind == common.AgentMachineKind || kind == common.AgentClusterKind:
+		if p.hcp.Spec.Platform.Type == hyperv1.AgentPlatform && p.Migration {
+			metadata, err := meta.Accessor(item)
+			if err != nil {
+				return nil, nil, fmt.Errorf("error getting metadata accessor for %s: %v", kind, err)
+			}
+			common.AddAnnotation(metadata, common.CAPIPausedAnnotation, "true")
+			p.log.Infof("Added CAPI paused annotation to %s %s during backup (migration mode)", kind, metadata.GetName())
+		}
+
 	case kind == common.DataVolumeKind || kind == common.PersistentVolumeClaimKind:
 		metadata, err := meta.Accessor(item)
 		if err != nil {

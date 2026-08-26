@@ -267,6 +267,14 @@ func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*v
 			return nil, fmt.Errorf("error updating ClusterDeployment resource with PreserveOnDelete option: %w", err)
 		}
 
+	case kind == common.AgentMachineKind || kind == common.AgentClusterKind:
+		metadata, err := meta.Accessor(input.Item)
+		if err != nil {
+			return nil, fmt.Errorf("error getting metadata accessor for %s: %v", kind, err)
+		}
+		common.RemoveAnnotation(metadata, common.CAPIPausedAnnotation)
+		p.log.Infof("Removed CAPI paused annotation from %s %s during restore", kind, metadata.GetName())
+
 	}
 
 	return velero.NewRestoreItemActionExecuteOutput(input.Item), nil

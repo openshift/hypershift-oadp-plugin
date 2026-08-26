@@ -240,6 +240,73 @@ func TestExecute(t *testing.T) {
 			},
 			backup: newTestBackup,
 		},
+		// Agent CAPI pause cases
+		{
+			name: "When Execute processes an AgentMachine on Agent platform with migration, It Should add CAPI paused annotation",
+			setup: func(bp *BackupPlugin) {
+				bp.hcp.Spec.Platform.Type = hyperv1.AgentPlatform
+				bp.Migration = true
+			},
+			item: func() *unstructured.Unstructured {
+				return newUnstructuredItem("AgentMachine", "capi-provider.agent-install.openshift.io/v1beta1", "test-am", "clusters-test")
+			},
+			backup: newTestBackup,
+			assert: func(g *GomegaWithT, result runtime.Unstructured, _ *BackupPlugin) {
+				metadata := result.UnstructuredContent()["metadata"].(map[string]any)
+				annotations := metadata["annotations"].(map[string]any)
+				g.Expect(annotations[common.CAPIPausedAnnotation]).To(Equal("true"))
+			},
+		},
+		{
+			name: "When Execute processes an AgentCluster on Agent platform with migration, It Should add CAPI paused annotation",
+			setup: func(bp *BackupPlugin) {
+				bp.hcp.Spec.Platform.Type = hyperv1.AgentPlatform
+				bp.Migration = true
+			},
+			item: func() *unstructured.Unstructured {
+				return newUnstructuredItem("AgentCluster", "capi-provider.agent-install.openshift.io/v1beta1", "test-ac", "clusters-test")
+			},
+			backup: newTestBackup,
+			assert: func(g *GomegaWithT, result runtime.Unstructured, _ *BackupPlugin) {
+				metadata := result.UnstructuredContent()["metadata"].(map[string]any)
+				annotations := metadata["annotations"].(map[string]any)
+				g.Expect(annotations[common.CAPIPausedAnnotation]).To(Equal("true"))
+			},
+		},
+		{
+			name: "When Execute processes an AgentMachine on non-Agent platform, It Should not add CAPI paused annotation",
+			item: func() *unstructured.Unstructured {
+				return newUnstructuredItem("AgentMachine", "capi-provider.agent-install.openshift.io/v1beta1", "test-am", "clusters-test")
+			},
+			backup: newTestBackup,
+			assert: func(g *GomegaWithT, result runtime.Unstructured, _ *BackupPlugin) {
+				metadata := result.UnstructuredContent()["metadata"].(map[string]any)
+				annotations, _ := metadata["annotations"].(map[string]any)
+				if annotations != nil {
+					_, exists := annotations[common.CAPIPausedAnnotation]
+					g.Expect(exists).To(BeFalse())
+				}
+			},
+		},
+		{
+			name: "When Execute processes an AgentMachine on Agent platform without migration, It Should not add CAPI paused annotation",
+			setup: func(bp *BackupPlugin) {
+				bp.hcp.Spec.Platform.Type = hyperv1.AgentPlatform
+				// Migration defaults to false
+			},
+			item: func() *unstructured.Unstructured {
+				return newUnstructuredItem("AgentMachine", "capi-provider.agent-install.openshift.io/v1beta1", "test-am", "clusters-test")
+			},
+			backup: newTestBackup,
+			assert: func(g *GomegaWithT, result runtime.Unstructured, _ *BackupPlugin) {
+				metadata := result.UnstructuredContent()["metadata"].(map[string]any)
+				annotations, _ := metadata["annotations"].(map[string]any)
+				if annotations != nil {
+					_, exists := annotations[common.CAPIPausedAnnotation]
+					g.Expect(exists).To(BeFalse())
+				}
+			},
+		},
 		// DataVolume cases
 		{
 			name: "When Execute processes a DataVolume with kubevirt RHCOS label, It Should skip it",

@@ -1287,3 +1287,110 @@ func TestRestoreExecuteHCPSnapshotURL(t *testing.T) {
 		})
 	}
 }
+
+func TestRestoreExecuteAgentCAPIPause(t *testing.T) {
+	s := common.CustomScheme
+
+	hcpCRD := &apiextensionsv1.CustomResourceDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "hostedcontrolplanes.hypershift.openshift.io"},
+	}
+
+	backup := &velerov1api.Backup{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-backup", Namespace: "openshift-adp"},
+		Spec: velerov1api.BackupSpec{
+			StorageLocation:    "default",
+			IncludedNamespaces: []string{"clusters", "clusters-test"},
+			IncludedResources:  testHCPResources,
+		},
+	}
+	restore := &velerov1api.Restore{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-restore", Namespace: "openshift-adp"},
+		Spec:       velerov1api.RestoreSpec{BackupName: "test-backup"},
+	}
+
+	origSAPath := common.DefaultK8sSAFilePath
+	nsDir := t.TempDir()
+	if err := os.WriteFile(nsDir+"/namespace", []byte("openshift-adp"), 0644); err != nil {
+		t.Fatalf("failed to write namespace file: %v", err)
+	}
+	common.SetK8sSAFilePath(nsDir)
+	t.Cleanup(func() { common.SetK8sSAFilePath(origSAPath) })
+
+	tests := []struct {
+		name           string
+		kind           string
+		hasPausedAnnotation bool
+		wantPausedRemoved   bool
+	}{
+		{
+			name:              "When restoring an AgentMachine with CAPI paused annotation, It Should remove it",
+			kind:              "AgentMachine",
+			hasPausedAnnotation: true,
+			wantPausedRemoved:  true,
+		},
+		{
+			name:              "When restoring an AgentCluster with CAPI paused annotation, It Should remove it",
+			kind:              "AgentCluster",
+			hasPausedAnnotation: true,
+			wantPausedRemoved:  true,
+		},
+		{
+			name:              "When restoring an AgentMachine without CAPI paused annotation, It Should pass through",
+			kind:              "AgentMachine",
+			hasPausedAnnotation: false,
+			wantPausedRemoved:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fakeClient := fake.NewClientBuilder().
+				WithScheme(s).
+				WithObjects(hcpCRD, backup).
+				Build()
+			plugin := &RestorePlugin{
+				log:       logrus.New(),
+				ctx:       context.Background(),
+				client:    fakeClient,
+				validator: &mockRestoreValidator{},
+				config:    map[string]string{},
+			}
+
+			item := &unstructured.Unstructured{
+				Object: map[string]any{
+					"apiVersion": "capi-provider.agent-install.openshift.io/v1beta1",
+					"kind":       tt.kind,
+					"metadata": map[string]any{
+						"name":      "test-resource",
+						"namespace": "clusters-test",
+					},
+				},
+			}
+
+			if tt.hasPausedAnnotation {
+				item.Object["metadata"].(map[string]any)["annotations"] = map[string]any{
+					common.CAPIPausedAnnotation: "true",
+				}
+			}
+
+			output, err := plugin.Execute(&veleroapiv1.RestoreItemActionExecuteInput{
+				Item:    item,
+				Restore: restore,
+			})
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			metadata := output.UpdatedItem.UnstructuredContent()["metadata"].(map[string]any)
+			annotations, _ := metadata["annotations"].(map[string]any)
+
+			if tt.wantPausedRemoved {
+				if annotations != nil {
+					if _, exists := annotations[common.CAPIPausedAnnotation]; exists {
+						t.Errorf("expected CAPI paused annotation to be removed, but it still exists")
+					}
+				}
+			}
+		})
+	}
+}
