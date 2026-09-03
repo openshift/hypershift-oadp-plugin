@@ -8,6 +8,7 @@ approvers:
 - celebdor
 - kaovilai
 - joeavaikath
+- PrasadJoshi12
 options: {}
 reviewers:
 - enxebre
@@ -20,4 +21,5 @@ reviewers:
 - devguyio
 - kaovilai
 - joeavaikath
+- PrasadJoshi12
 component: hypershift-oadp-plugin
