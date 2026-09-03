@@ -2,6 +2,7 @@ package s3presign
 
 import (
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -422,4 +423,267 @@ func TestGeneratePresignedGetURL(t *testing.T) {
 			t.Error("should not have X-Amz-Security-Token without session token")
 		}
 	})
+}
+
+func TestParseAWSCredentialData(t *testing.T) {
+	tests := []struct {
+		name          string
+		data          string
+		profile       string
+		envTokenFile  string // value for AWS_WEB_IDENTITY_TOKEN_FILE, empty = unset
+		wantType      CredentialType
+		wantRoleARN   string
+		wantTokenFile string
+		wantAccessKey string
+		wantToken     string
+		wantErr       bool
+		errContains   []string // substrings the error message must contain
+	}{
+		// --- STS: bare ARN ---
+		{
+			name:          "bare ARN string returns STS type",
+			data:          "arn:aws:iam::123456789012:role/my-role",
+			envTokenFile:  "/var/run/secrets/token",
+			wantType:      STSRoleCredentialType,
+			wantRoleARN:   "arn:aws:iam::123456789012:role/my-role",
+			wantTokenFile: "/var/run/secrets/token",
+		},
+		{
+			name:          "bare ARN with whitespace is trimmed",
+			data:          "  arn:aws:iam::123456789012:role/my-role  \n",
+			envTokenFile:  "/token",
+			wantType:      STSRoleCredentialType,
+			wantRoleARN:   "arn:aws:iam::123456789012:role/my-role",
+			wantTokenFile: "/token",
+		},
+		{
+			name:         "GovCloud ARN returns STS type",
+			data:         "arn:aws-us-gov:iam::123456789012:role/gov-role",
+			envTokenFile: "/token",
+			wantType:     STSRoleCredentialType,
+			wantRoleARN:  "arn:aws-us-gov:iam::123456789012:role/gov-role",
+		},
+		{
+			name:         "China region ARN returns STS type",
+			data:         "arn:aws-cn:iam::123456789012:role/cn-role",
+			envTokenFile: "/token",
+			wantType:     STSRoleCredentialType,
+			wantRoleARN:  "arn:aws-cn:iam::123456789012:role/cn-role",
+		},
+		{
+			name:        "bare ARN without env token file returns error",
+			data:        "arn:aws:iam::123456789012:role/my-role",
+			wantErr:     true,
+			errContains: []string{"AWS_WEB_IDENTITY_TOKEN_FILE"},
+		},
+		// --- STS: INI with role_arn ---
+		{
+			name:          "INI with role_arn and web_identity_token_file returns STS type",
+			data:          "[default]\nrole_arn = arn:aws:iam::123456789012:role/ini-role\nweb_identity_token_file = /var/run/secrets/eks/token\n",
+			wantType:      STSRoleCredentialType,
+			wantRoleARN:   "arn:aws:iam::123456789012:role/ini-role",
+			wantTokenFile: "/var/run/secrets/eks/token",
+		},
+		{
+			name:          "INI with role_arn only falls back to env for token file",
+			data:          "[default]\nrole_arn = arn:aws:iam::123456789012:role/env-role\n",
+			envTokenFile:  "/env/token",
+			wantType:      STSRoleCredentialType,
+			wantRoleARN:   "arn:aws:iam::123456789012:role/env-role",
+			wantTokenFile: "/env/token",
+		},
+		{
+			name:          "non-default profile with role_arn",
+			data:          "[default]\naws_access_key_id = DEFAULT_KEY\naws_secret_access_key = DEFAULT_SECRET\n\n[backup]\nrole_arn = arn:aws:iam::123456789012:role/backup-role\nweb_identity_token_file = /var/run/secrets/backup/token\n",
+			profile:       "backup",
+			wantType:      STSRoleCredentialType,
+			wantRoleARN:   "arn:aws:iam::123456789012:role/backup-role",
+			wantTokenFile: "/var/run/secrets/backup/token",
+		},
+		{
+			name:        "INI with role_arn + source_profile but no token file returns error",
+			data:        "[default]\nrole_arn = arn:aws:iam::123456789012:role/my-role\nsource_profile = base\n",
+			wantErr:     true,
+			errContains: []string{"web_identity_token_file", "source_profile"},
+		},
+		{
+			name:        "INI with role_arn + credential_source but no token file returns error",
+			data:        "[default]\nrole_arn = arn:aws:iam::123456789012:role/my-role\ncredential_source = Environment\n",
+			wantErr:     true,
+			errContains: []string{"web_identity_token_file"},
+		},
+		// --- Static credentials ---
+		{
+			name:          "static credentials return static type",
+			data:          "[default]\naws_access_key_id = AKIAIOSFODNN7EXAMPLE\naws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY\n",
+			wantType:      StaticCredentialType,
+			wantAccessKey: "AKIAIOSFODNN7EXAMPLE",
+		},
+		{
+			name:          "static credentials with session token",
+			data:          "[default]\naws_access_key_id = AKIAIOSFODNN7EXAMPLE\naws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY\naws_session_token = FwoGZXIvYXdzEBYaDHqa0AP\n",
+			wantType:      StaticCredentialType,
+			wantAccessKey: "AKIAIOSFODNN7EXAMPLE",
+			wantToken:     "FwoGZXIvYXdzEBYaDHqa0AP",
+		},
+		// --- Error cases ---
+		{
+			name:    "empty data returns error",
+			data:    "",
+			wantErr: true,
+		},
+		{
+			name:    "whitespace-only data returns error",
+			data:    "   \n  ",
+			wantErr: true,
+		},
+		{
+			name:    "invalid INI data returns error",
+			data:    "this is not valid ini or arn data",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.envTokenFile != "" {
+				t.Setenv("AWS_WEB_IDENTITY_TOKEN_FILE", tt.envTokenFile)
+			} else {
+				os.Unsetenv("AWS_WEB_IDENTITY_TOKEN_FILE")
+			}
+
+			profile := tt.profile
+			if profile == "" {
+				profile = "default"
+			}
+
+			parsed, err := ParseAWSCredentialData([]byte(tt.data), profile)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error but got nil")
+				}
+				for _, substr := range tt.errContains {
+					if !strings.Contains(err.Error(), substr) {
+						t.Errorf("error should contain %q, got: %v", substr, err)
+					}
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if parsed.Type != tt.wantType {
+				t.Errorf("expected type %q, got %q", tt.wantType, parsed.Type)
+			}
+
+			switch tt.wantType {
+			case STSRoleCredentialType:
+				if parsed.STSRole == nil {
+					t.Fatal("STSRole should not be nil")
+				}
+				if parsed.Static != nil {
+					t.Error("Static should be nil for STS type")
+				}
+				if tt.wantRoleARN != "" && parsed.STSRole.RoleARN != tt.wantRoleARN {
+					t.Errorf("RoleARN = %q, want %q", parsed.STSRole.RoleARN, tt.wantRoleARN)
+				}
+				if tt.wantTokenFile != "" && parsed.STSRole.WebIdentityTokenFile != tt.wantTokenFile {
+					t.Errorf("WebIdentityTokenFile = %q, want %q", parsed.STSRole.WebIdentityTokenFile, tt.wantTokenFile)
+				}
+			case StaticCredentialType:
+				if parsed.Static == nil {
+					t.Fatal("Static should not be nil")
+				}
+				if parsed.STSRole != nil {
+					t.Error("STSRole should be nil for static type")
+				}
+				if tt.wantAccessKey != "" && parsed.Static.AccessKeyID != tt.wantAccessKey {
+					t.Errorf("AccessKeyID = %q, want %q", parsed.Static.AccessKeyID, tt.wantAccessKey)
+				}
+				if tt.wantToken != "" && parsed.Static.SessionToken != tt.wantToken {
+					t.Errorf("SessionToken = %q, want %q", parsed.Static.SessionToken, tt.wantToken)
+				}
+			}
+		})
+	}
+}
+
+func TestIsBareARN(t *testing.T) {
+	tests := []struct {
+		name string
+		input string
+		want bool
+	}{
+		{"standard ARN", "arn:aws:iam::123456789012:role/my-role", true},
+		{"GovCloud ARN", "arn:aws-us-gov:iam::123456789012:role/my-role", true},
+		{"China ARN", "arn:aws-cn:iam::123456789012:role/my-role", true},
+		{"ARN with path", "arn:aws:iam::123456789012:role/path/to/role", true},
+		{"not an ARN - random string", "some-random-string", false},
+		{"not an ARN - has arn prefix but no iam", "arn:aws:s3:::my-bucket", false},
+		{"not an ARN - has arn and iam but no role", "arn:aws:iam::123456789012:user/my-user", false},
+		{"multiline content is not bare ARN", "arn:aws:iam::123456789012:role/my-role\nextra", false},
+		{"INI file is not bare ARN", "[default]\nrole_arn = arn:aws:iam::123:role/r", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isBareARN(tt.input)
+			if got != tt.want {
+				t.Errorf("isBareARN(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseSTSProfile(t *testing.T) {
+	tests := []struct {
+		name          string
+		data          string
+		profile       string
+		wantRoleARN   string
+		wantTokenFile string
+	}{
+		{
+			name:          "profile with both role_arn and token file",
+			data:          "[default]\nrole_arn = arn:aws:iam::123456789012:role/test\nweb_identity_token_file = /var/run/secrets/token\n",
+			profile:       "default",
+			wantRoleARN:   "arn:aws:iam::123456789012:role/test",
+			wantTokenFile: "/var/run/secrets/token",
+		},
+		{
+			name:        "profile with role_arn only",
+			data:        "[default]\nrole_arn = arn:aws:iam::123456789012:role/test\n",
+			profile:     "default",
+			wantRoleARN: "arn:aws:iam::123456789012:role/test",
+		},
+		{
+			name:    "profile without role_arn",
+			data:    "[default]\naws_access_key_id = AKID\naws_secret_access_key = SECRET\n",
+			profile: "default",
+		},
+		{
+			name:        "empty profile defaults to default",
+			data:        "[default]\nrole_arn = arn:aws:iam::123456789012:role/test\n",
+			profile:     "",
+			wantRoleARN: "arn:aws:iam::123456789012:role/test",
+		},
+		{
+			name:    "non-matching profile returns empty",
+			data:    "[default]\nrole_arn = arn:aws:iam::123456789012:role/test\n",
+			profile: "other",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			roleARN, tokenFile := parseSTSProfile([]byte(tt.data), tt.profile)
+			if roleARN != tt.wantRoleARN {
+				t.Errorf("roleARN = %q, want %q", roleARN, tt.wantRoleARN)
+			}
+			if tokenFile != tt.wantTokenFile {
+				t.Errorf("tokenFile = %q, want %q", tokenFile, tt.wantTokenFile)
+			}
+		})
+	}
 }
