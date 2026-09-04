@@ -1,6 +1,7 @@
 approvers:
 - enxebre
 - csrwng
+- PrasadJoshi12
 - sjenning
 - muraee
 - bryan-cox
@@ -12,6 +13,7 @@ options: {}
 reviewers:
 - enxebre
 - csrwng
+- PrasadJoshi12
 - sjenning
 - bryan-cox
 - jparrill
