@@ -1,0 +1,14 @@
+[allowlist]
+  description = "Global Allowlist - False positives from test data"
+
+  regexes = [
+    # AWS example credentials from AWS documentation
+    '''AKIAIOSFODNN7EXAMPLE''',
+    '''wJalrXUtnFEMI\/K7MDENG\/bPxRfiCYEXAMPLEKEY''',
+    '''FwoGZXIvYXdzEBYaDHqa0AP''',
+  ]
+
+  paths = [
+    # Test files with placeholder AWS credentials
+    '''pkg\/s3presign\/presign_test\.go$''',
+  ]
