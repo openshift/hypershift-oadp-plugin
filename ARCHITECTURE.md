@@ -69,6 +69,7 @@ Velero strips `status` from items during restore. To preserve the etcd snapshot 
 |------|--------|
 | `HostedControlPlane` | Validates platform config. Reads snapshot URL from annotation, pre-signs it (S3 or Azure Blob SAS), injects into `spec.etcd.managed.storage.restoreSnapshotURL`. |
 | `HostedCluster` | Adds `hypershift.openshift.io/restored-from-backup` annotation. Pre-signs and injects snapshot URL. |
+| `Secret` | Secrets with the `-import` suffix are skipped (`WithoutRestore`). These are ACM/MCE bootstrap secrets containing a SA token minted by the source hub — restoring them to a different hub causes authentication failures. |
 | `Pod` | Skipped entirely (`WithoutRestore`). Pods are recreated by controllers. |
 | `StatefulSet` | Etcd StatefulSet skipped with `etcdSnapshot` method. Etcd bootstraps from snapshot URL. |
 | `ClusterDeployment` | Sets `spec.preserveOnDelete = true` to prevent Hive cleanup during restore. |
@@ -122,6 +123,7 @@ The plugin fails explicitly — errors propagate to Velero, which marks the back
 | **HCPEtcdBackup times out or reports unhealthy etcd** | `VerifyInProgress` or `WaitForCompletion` returns an error after polling timeout. | Investigate etcd pod health in the HCP namespace. The `HCPEtcdBackup` CR's `.status.conditions` contain the failure reason. |
 | **Pre-signed URL generation fails at restore time** | Restore plugin returns an error for the `HostedControlPlane` or `HostedCluster` item. | Verify cloud credentials are valid and the snapshot object still exists in the bucket. For AWS: check the STS assume-role chain. For Azure: check AAD token and SAS delegation permissions. |
 | **Credential secret not found** | Standalone Velero (no DPA) path fails if `cloud-credentials` secret is missing. | Create the secret in the Velero namespace with the expected keys. |
+| **Stale ACM/MCE import secret restored** | If the `-import` secret exclusion is bypassed (e.g., older plugin version), the restored secret contains a bootstrap SA token minted by the source hub. The destination hub rejects the token, the klusterlet cannot create a CSR, and the `ManagedCluster` remains `Pending` or `Unknown`. | Delete the stale `<hc-name>-import` secret on the destination hub and let MCE regenerate it. |
 
 ## Backup Sequence
 
@@ -171,6 +173,13 @@ sequenceDiagram
     Cloud-->>RIA: Signed URL (time-limited)
     RIA->>RIA: Inject into spec.etcd.managed.storage.restoreSnapshotURL
     RIA-->>Velero: return modified item
+
+    Velero->>RIA: Execute(Secret)
+    alt Name ends with -import
+        RIA-->>Velero: WithoutRestore (stale ACM/MCE token)
+    else Regular secret
+        RIA-->>Velero: return item unmodified
+    end
 
     Velero->>RIA: Execute(HostedCluster)
     RIA->>RIA: Add restored-from-backup annotation
