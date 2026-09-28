@@ -25,6 +25,10 @@ const (
 	PersistentVolumeClaimKind string = "PersistentVolumeClaim"
 	ClusterDeploymentKind     string = "ClusterDeployment"
 	DataVolumeKind            string = "DataVolume"
+
+	// ACM/MCE import secret suffix. Secrets matching this suffix contain a bootstrap
+	// SA token minted by the source hub and must not be restored to a different hub.
+	ImportSecretSuffix string = "-import"
 )
 
 var (
