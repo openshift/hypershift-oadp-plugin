@@ -10,7 +10,7 @@ require (
 	github.com/openshift/hive/apis v0.0.0-20260519181045-ab4b2490385a
 	github.com/openshift/hypershift/api v0.0.0-20260519175807-9e283aee4b29
 	github.com/sirupsen/logrus v1.9.4
-	github.com/vmware-tanzu/velero v1.18.3
+	github.com/vmware-tanzu/velero v1.18.4
 	k8s.io/api v0.35.4
 	k8s.io/apiextensions-apiserver v0.35.3
 	sigs.k8s.io/controller-runtime v0.23.3
@@ -111,6 +111,6 @@ require (
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
 
-replace github.com/vmware-tanzu/velero => github.com/openshift/velero v0.10.2-0.20260922232025-4365110ccbf8
+replace github.com/vmware-tanzu/velero => github.com/openshift/velero v0.10.2-0.20260929121502-33ae2d9f3152
 
 exclude github.com/kcp-dev/kcp/sdk v0.0.0-00010101000000-000000000000
