@@ -217,6 +217,16 @@ func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*v
 			return velero.NewRestoreItemActionExecuteOutput(input.Item).WithoutRestore(), nil
 		}
 
+	case kind == "Secret":
+		metadata, err := meta.Accessor(input.Item)
+		if err != nil {
+			return nil, fmt.Errorf("error getting metadata accessor: %v", err)
+		}
+		if strings.HasSuffix(metadata.GetName(), common.ImportSecretSuffix) {
+			p.log.Infof("Skipping restore of ACM/MCE import secret %s/%s (contains stale bootstrap token)", metadata.GetNamespace(), metadata.GetName())
+			return velero.NewRestoreItemActionExecuteOutput(input.Item).WithoutRestore(), nil
+		}
+
 	case common.MainKinds[kind]:
 		if kind == common.HostedClusterKind {
 			metadata, err := meta.Accessor(input.Item)
