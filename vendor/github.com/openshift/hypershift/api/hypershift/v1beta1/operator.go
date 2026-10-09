@@ -4,7 +4,21 @@ import (
 	operatorv1 "github.com/openshift/api/operator/v1"
 )
 
-// +kubebuilder:validation:Enum="";Normal;Debug;Trace;TraceAll
+const (
+	// KubevirtDefaultV6InternalJoinSubnet is the default IPv6 OVN join subnet
+	// for KubeVirt hosted clusters. The upstream OVN-Kubernetes default is fd98::/64,
+	// but KubeVirt guests use fd99::/64 to avoid collisions with the management
+	// cluster's join subnet when both run OVN-Kubernetes.
+	KubevirtDefaultV6InternalJoinSubnet = "fd99::/64"
+
+	// KubevirtDefaultV4InternalSubnet is the default IPv4 OVN internal subnet
+	// for KubeVirt hosted clusters. The upstream OVN-Kubernetes default gateway
+	// router LRP CIDR is 100.64.0.0/16 and the default UDNs is 100.65.0.0/16.
+	// KubeVirt guests use 100.66.0.0/16 to avoid collisions with the management cluster.
+	KubevirtDefaultV4InternalSubnet = "100.66.0.0/16"
+)
+
+// +kubebuilder:validation:Enum=Normal;Debug;Trace;TraceAll
 type LogLevel string
 
 var (
@@ -26,6 +40,72 @@ var (
 	TraceAll LogLevel = "TraceAll"
 )
 
+// ComponentLogLevelSpec configures the log verbosity for a hosted control plane component.
+// +kubebuilder:validation:MinProperties=1
+type ComponentLogLevelSpec struct {
+	// logLevel sets the log verbosity for the component.
+	// Valid values are: "Normal", "Debug", "Trace", "TraceAll".
+	// When set to Normal, standard operational log messages are produced for auditing and common operations.
+	// When set to Debug, more verbose logging is enabled for diagnosing problems.
+	// When set to Trace, very verbose logging is enabled including function-level tracing.
+	// When set to TraceAll, the most verbose logging is used, including full API body content,
+	// this can cause significant performance impact and produce large volumes of logs.
+	// When omitted, this means the user has no opinion and the platform
+	// chooses a reasonable default, which is subject to change over time.
+	// The current default log level is Normal.
+	// +optional
+	LogLevel LogLevel `json:"logLevel,omitempty"`
+}
+
+// KubeAPIServerOperatorSpec specifies the configuration for the Kube API Server.
+// +kubebuilder:validation:MinProperties=1
+type KubeAPIServerOperatorSpec struct {
+	ComponentLogLevelSpec `json:",inline"`
+}
+
+// EtcdOperatorSpec specifies the configuration for the etcd.
+// +kubebuilder:validation:MinProperties=1
+// +kubebuilder:validation:XValidation:rule="!has(self.logLevel) || self.logLevel in ['Normal', 'Debug']",message="etcd only supports Normal and Debug log levels; Trace and TraceAll are not valid for etcd"
+type EtcdOperatorSpec struct {
+	ComponentLogLevelSpec `json:",inline"`
+}
+
+// KubeControllerManagerOperatorSpec specifies the configuration for the Kube Controller Manager.
+// +kubebuilder:validation:MinProperties=1
+type KubeControllerManagerOperatorSpec struct {
+	ComponentLogLevelSpec `json:",inline"`
+}
+
+// KubeSchedulerOperatorSpec specifies the configuration for the Kube Scheduler.
+// +kubebuilder:validation:MinProperties=1
+type KubeSchedulerOperatorSpec struct {
+	ComponentLogLevelSpec `json:",inline"`
+}
+
+// OpenShiftControllerManagerOperatorSpec specifies the configuration for the OpenShift Controller Manager.
+// +kubebuilder:validation:MinProperties=1
+type OpenShiftControllerManagerOperatorSpec struct {
+	ComponentLogLevelSpec `json:",inline"`
+}
+
+// OpenShiftAPIServerOperatorSpec specifies the configuration for the OpenShift API Server.
+// +kubebuilder:validation:MinProperties=1
+type OpenShiftAPIServerOperatorSpec struct {
+	ComponentLogLevelSpec `json:",inline"`
+}
+
+// OpenShiftOAuthAPIServerOperatorSpec specifies the configuration for the OpenShift OAuth API Server.
+// +kubebuilder:validation:MinProperties=1
+type OpenShiftOAuthAPIServerOperatorSpec struct {
+	ComponentLogLevelSpec `json:",inline"`
+}
+
+// OAuthServerOperatorSpec specifies the configuration for the OAuth Server.
+// +kubebuilder:validation:MinProperties=1
+type OAuthServerOperatorSpec struct {
+	ComponentLogLevelSpec `json:",inline"`
+}
+
 // ClusterVersionOperatorSpec is the specification of the desired behavior of the Cluster Version Operator.
 type ClusterVersionOperatorSpec struct {
 	// operatorLogLevel is an intent based logging for the operator itself. It does not give fine-grained control,
@@ -38,6 +118,7 @@ type ClusterVersionOperatorSpec struct {
 	OperatorLogLevel LogLevel `json:"operatorLogLevel,omitempty"`
 }
 
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.ovnKubernetesConfig) || has(self.ovnKubernetesConfig)", message="ovnKubernetesConfig is immutable once set and cannot be removed"
 type ClusterNetworkOperatorSpec struct {
 	// disableMultiNetwork when set to true disables the Multus CNI plugin and related components
 	// in the hosted cluster. This prevents the installation of multus daemon sets in the
@@ -62,7 +143,13 @@ type ClusterNetworkOperatorSpec struct {
 // OVNKubernetesConfig contains OVN-Kubernetes specific configuration options.
 // https://github.com/openshift/api/blob/6d3c4e25a8d3aeb57ad61649d80c38cbd27d1cc8/operator/v1/types_network.go#L400-L471
 // +kubebuilder:validation:XValidation:rule="!has(self.ipv4) || !has(self.ipv4.internalJoinSubnet) || !has(self.ipv4.internalTransitSwitchSubnet) || self.ipv4.internalJoinSubnet != self.ipv4.internalTransitSwitchSubnet", message="internalJoinSubnet and internalTransitSwitchSubnet must not be the same"
+// +kubebuilder:validation:XValidation:rule="!has(self.ipv6) || !has(self.ipv6.internalJoinSubnet) || !has(self.ipv6.internalTransitSwitchSubnet) || self.ipv6.internalJoinSubnet != self.ipv6.internalTransitSwitchSubnet", message="ipv6 internalJoinSubnet and internalTransitSwitchSubnet must not be the same"
 // +kubebuilder:validation:XValidation:rule="!has(oldSelf.mtu) || has(self.mtu)",message="mtu is immutable once set and cannot be removed"
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.ipv6) || has(self.ipv6)", message="ipv6 is immutable once set and cannot be removed"
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.ipv6) || !has(oldSelf.ipv6.internalJoinSubnet) || (has(self.ipv6) && has(self.ipv6.internalJoinSubnet))", message="ipv6.internalJoinSubnet cannot be removed once set"
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.ipv6) || !has(oldSelf.ipv6.internalTransitSwitchSubnet) || (has(self.ipv6) && has(self.ipv6.internalTransitSwitchSubnet))", message="ipv6.internalTransitSwitchSubnet cannot be removed once set"
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.v4InternalSubnet) || has(self.v4InternalSubnet)",message="v4InternalSubnet is immutable once set and cannot be removed"
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.v6InternalSubnet) || has(self.v6InternalSubnet)",message="v6InternalSubnet is immutable once set and cannot be removed"
 // +kubebuilder:validation:MinProperties=1
 type OVNKubernetesConfig struct {
 	// ipv4 allows users to configure IP settings for IPv4 connections. When omitted,
@@ -70,6 +157,15 @@ type OVNKubernetesConfig struct {
 	// fields within ipv4 for details of default values.
 	// +optional
 	IPv4 *OVNIPv4Config `json:"ipv4,omitempty"`
+
+	// ipv6 allows users to configure IP settings for IPv6 connections. When omitted,
+	// this means no opinions and the default configuration is used. Check individual
+	// fields within ipv6 for details of default values.
+	// For KubeVirt hosted clusters using dual-stack networking, it is recommended to
+	// set ipv6.internalJoinSubnet to a value different from the management cluster's
+	// join subnet (default fd98::/64) to avoid IPv6 routing conflicts.
+	// +optional
+	IPv6 OVNIPv6Config `json:"ipv6,omitzero,omitempty"`
 
 	// mtu is the MTU to use for the tunnel interface on hosted cluster nodes.
 	// This must be 100 bytes smaller than the uplink MTU.
@@ -87,6 +183,58 @@ type OVNKubernetesConfig struct {
 	// +kubebuilder:validation:Maximum=9216
 	// +optional
 	MTU int32 `json:"mtu,omitempty"`
+
+	// v4InternalSubnet configures the IPv4 subnet used by OVN-Kubernetes for gateway
+	// router logical router port (LRP) addresses and masquerade/SNAT traffic within
+	// the OVN logical topology. It must not overlap with any other subnet being used
+	// by OpenShift or by the node network. The size of the subnet must be larger than
+	// the number of nodes.
+	// This field is distinct from ipv4.internalJoinSubnet, which configures the subnet
+	// for the join switch that interconnects per-node gateway routers with the cluster
+	// router. Both default to 100.64.0.0/16 but control different OVN-Kubernetes
+	// internal networks and can be configured independently to avoid overlaps with
+	// existing network infrastructure.
+	// Once set, the value is immutable and cannot be modified in subsequent updates.
+	// The default is 100.64.0.0/16.
+	// The value must be in IPv4 CIDR notation (e.g., 192.168.0.0/16), consisting of
+	// four decimal octets (0-255) separated by dots, followed by a slash and a prefix
+	// length. The prefix length must be between 0 and 30 inclusive, and the first
+	// octet must not be 0.
+	// The value must be between 9 and 18 characters in length.
+	// This field is immutable once set.
+	// +kubebuilder:validation:MaxLength=18
+	// +kubebuilder:validation:MinLength=9
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="v4InternalSubnet is immutable once set"
+	// +kubebuilder:validation:XValidation:rule="isCIDR(self) && cidr(self).ip().family() == 4",message="Subnet must be in a valid IPv4 CIDR format"
+	// +kubebuilder:validation:XValidation:rule="isCIDR(self) && cidr(self).prefixLength() <= 30",message="subnet must be in the range /0 to /30 inclusive"
+	// +kubebuilder:validation:XValidation:rule="isCIDR(self) && cidr(self).ip().family() == 4 && int(self.split('.')[0]) > 0",message="first IP address octet must not be 0"
+	// +optional
+	V4InternalSubnet string `json:"v4InternalSubnet,omitempty"`
+
+	// v6InternalSubnet configures the IPv6 subnet used by OVN-Kubernetes for gateway
+	// router logical router port (LRP) addresses and masquerade/SNAT traffic within
+	// the OVN logical topology. It must not overlap with any other subnet being used
+	// by OpenShift or by the node network. The size of the subnet must be larger than
+	// the number of nodes.
+	// This field is distinct from ipv6.internalJoinSubnet, which configures the subnet
+	// for the join switch that interconnects per-node gateway routers with the cluster
+	// router. Both default to fd98::/64 but control different OVN-Kubernetes internal
+	// networks and can be configured independently to avoid overlaps with existing
+	// network infrastructure.
+	// Once set, the value is immutable and cannot be modified in subsequent updates.
+	// The default is fd98::/64.
+	// The value must be in IPv6 CIDR notation (e.g., fd98::/64), consisting of an
+	// IPv6 address followed by a slash and a prefix length. The prefix length must
+	// be between 0 and 125 inclusive.
+	// The value must be between 4 and 48 characters in length.
+	// This field is immutable once set.
+	// +kubebuilder:validation:MaxLength=48
+	// +kubebuilder:validation:MinLength=4
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="v6InternalSubnet is immutable once set"
+	// +kubebuilder:validation:XValidation:rule="isCIDR(self) && cidr(self).ip().family() == 6",message="Subnet must be in valid IPv6 CIDR format"
+	// +kubebuilder:validation:XValidation:rule="isCIDR(self) && cidr(self).prefixLength() <= 125",message="subnet must be in the range /0 to /125 inclusive"
+	// +optional
+	V6InternalSubnet string `json:"v6InternalSubnet,omitempty"`
 }
 
 // OVNIPv4Config contains IPv4-specific configuration options for OVN-Kubernetes.
@@ -126,6 +274,52 @@ type OVNIPv4Config struct {
 	InternalJoinSubnet string `json:"internalJoinSubnet,omitempty"`
 }
 
+// OVNIPv6Config contains IPv6-specific configuration options for OVN-Kubernetes.
+// https://github.com/openshift/api/blob/6d3c4e25a8d3aeb57ad61649d80c38cbd27d1cc8/operator/v1/types_network.go#L541-L570
+// +kubebuilder:validation:MinProperties=1
+type OVNIPv6Config struct {
+	// internalTransitSwitchSubnet is a v6 subnet in IPv6 CIDR format used internally
+	// by OVN-Kubernetes for the distributed transit switch in the OVN Interconnect
+	// architecture that connects the cluster routers on each node together to enable
+	// east west traffic. The subnet chosen should not overlap with other networks
+	// specified for OVN-Kubernetes as well as other networks used on the host.
+	// When omitted, this means no opinion and the platform is left to choose a reasonable
+	// default which is subject to change over time.
+	// The current default subnet is fd97::/64.
+	// The subnet must be large enough to accommodate one IP per node in your cluster.
+	// The value must be a valid IPv6 CIDR (e.g. fd97::/64). IPv4 addresses,
+	// IPv4-mapped IPv6 addresses, and dual-stack addresses are not permitted.
+	// The prefix length must be in the range /0 to /125 inclusive.
+	// This field is immutable once set.
+	// +kubebuilder:validation:MaxLength=48
+	// +kubebuilder:validation:MinLength=3
+	// +kubebuilder:validation:XValidation:rule="isCIDR(self) && cidr(self).ip().family() == 6", message="Subnet must be in valid IPv6 CIDR format (e.g., fd97::/64)"
+	// +kubebuilder:validation:XValidation:rule="isCIDR(self) && cidr(self).prefixLength() <= 125", message="subnet must be in the range /0 to /125 inclusive"
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf", message="internalTransitSwitchSubnet is immutable"
+	// +optional
+	InternalTransitSwitchSubnet string `json:"internalTransitSwitchSubnet,omitempty"`
+	// internalJoinSubnet is a v6 subnet used internally by ovn-kubernetes in case the
+	// default one is being already used by something else. It must not overlap with
+	// any other subnet being used by OpenShift or by the node network. The size of the
+	// subnet must be larger than the number of nodes.
+	// The current default value is fd98::/64.
+	// For KubeVirt hosted clusters, if this field is not set, HyperShift will
+	// automatically use fd99::/64 to avoid collisions with the management cluster's
+	// default join subnet (fd98::/64).
+	// The subnet must be large enough to accommodate one IP per node in your cluster.
+	// The value must be a valid IPv6 CIDR (e.g. fd98::/64). IPv4 addresses,
+	// IPv4-mapped IPv6 addresses, and dual-stack addresses are not permitted.
+	// The prefix length must be in the range /0 to /125 inclusive.
+	// This field is immutable once set.
+	// +kubebuilder:validation:MaxLength=48
+	// +kubebuilder:validation:MinLength=3
+	// +kubebuilder:validation:XValidation:rule="isCIDR(self) && cidr(self).ip().family() == 6", message="Subnet must be in valid IPv6 CIDR format (e.g., fd98::/64)"
+	// +kubebuilder:validation:XValidation:rule="isCIDR(self) && cidr(self).prefixLength() <= 125", message="subnet must be in the range /0 to /125 inclusive"
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf", message="internalJoinSubnet is immutable"
+	// +optional
+	InternalJoinSubnet string `json:"internalJoinSubnet,omitempty"`
+}
+
 // IngressOperatorSpec is the specification of the desired behavior of the Ingress Operator.
 type IngressOperatorSpec struct {
 	// endpointPublishingStrategy is used to publish the default ingress controller endpoints.
@@ -155,4 +349,46 @@ type IngressOperatorSpec struct {
 	// +kubebuilder:pruning:PreserveUnknownFields
 	// +kubebuilder:validation:Type=object
 	EndpointPublishingStrategy *operatorv1.EndpointPublishingStrategy `json:"endpointPublishingStrategy,omitempty"`
+
+	// defaultCertificate is a reference to a secret in the HostedCluster namespace
+	// that contains the default certificate served by the default ingress controller.
+	// When Routes don't specify their own certificate, defaultCertificate is used.
+	//
+	// The secret must contain the following keys and data:
+	//   tls.crt: certificate file contents
+	//   tls.key: key file contents
+	//
+	// When set, this certificate replaces the auto-generated wildcard certificate
+	// that is normally created by the control plane operator. The secret is synced
+	// from the HostedCluster namespace to the control plane, and then propagated
+	// to the hosted cluster's openshift-ingress namespace.
+	//
+	// When the referenced secret is updated, the new certificate data is
+	// automatically propagated to the hosted cluster.
+	//
+	// When not set, the control plane operator generates a wildcard certificate
+	// signed by the cluster's root CA.
+	//
+	// Note: a cluster-admin in the hosted cluster can override the default ingress
+	// controller's certificate directly. That override takes precedence and the
+	// certificate referenced here is no longer served.
+	//
+	// +optional
+	DefaultCertificate IngressDefaultCertificateReference `json:"defaultCertificate,omitzero"`
+}
+
+// IngressDefaultCertificateReference contains a reference to a TLS Secret
+// in the HostedCluster namespace used as the default serving certificate
+// for the ingress controller.
+type IngressDefaultCertificateReference struct {
+	// name is the name of the Secret containing tls.crt and tls.key.
+	// The Secret must exist in the same namespace as the HostedCluster.
+	// name must be a valid DNS subdomain name (RFC 1123): it must contain only
+	// lowercase alphanumeric characters, '-' or '.', and start and end with an
+	// alphanumeric character.
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:XValidation:rule="self.matches('^[a-z0-9]([-a-z0-9]*[a-z0-9])?([.][a-z0-9]([-a-z0-9]*[a-z0-9])?)*$')",message="name must be a valid DNS subdomain name: contain no more than 253 characters, contain only lowercase alphanumeric characters, '-' or '.', and start and end with an alphanumeric character"
+	Name string `json:"name,omitempty"`
 }
