@@ -987,6 +987,10 @@ func TestVerifyInProgress(t *testing.T) {
 			reason: hyperv1.BackupSucceededReason,
 		},
 		{
+			name:   "When HCPEtcdBackup is waiting for credentials, It Should return nil",
+			reason: hyperv1.BackupWaitingForCredentialsReason,
+		},
+		{
 			name:      "When HCPEtcdBackup failed, It Should return error",
 			reason:    hyperv1.BackupFailedReason,
 			wantErr:   true,

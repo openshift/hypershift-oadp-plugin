@@ -136,6 +136,8 @@ func (o *Orchestrator) VerifyInProgress(ctx context.Context) error {
 			return false, fmt.Errorf("HCPEtcdBackup rejected: %s", cond.Message)
 		case hyperv1.EtcdUnhealthyReason:
 			return false, fmt.Errorf("etcd unhealthy: %s", cond.Message)
+		case hyperv1.BackupWaitingForCredentialsReason:
+			return true, nil
 		}
 		return false, nil
 	})
