@@ -200,6 +200,14 @@ const (
 	// A failure here often means a software bug or a non-stable cluster.
 	ReconciliationSucceeded ConditionType = "ReconciliationSucceeded"
 
+	// ConfigOperatorReconciliationSucceeded indicates if the HostedCluster Config
+	// Operator (HCCO) reconciliation succeeded. The HCCO is responsible for
+	// reconciling resources inside the hosted cluster (e.g. global configuration,
+	// CRDs, RBAC, and connectivity checks).
+	// A failure here often means a software bug, a non-stable cluster, or
+	// connectivity issues between the control plane and the hosted cluster.
+	ConfigOperatorReconciliationSucceeded ConditionType = "ConfigOperatorReconciliationSucceeded"
+
 	// EtcdRecoveryActive indicates that the Etcd cluster is failing and the
 	// recovery job was triggered.
 	EtcdRecoveryActive ConditionType = "EtcdRecoveryActive"
@@ -252,17 +260,69 @@ const (
 	// **False / AutoNodeProgressing** means AutoNode is being enabled or disabled — the operation is in progress.
 	// **False / AutoNodeNotConfigured** means AutoNode is not configured in the spec and all Karpenter components have been removed.
 	AutoNodeEnabled ConditionType = "AutoNodeEnabled"
+
+	// PublicEndpointExposed indicates whether public API server endpoints are
+	// currently configured and exposed for this cluster via the management
+	// cluster's shared ingress. Status reflects observed state: True means
+	// public endpoints are reachable, False means they are not.
+	PublicEndpointExposed ConditionType = "PublicEndpointExposed"
+
+	// HostedClusterConfigurationDeprecated indicates whether any deprecated
+	// mechanism is being used to configure the hosted cluster. It is intentionally
+	// generic so that a single condition can surface any deprecated configuration
+	// surface as they are added; the message identifies the specific deprecated
+	// mechanism in use.
+	// **True** (reason DeprecatedConfigurationInUse) means a deprecated
+	// configuration mechanism is set. For example, the deprecated
+	// hypershift.openshift.io/kube-apiserver-verbosity-level annotation fires this
+	// whenever the annotation is present, even if
+	// spec.operatorConfiguration.kubeAPIServer.logLevel is also set and taking
+	// precedence, so that users are guided to migrate to the logLevel field and
+	// remove the annotation.
+	// **False** (reason AsExpected) means no deprecated configuration is in use.
+	HostedClusterConfigurationDeprecated ConditionType = "HostedClusterConfigurationDeprecated"
+
+	// IngressDefaultCertificateSynced indicates whether the user-provided default
+	// ingress certificate referenced by
+	// spec.operatorConfiguration.ingressOperator.defaultCertificate has been
+	// synced from the HostedCluster namespace into the control plane namespace.
+	// **True** means the referenced Secret was found, contains tls.crt and tls.key,
+	// and its data was synced.
+	// **False** means the referenced Secret is missing or malformed; in that case
+	// the previously synced certificate (or the auto-generated wildcard certificate)
+	// keeps serving and the HostedCluster does not become degraded.
+	// The condition is absent when no defaultCertificate is configured.
+	IngressDefaultCertificateSynced ConditionType = "IngressDefaultCertificateSynced"
+)
+
+// Reasons for PublicEndpointExposed condition.
+const (
+	PublicEndpointSharedIngressConfiguredReason = "SharedIngressConfigured"
+	PublicEndpointTopologyPrivateReason         = "TopologyPrivate"
+	PublicEndpointConvergenceInProgressReason   = "ConvergenceInProgress"
+	// EtcdDataEncryptionUpToDate indicates whether all etcd data is encrypted with the
+	// currently active encryption key.
+	// True: all data confirmed encrypted with the active key.
+	// False: re-encryption is in progress or has failed.
+	// Absent: encryption is not configured.
+	EtcdDataEncryptionUpToDate ConditionType = "EtcdDataEncryptionUpToDate"
 )
 
 // Reasons.
 const (
-	StatusUnknownReason         = "StatusUnknown"
-	AsExpectedReason            = "AsExpected"
-	NotFoundReason              = "NotFound"
-	WaitingForAvailableReason   = "WaitingForAvailable"
-	SecretNotFoundReason        = "SecretNotFound"
-	WaitingForGracePeriodReason = "WaitingForGracePeriod"
-	BlockedReason               = "Blocked"
+	StatusUnknownReason = "StatusUnknown"
+	AsExpectedReason    = "AsExpected"
+	// DeprecatedConfigurationInUseReason is used with the
+	// HostedClusterConfigurationDeprecated condition when a deprecated configuration
+	// mechanism is set. It indicates the deprecated mechanism is present; it does not
+	// imply the mechanism is currently driving configuration, since a non-deprecated
+	// field may take precedence over it.
+	DeprecatedConfigurationInUseReason = "DeprecatedConfigurationInUse"
+	NotFoundReason                     = "NotFound"
+	WaitingForAvailableReason          = "WaitingForAvailable"
+	SecretNotFoundReason               = "SecretNotFound"
+	WaitingForGracePeriodReason        = "WaitingForGracePeriod"
+	BlockedReason                      = "Blocked"
 
 	InfraStatusFailureReason           = "InfraStatusFailure"
 	WaitingOnInfrastructureReadyReason = "WaitingOnInfrastructureReady"
@@ -313,6 +373,16 @@ const (
 
 	ReconcileErrorReason = "ReconcileError"
 
+	// IngressDefaultCertificateInvalidReason is used when the referenced default
+	// ingress certificate Secret exists but does not contain the required tls.crt
+	// and tls.key entries.
+	IngressDefaultCertificateInvalidReason = "InvalidCertificateSecret"
+
+	// IngressDefaultCertificatePlatformNotSupportedReason is used when a default
+	// ingress certificate is configured on a platform whose ingress controller does
+	// not consume it (e.g. IBM Cloud), so the certificate is intentionally not synced.
+	IngressDefaultCertificatePlatformNotSupportedReason = "PlatformNotSupported"
+
 	CloudResourcesCleanupSkippedReason = "CloudResourcesCleanupSkipped"
 
 	CloudResourcesDeletionTimedOutReason = "CloudResourcesDeletionTimedOut"
@@ -336,6 +406,13 @@ const (
 	AutoNodeNotConfiguredReason    = "AutoNodeNotConfigured"
 	AutoNodeProgressingReason      = "AutoNodeProgressing"
 	AutoNodeEvaluationFailedReason = "AutoNodeEvaluationFailed"
+
+	ReadOnlyRolloutInProgressReason = "ReadOnlyRolloutInProgress"
+	WritePromotionInProgressReason  = "WritePromotionInProgress"
+	ReEncryptionInProgressReason    = "ReEncryptionInProgress"
+	ReEncryptionCompletedReason     = "ReEncryptionCompleted"
+	ReEncryptionFailedReason        = "ReEncryptionFailed"
+	ReEncryptionWaitingForKASReason = "ReEncryptionWaitingForKASConvergence"
 )
 
 // Messages.

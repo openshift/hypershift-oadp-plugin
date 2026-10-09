@@ -41,6 +41,7 @@ type HostedControlPlane struct {
 // HostedControlPlaneSpec defines the desired state of HostedControlPlane
 // +kubebuilder:validation:XValidation:rule="self.platform.type == 'IBMCloud' ? size(self.services) >= 3 : size(self.services) >= 4",message="spec.services in body should have at least 4 items or 3 for IBMCloud"
 // +kubebuilder:validation:XValidation:rule="!has(self.operatorConfiguration) || !has(self.operatorConfiguration.clusterNetworkOperator) || !has(self.operatorConfiguration.clusterNetworkOperator.disableMultiNetwork) || !self.operatorConfiguration.clusterNetworkOperator.disableMultiNetwork || self.networking.networkType == 'Other'",message="disableMultiNetwork can only be set to true when networkType is 'Other'"
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.secretEncryption) || has(self.secretEncryption)",message="secretEncryption cannot be removed once configured"
 type HostedControlPlaneSpec struct {
 	// releaseImage is the release image applied to the hosted control plane.
 	// +required
@@ -186,6 +187,13 @@ type HostedControlPlaneSpec struct {
 	//
 	// +optional
 	OperatorConfiguration *OperatorConfiguration `json:"operatorConfiguration,omitempty"`
+
+	// monitoring configures monitoring for the hosted cluster, including
+	// forwarding of control plane metrics to the hosted cluster's monitoring stack.
+	// When omitted, metrics forwarding is not configured and will be inactive.
+	//
+	// +optional
+	Monitoring MonitoringSpec `json:"monitoring,omitzero"`
 
 	// imageContentSources lists sources/repositories for the release-image content.
 	// +optional
@@ -419,6 +427,26 @@ type HostedControlPlaneStatus struct {
 	// configuration contains the cluster configuration status of the HostedCluster
 	// +optional
 	Configuration *ConfigurationStatus `json:"configuration,omitempty"`
+
+	// secretEncryption tracks the state of secret encryption key rotation and re-encryption.
+	// +optional
+	SecretEncryption SecretEncryptionStatus `json:"secretEncryption,omitzero"`
+	// initialization contains fields that track the status of the initialization of the HostedControlPlane.
+	// +optional
+	Initialization HostedControlPlaneInitializationStatus `json:"initialization,omitzero"`
+}
+
+// HostedControlPlaneInitializationStatus provides observations of the HostedControlPlane initialization process.
+// This satisfies the CAPI v1beta2 ControlPlane provider contract:
+// https://github.com/kubernetes-sigs/cluster-api/blob/v1.11.5/api/core/v1beta2/cluster_types.go#L1361-L1379
+// +kubebuilder:validation:MinProperties=1
+type HostedControlPlaneInitializationStatus struct {
+	// controlPlaneInitialized is true when the control plane is functional enough to accept requests.
+	// Once this condition is marked true, its value is never changed. See the Ready condition for an
+	// indication of the current readiness of the cluster's control plane.
+	// This satisfies CAPI contract https://cluster-api.sigs.k8s.io/developer/providers/contracts/control-plane#controlplane-initialization-completed
+	// +optional
+	ControlPlaneInitialized *bool `json:"controlPlaneInitialized,omitempty"`
 }
 
 // APIEndpoint represents a reachable Kubernetes API endpoint.

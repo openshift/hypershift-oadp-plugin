@@ -86,13 +86,13 @@ type AzureNodePoolPlatform struct {
 	// HostedCluster.Spec.Platform.Azure.SubscriptionID.
 	// subnetID is immutable once set.
 	// The subnetID should be in the format `/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.Network/virtualNetworks/{vnetName}/subnets/{subnetName}`.
-	// The subscriptionId in the encryptionSetID must be a valid UUID. It should be 5 groups of hyphen separated hexadecimal characters in the form 8-4-4-4-12.
+	// The subscriptionId in the subnetID must be a valid UUID. It should be 5 groups of hyphen separated hexadecimal characters in the form 8-4-4-4-12.
 	// The resourceGroupName should be between 1 and 90 characters, consisting only of alphanumeric characters, hyphens, underscores, periods and parenthesis and must not end with a period (.) character.
 	// The vnetName should be between 2 and 64 characters, consisting only of alphanumeric characters, hyphens, underscores and periods and must not end with either a period (.) or hyphen (-) character.
 	// The subnetName should be between 1 and 80 characters, consisting only of alphanumeric characters, hyphens and underscores and must start with an alphanumeric character and must not end with a period (.) or hyphen (-) character.
 	//
-	// +kubebuilder:validation:XValidation:rule="size(self.split('/')) == 11 && self.matches('^/subscriptions/.*/resourceGroups/.*/providers/Microsoft.Network/virtualNetworks/.*/subnets/.*$')",message="encryptionSetID must be in the format `/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.Network/virtualNetworks/{vnetName}/subnets/{subnetName}`"
-	// +kubebuilder:validation:XValidation:rule="self.split('/')[2].matches('^[{]?[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}[}]?$')",message="the subscriptionId in the encryptionSetID must be a valid UUID. It should be 5 groups of hyphen separated hexadecimal characters in the form 8-4-4-4-12"
+	// +kubebuilder:validation:XValidation:rule="size(self.split('/')) == 11 && self.matches('^/subscriptions/.*/resourceGroups/.*/providers/Microsoft.Network/virtualNetworks/.*/subnets/.*$')",message="subnetID must be in the format `/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.Network/virtualNetworks/{vnetName}/subnets/{subnetName}`"
+	// +kubebuilder:validation:XValidation:rule="self.split('/')[2].matches('^[{]?[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}[}]?$')",message="the subscriptionId in the subnetID must be a valid UUID. It should be 5 groups of hyphen separated hexadecimal characters in the form 8-4-4-4-12"
 	// +kubebuilder:validation:XValidation:rule=`self.split('/')[4].matches('[a-zA-Z0-9-_\\(\\)\\.]{1,90}')`,message="The resourceGroupName should be between 1 and 90 characters, consisting only of alphanumeric characters, hyphens, underscores, periods and parenthesis"
 	// +kubebuilder:validation:XValidation:rule="!self.split('/')[4].endsWith('.')",message="the resourceGroupName in the subnetID must not end with a period (.) character"
 	// +kubebuilder:validation:XValidation:rule=`self.split('/')[8].matches('[a-zA-Z0-9-_\\.]{2,64}')`,message="The vnetName should be between 2 and 64 characters, consisting only of alphanumeric characters, hyphens, underscores and periods"
@@ -100,7 +100,8 @@ type AzureNodePoolPlatform struct {
 	// +kubebuilder:validation:XValidation:rule=`self.split('/')[10].matches('[a-zA-Z0-9][a-zA-Z0-9-_\\.]{0,79}')`,message="The subnetName should be between 1 and 80 characters, consisting only of alphanumeric characters, hyphens and underscores and must start with an alphanumeric character"
 	// +kubebuilder:validation:XValidation:rule="!self.split('/')[10].endsWith('.') && !self.split('/')[10].endsWith('-')",message="the subnetName in the subnetID must not end with a period (.) or hyphen (-) character"
 	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:MaxLength=355
+	// MaxLength is 85 fixed path characters + 38 for a fully braced UUID + 90 (resource group) + 64 (VNet) + 80 (subnet).
+	// +kubebuilder:validation:MaxLength=357
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf", message="SubnetID is immutable"
 	// +required
 	SubnetID string `json:"subnetID"`
@@ -362,12 +363,12 @@ type AzureNodePoolOSDisk struct {
 // +kubebuilder:validation:XValidation:rule="has(self.private) == has(oldSelf.private)",message="private cannot be added or removed after cluster creation"
 // +kubebuilder:validation:XValidation:rule="!has(oldSelf.topology) || has(self.topology)",message="topology cannot be removed once set"
 // +kubebuilder:validation:XValidation:rule="!has(self.topology) || !has(oldSelf.topology) || (self.topology == 'Public') == (oldSelf.topology == 'Public')",message="transitions between Public and non-Public topology are not supported"
-// +kubebuilder:validation:XValidation:rule="!has(self.topology) || ((self.topology == 'Private' || self.topology == 'PublicAndPrivate') ? has(self.private) : !has(self.private))",message="private is required when topology is Private or PublicAndPrivate, and forbidden otherwise"
+// +kubebuilder:validation:XValidation:rule="has(self.topology) && (self.topology == 'Private' || self.topology == 'PublicAndPrivate') ? has(self.private) : !has(self.private)",message="private is required when topology is Private or PublicAndPrivate, and forbidden otherwise"
 // +kubebuilder:validation:XValidation:rule="!has(self.private) || self.private.type != 'PrivateLink' || self.azureAuthenticationConfig.azureAuthenticationConfigType != 'WorkloadIdentities' || has(self.azureAuthenticationConfig.workloadIdentities.controlPlaneOperator)",message="workloadIdentities.controlPlaneOperator is required when Private Link is configured with WorkloadIdentities authentication"
 type AzurePlatformSpec struct {
-	// cloud is the cloud environment identifier, valid values could be found here: https://github.com/Azure/go-autorest/blob/4c0e21ca2bbb3251fe7853e6f9df6397f53dd419/autorest/azure/environments.go#L33
+	// cloud is the Azure cloud environment identifier.
 	//
-	// +kubebuilder:validation:Enum=AzurePublicCloud;AzureUSGovernmentCloud;AzureChinaCloud;AzureGermanCloud;AzureStackCloud
+	// +kubebuilder:validation:Enum=AzurePublicCloud;AzureUSGovernmentCloud;AzureChinaCloud;AzureGermanCloud;AzureBleuCloud;AzureStackCloud
 	// +kubebuilder:default="AzurePublicCloud"
 	// +optional
 	Cloud string `json:"cloud,omitempty"`
@@ -414,19 +415,17 @@ type AzurePlatformSpec struct {
 	// +immutable
 	VnetID string `json:"vnetID"`
 
-	// subnetID is the subnet ID of an existing subnet where the nodes in the nodepool will be created. This can be a
-	// different subnet than the one listed in the HostedCluster, HostedCluster.Spec.Platform.Azure.SubnetID, but must
-	// exist in the same network, HostedCluster.Spec.Platform.Azure.VnetID, and must exist under the same subscription ID,
-	// HostedCluster.Spec.Platform.Azure.SubscriptionID.
+	// subnetID is the ID of an existing subnet where the HostedCluster's nodes will be created. It must exist in the same
+	// network as VnetID and under the same subscription as SubscriptionID.
 	// subnetID is immutable once set.
 	// The subnetID should be in the format `/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.Network/virtualNetworks/{vnetName}/subnets/{subnetName}`.
-	// The subscriptionId in the encryptionSetID must be a valid UUID. It should be 5 groups of hyphen separated hexadecimal characters in the form 8-4-4-4-12.
+	// The subscriptionId in the subnetID must be a valid UUID. It should be 5 groups of hyphen separated hexadecimal characters in the form 8-4-4-4-12.
 	// The resourceGroupName should be between 1 and 90 characters, consisting only of alphanumeric characters, hyphens, underscores, periods and parenthesis and must not end with a period (.) character.
 	// The vnetName should be between 2 and 64 characters, consisting only of alphanumeric characters, hyphens, underscores and periods and must not end with either a period (.) or hyphen (-) character.
 	// The subnetName should be between 1 and 80 characters, consisting only of alphanumeric characters, hyphens and underscores and must start with an alphanumeric character and must not end with a period (.) or hyphen (-) character.
 	//
-	// +kubebuilder:validation:XValidation:rule="size(self.split('/')) == 11 && self.matches('^/subscriptions/.*/resourceGroups/.*/providers/Microsoft.Network/virtualNetworks/.*/subnets/.*$')",message="encryptionSetID must be in the format `/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.Network/virtualNetworks/{vnetName}/subnets/{subnetName}`"
-	// +kubeubilder:validation:XValidation:rule="self.split('/')[2].matches('^[{]?[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}[}]?$')",message="the subscriptionId in the encryptionSetID must be a valid UUID. It should be 5 groups of hyphen separated hexadecimal characters in the form 8-4-4-4-12"
+	// +kubebuilder:validation:XValidation:rule="size(self.split('/')) == 11 && self.matches('^/subscriptions/.*/resourceGroups/.*/providers/Microsoft.Network/virtualNetworks/.*/subnets/.*$')",message="subnetID must be in the format `/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.Network/virtualNetworks/{vnetName}/subnets/{subnetName}`"
+	// +kubebuilder:validation:XValidation:rule="self.split('/')[2].matches('^([0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}|[{][0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}[}])$')",message="the subscriptionId in the subnetID must be a valid UUID. It should be 5 groups of hyphen separated hexadecimal characters in the form 8-4-4-4-12"
 	// +kubebuilder:validation:XValidation:rule=`self.split('/')[4].matches('[a-zA-Z0-9-_\\(\\)\\.]{1,90}')`,message="The resourceGroupName should be between 1 and 90 characters, consisting only of alphanumeric characters, hyphens, underscores, periods and parenthesis"
 	// +kubebuilder:validation:XValidation:rule="!self.split('/')[4].endsWith('.')",message="the resourceGroupName in the subnetID must not end with a period (.) character"
 	// +kubebuilder:validation:XValidation:rule=`self.split('/')[8].matches('[a-zA-Z0-9-_\\.]{2,64}')`,message="The vnetName should be between 2 and 64 characters, consisting only of alphanumeric characters, hyphens, underscores and periods"
@@ -434,7 +433,8 @@ type AzurePlatformSpec struct {
 	// +kubebuilder:validation:XValidation:rule=`self.split('/')[10].matches('[a-zA-Z0-9][a-zA-Z0-9-_\\.]{0,79}')`,message="The subnetName should be between 1 and 80 characters, consisting only of alphanumeric characters, hyphens and underscores and must start with an alphanumeric character"
 	// +kubebuilder:validation:XValidation:rule="!self.split('/')[10].endsWith('.') && !self.split('/')[10].endsWith('-')",message="the subnetName in the subnetID must not end with a period (.) or hyphen (-) character"
 	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:MaxLength=355
+	// MaxLength is 85 fixed path characters + 38 for a fully braced UUID + 90 (resource group) + 64 (VNet) + 80 (subnet).
+	// +kubebuilder:validation:MaxLength=357
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf", message="SubnetID is immutable"
 	// +required
 	SubnetID string `json:"subnetID"`
@@ -468,6 +468,16 @@ type AzurePlatformSpec struct {
 	// +required
 	// +kubebuilder:validation:MaxLength=255
 	TenantID string `json:"tenantID"`
+
+	// containerRegistry configures how worker nodes authenticate to Azure Container Registry (ACR).
+	// When set, the managed identity is attached to worker virtual machines and its resource ID is
+	// written into the worker cloud provider config so kubelet's ACR credential provider can
+	// authenticate without image pull secrets.
+	// Changing this value will trigger a rollout for all existing NodePools in the cluster.
+	//
+	// +rollout
+	// +optional
+	ContainerRegistry AzureContainerRegistryConfig `json:"containerRegistry,omitzero"`
 
 	// topology specifies the network topology of the API server endpoint for the hosted cluster.
 	// - Public: The API server is accessible only via a public endpoint.
@@ -545,6 +555,67 @@ type AzureResourceManagedIdentities struct {
 // +kubebuilder:validation:MaxLength=36
 // +kubebuilder:validation:Pattern=`^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$`
 type AzureClientID string
+
+// AzureManagedIdentityResourceID is an ARM resource ID for a user-assigned managed identity
+// in the format /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/{name}.
+//
+// +kubebuilder:validation:XValidation:rule="self.lowerAscii().matches('^/subscriptions/[^/]+/resourcegroups/[^/]+/providers/microsoft\\\\.managedidentity/userassignedidentities/[^/]+$')",message="must be a user-assigned managed identity ARM resource ID in the format /subscriptions/{subscriptionID}/resourceGroups/{resourceGroupName}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/{identityName}"
+// +kubebuilder:validation:MinLength=131
+// +kubebuilder:validation:MaxLength=345
+type AzureManagedIdentityResourceID string
+
+// UserAssignedManagedIdentity identifies a user-assigned managed identity by its ARM resource ID.
+type UserAssignedManagedIdentity struct {
+	// resourceID is the ARM resource ID of the user-assigned managed identity
+	// in the format /subscriptions/{subscriptionID}/resourceGroups/{resourceGroupName}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/{identityName}.
+	// The identity must have the AcrPull role on the target Azure Container Registry.
+	// It does not need to be in the same subscription or resource group as the HostedCluster,
+	// but it must be in the same Azure AD tenant.
+	//
+	// +required
+	ResourceID AzureManagedIdentityResourceID `json:"resourceID,omitempty"`
+}
+
+// AzureContainerRegistryConfig configures Azure Container Registry integration for a hosted cluster.
+type AzureContainerRegistryConfig struct {
+	// credentials configures authentication for worker nodes pulling images from ACR
+	// using a user-assigned managed identity.
+	// The identity does not need to be in the same subscription or resource group as the
+	// HostedCluster, but it must be in the same Azure AD tenant. The management cluster's
+	// CAPZ identity must have Microsoft.ManagedIdentity/userAssignedIdentities/*/assign/action
+	// on the identity's scope to attach it to worker virtual machines at creation time.
+	//
+	// +required
+	Credentials AzureContainerRegistryCredentialConfig `json:"credentials,omitzero"`
+}
+
+// AzureContainerRegistryCredentialType identifies the type of credential used for ACR image pulls.
+//
+// +kubebuilder:validation:Enum=ManagedIdentity
+type AzureContainerRegistryCredentialType string
+
+const (
+	// AzureContainerRegistryCredentialManagedIdentity uses a user-assigned managed identity for ACR authentication.
+	AzureContainerRegistryCredentialManagedIdentity AzureContainerRegistryCredentialType = "ManagedIdentity"
+)
+
+// AzureContainerRegistryCredentialConfig configures authentication credentials for Azure Container Registry.
+//
+// +kubebuilder:validation:XValidation:rule="self.type == 'ManagedIdentity' ? has(self.managedIdentity) : !has(self.managedIdentity)",message="managedIdentity is required when type is ManagedIdentity, and forbidden otherwise"
+// +union
+type AzureContainerRegistryCredentialConfig struct {
+	// type specifies the credential type used for ACR image pulls.
+	//
+	// +required
+	// +unionDiscriminator
+	Type AzureContainerRegistryCredentialType `json:"type,omitempty"`
+
+	// managedIdentity identifies the user-assigned managed identity used for ACR image pulls.
+	//
+	// +optional
+	// +unionMember
+	ManagedIdentity UserAssignedManagedIdentity `json:"managedIdentity,omitzero"`
+}
 
 // AzureWorkloadIdentities is a struct that contains the client IDs of all the managed identities in self-managed Azure
 // needing to authenticate with Azure's API.
@@ -653,7 +724,7 @@ const (
 // AzurePrivateType specifies the type of private connectivity mechanism used for the Azure
 // hosted cluster's API server. This acts as the discriminator for the AzurePrivateSpec union.
 //
-// +kubebuilder:validation:Enum=PrivateLink
+// +kubebuilder:validation:Enum=PrivateLink;Swift
 type AzurePrivateType string
 
 const (
@@ -661,23 +732,30 @@ const (
 	// In this mode, the operator creates a Private Link Service backed by the management cluster's
 	// internal load balancer, and a Private Endpoint in the guest VNet for private API server access.
 	AzurePrivateTypePrivateLink AzurePrivateType = "PrivateLink"
+
+	// AzurePrivateTypeSwift specifies private connectivity using Azure Swift pod networking.
+	// In this mode, Azure Swift assigns a private IP from the customer VNet directly
+	// to the hosted cluster's router pods, providing private API server access without a
+	// separate Private Link Service. This is used by ARO HCP managed clusters.
+	AzurePrivateTypeSwift AzurePrivateType = "Swift"
 )
 
 // AzurePrivateSpec configures private connectivity to an Azure hosted cluster's API server.
 // It is a discriminated union keyed on the type field, which selects the private connectivity
-// mechanism. Currently only PrivateLink is supported; additional mechanisms (e.g., Swift) may
-// be added in the future.
+// mechanism.
 //
-// +kubebuilder:validation:XValidation:rule="self.type != 'PrivateLink' ? !has(self.privateLink) : true",message="privateLink is forbidden when type is not PrivateLink"
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.type) || self.type == oldSelf.type",message="type is immutable"
+// +kubebuilder:validation:XValidation:rule="self.type == 'PrivateLink' ? has(self.privateLink) : !has(self.privateLink)",message="privateLink is required when type is PrivateLink, and forbidden otherwise"
+// +kubebuilder:validation:XValidation:rule="self.type == 'Swift' ? has(self.swift) : !has(self.swift)",message="swift is required when type is Swift, and forbidden otherwise"
 // +union
 type AzurePrivateSpec struct {
 	// type specifies the private connectivity mechanism used for the hosted cluster's API server.
 	// "PrivateLink" selects Azure Private Link Service for private API server access.
+	// "Swift" selects Azure Swift pod networking for private API server access, used by ARO HCP.
 	// This field is immutable once set.
 	//
 	// +unionDiscriminator
 	// +required
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="type is immutable"
 	Type AzurePrivateType `json:"type,omitempty"`
 
 	// privateLink configures Azure Private Link Service for private API server access.
@@ -686,6 +764,15 @@ type AzurePrivateSpec struct {
 	// +optional
 	// +unionMember
 	PrivateLink AzurePrivateLinkSpec `json:"privateLink,omitzero"`
+
+	// swift configures Azure Swift pod networking for private API server access.
+	// Swift networking requires the management cluster to be pre-configured with
+	// Azure Swift support; this is not provisioned by HyperShift automatically.
+	// This field is required when type is "Swift" and must not be set otherwise.
+	//
+	// +optional
+	// +unionMember
+	Swift AzureSwiftSpec `json:"swift,omitzero"`
 }
 
 // AzurePrivateLinkSpec configures Azure Private Link Service connectivity.
@@ -696,7 +783,7 @@ type AzurePrivateLinkSpec struct {
 	// If not provided, the controller will auto-create a NAT subnet in the HC's VNet.
 	// The expected format is:
 	//   /subscriptions/{subscriptionID}/resourceGroups/{resourceGroup}/providers/Microsoft.Network/virtualNetworks/{vnetName}/subnets/{subnetName}
-	// The maximum length is 355 characters.
+	// The maximum length is 357 characters: 85 fixed path characters + 38 for a fully braced UUID + 90 (resource group) + 64 (VNet) + 80 (subnet).
 	//
 	// +optional
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="natSubnetID is immutable once set"
@@ -714,6 +801,26 @@ type AzurePrivateLinkSpec struct {
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=50
 	AdditionalAllowedSubscriptions []AzureSubscriptionID `json:"additionalAllowedSubscriptions,omitempty"`
+}
+
+// AzureSwiftSpec configures Azure Swift pod networking for private API server access.
+// Swift assigns a private IP from the customer VNet directly to the hosted cluster's
+// router pods, providing private connectivity without a separate Private Link Service.
+//
+// +kubebuilder:validation:XValidation:rule="self.podNetworkInstance == oldSelf.podNetworkInstance",message="podNetworkInstance is immutable"
+type AzureSwiftSpec struct {
+	// podNetworkInstance is the name of a PodNetworkInstance custom resource in the
+	// hosted control plane namespace. This resource configures Azure Swift pod networking
+	// for private connectivity to the hosted cluster's router pods.
+	// The value must be a valid Kubernetes object name (RFC 1123 DNS label): lowercase
+	// alphanumeric characters or hyphens, must start and end with an alphanumeric character.
+	// This field is immutable once set.
+	//
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:XValidation:rule="self.matches('^[a-z0-9]([-a-z0-9]*[a-z0-9])?$')",message="podNetworkInstance must be a valid DNS label: lowercase alphanumeric characters or hyphens, must start and end with an alphanumeric character"
+	PodNetworkInstance string `json:"podNetworkInstance,omitempty"`
 }
 
 // ControlPlaneManagedIdentities contains the managed identities on the HCP control plane needing to authenticate with
@@ -807,9 +914,10 @@ const (
 	AzureKeyVaultPrivate AzureKeyVaultAccessType = "Private"
 )
 
-// AzureKMSSpec defines metadata about the configuration of the Azure KMS Secret Encryption provider using Azure key vault
+// AzureKMSSpec defines metadata about the configuration of the Azure KMS Secret Encryption provider using Azure Key Vault or Managed HSM.
 //
 // +kubebuilder:validation:XValidation:rule="!has(self.backupKey) || self.backupKey.keyVaultName == self.activeKey.keyVaultName",message="backupKey.keyVaultName must match activeKey.keyVaultName; both keys must reside in the same Key Vault"
+// +kubebuilder:validation:XValidation:rule="(has(self.keyVaultType) ? self.keyVaultType : 'KeyVault') == (has(oldSelf.keyVaultType) ? oldSelf.keyVaultType : 'KeyVault')",message="keyVaultType is immutable"
 // +kubebuilder:validation:XValidation:rule="!(has(self.kms) && has(self.workloadIdentity))",message="kms and workloadIdentity are mutually exclusive"
 // +kubebuilder:validation:XValidation:rule="has(self.kms) || has(self.workloadIdentity)",message="one of kms or workloadIdentity must be set"
 // +kubebuilder:validation:XValidation:rule="has(self.kms) == has(oldSelf.kms)",message="the KMS authentication mode is immutable once set"
@@ -820,6 +928,9 @@ type AzureKMSSpec struct {
 	ActiveKey AzureKMSKey `json:"activeKey"`
 	// backupKey defines the old key during the rotation process so previously created
 	// secrets can continue to be decrypted until they are all re-encrypted with the active key.
+	//
+	// Deprecated: This field will be ignored when status.secretEncryption.activeKey is set.
+	// The system automatically manages the previous key via the status field.
 	// +optional
 	BackupKey *AzureKMSKey `json:"backupKey,omitempty"`
 
@@ -838,6 +949,15 @@ type AzureKMSSpec struct {
 	// +optional
 	WorkloadIdentity WorkloadIdentity `json:"workloadIdentity,omitzero"`
 
+	// keyVaultType specifies whether activeKey and backupKey are hosted by Azure Key Vault or Azure Managed HSM.
+	// Valid values are "KeyVault" and "ManagedHSM".
+	// When set to "KeyVault", both keys are hosted by Azure Key Vault.
+	// When set to "ManagedHSM", both keys are hosted by Azure Managed HSM.
+	// The type is immutable; key rotation must remain within the same service.
+	// When omitted, the keys are treated as Key Vault keys.
+	// +optional
+	KeyVaultType AzureKMSKeyVaultType `json:"keyVaultType,omitempty"`
+
 	// keyVaultAccess specifies how the Key Vault should be accessed.
 	// When set to "Private", the control plane routes Key Vault traffic through
 	// the private router to reach the Key Vault's private endpoint in the customer VNet.
@@ -847,23 +967,38 @@ type AzureKMSSpec struct {
 	KeyVaultAccess AzureKeyVaultAccessType `json:"keyVaultAccess,omitempty"`
 }
 
-type AzureKMSKey struct {
-	// keyVaultName is the name of the keyvault. Must match criteria specified at https://docs.microsoft.com/en-us/azure/key-vault/general/about-keys-secrets-certificates#vault-name-and-object-name
-	// Your Microsoft Entra application used to create the cluster must be authorized to access this keyvault, e.g using the AzureCLI:
-	// `az keyvault set-policy -n $KEYVAULT_NAME --key-permissions decrypt encrypt --spn <YOUR APPLICATION CLIENT ID>`
-	// +kubebuilder:validation:MaxLength=255
-	// +required
-	KeyVaultName string `json:"keyVaultName"`
+// AzureKMSKeyVaultType specifies the Azure service that hosts a KMS key.
+// +kubebuilder:validation:Enum=KeyVault;ManagedHSM
+type AzureKMSKeyVaultType string
 
-	// keyName is the name of the keyvault key used for encrypt/decrypt
+const (
+	// AzureKMSKeyVaultTypeKeyVault indicates that the key is hosted by Azure Key Vault.
+	AzureKMSKeyVaultTypeKeyVault AzureKMSKeyVaultType = "KeyVault"
+	// AzureKMSKeyVaultTypeManagedHSM indicates that the key is hosted by Azure Managed HSM.
+	AzureKMSKeyVaultTypeManagedHSM AzureKMSKeyVaultType = "ManagedHSM"
+)
+
+// AzureKMSKey defines an Azure Key Vault or Managed HSM key used for KMS encryption.
+type AzureKMSKey struct {
+	// keyVaultName is the name of the Key Vault or Managed HSM. Must match criteria specified at https://docs.microsoft.com/en-us/azure/key-vault/general/about-keys-secrets-certificates#vault-name-and-object-name
+	// Your Microsoft Entra application used to create the cluster must be authorized to access this resource, e.g using the AzureCLI:
+	// `az keyvault set-policy -n $KEYVAULT_NAME --key-permissions decrypt encrypt --spn <YOUR APPLICATION CLIENT ID>`
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=255
 	// +required
-	KeyName string `json:"keyName"`
+	KeyVaultName string `json:"keyVaultName,omitempty"`
+
+	// keyName is the name of the key used for encrypt/decrypt.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=255
+	// +required
+	KeyName string `json:"keyName,omitempty"`
 
 	// keyVersion contains the version of the key to use
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=255
 	// +required
-	KeyVersion string `json:"keyVersion"`
+	KeyVersion string `json:"keyVersion,omitempty"`
 }
 
 // AzureAuthenticationType is a discriminated union type that contains the Azure authentication configuration for an
