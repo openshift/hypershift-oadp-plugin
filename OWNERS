@@ -1,6 +1,8 @@
 approvers:
+- akarol
 - enxebre
 - csrwng
+- PrasadJoshi12
 - sjenning
 - muraee
 - bryan-cox
@@ -10,8 +12,10 @@ approvers:
 - joeavaikath
 options: {}
 reviewers:
+- akarol
 - enxebre
 - csrwng
+- PrasadJoshi12
 - sjenning
 - bryan-cox
 - jparrill
