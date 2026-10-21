@@ -1,4 +1,5 @@
 approvers:
+- akarol
 - enxebre
 - csrwng
 - PrasadJoshi12
@@ -11,6 +12,7 @@ approvers:
 - joeavaikath
 options: {}
 reviewers:
+- akarol
 - enxebre
 - csrwng
 - PrasadJoshi12
