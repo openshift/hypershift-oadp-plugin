@@ -1,0 +1,5 @@
+# CODEOWNERS - Code ownership for hypershift-oadp-plugin
+# See https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+# Each line is a file pattern followed by one or more owners.
+
+* @enxebre @csrwng @sjenning @muraee @bryan-cox @jparrill @celebdor @kaovilai
