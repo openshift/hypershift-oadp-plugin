@@ -37,3 +37,7 @@ updates:
       misc-dependencies:
         patterns:
           - "*"
+      go-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
