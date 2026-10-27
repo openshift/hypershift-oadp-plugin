@@ -5,11 +5,11 @@ go 1.26.0
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.23.3
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.14.0
-	github.com/kubernetes-csi/external-snapshotter/client/v8 v8.4.0
-	github.com/onsi/gomega v1.41.0
+	github.com/kubernetes-csi/external-snapshotter/client/v8 v8.7.0
+	github.com/onsi/gomega v1.44.0
 	github.com/openshift/hive/apis v0.0.0-20260519181045-ab4b2490385a
 	github.com/openshift/hypershift/api v0.0.0-20261009141408-b36dd9034f72
-	github.com/sirupsen/logrus v1.9.4
+	github.com/sirupsen/logrus v1.10.2
 	github.com/vmware-tanzu/velero v1.18.1
 	github.com/vmware-tanzu/velero/pkg/apis v0.0.0
 	k8s.io/api v0.37.0
