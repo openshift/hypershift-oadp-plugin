@@ -2,7 +2,7 @@ module github.com/openshift/hypershift-oadp-plugin
 
 go 1.25.0
 
-toolchain go1.25.8
+toolchain go1.26.11
 
 require (
 	github.com/kubernetes-csi/external-snapshotter/client/v8 v8.2.0
