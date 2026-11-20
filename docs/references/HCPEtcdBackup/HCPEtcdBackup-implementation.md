@@ -117,7 +117,7 @@ The `Execute()` method is called once per backed-up item, with no guaranteed ord
 
 1. When the `HostedCluster` item is processed during restore, the plugin reads the etcd snapshot URL from the annotation `hypershift.openshift.io/etcd-snapshot-url`. This annotation is set during backup because Velero strips status fields from items during restore.
 
-2. During **restore**, the restore plugin reads the annotation from the HostedCluster metadata.
+2. During **restore**, the plugin only uses a snapshot annotation whose URL points to `backups/<backup-name>/etcd-backup/` for the selected Velero backup. For timestamped snapshot files, it also rejects files that predate the backup when the backup start time is available. On both HostedCluster and HostedControlPlane, it drops unrelated annotations and inherited `spec.etcd.managed.storage.restoreSnapshotURL` from the object being restored. If volume backup and restore are explicitly disabled, a managed etcd restore fails without a valid snapshot URL instead of starting without snapshot data.
 
 3. If the URL uses the `s3://` scheme, the plugin converts it to a **pre-signed HTTPS GET URL** using AWS SigV4. This is required because the `etcd-init` container downloads the snapshot using `curl`, which cannot handle S3-native URLs. The pre-signed URL is generated using credentials from the Velero BackupStorageLocation (BSL) credential Secret.
 
@@ -469,7 +469,7 @@ oc get hostedcluster <name> -n <hosted-cluster-namespace> \
 
 The output should be an array containing a **pre-signed HTTPS URL**, e.g.:
 ```json
-["https://my-bucket.s3.us-east-1.amazonaws.com/path/to/snapshot.db?X-Amz-Algorithm=AWS4-HMAC-SHA256&..."]
+["https://my-bucket.s3.us-east-1.amazonaws.com/backups/hcp-aws-backup/etcd-backup/snapshot.db?X-Amz-Algorithm=AWS4-HMAC-SHA256&..."]
 ```
 
 The restore plugin automatically converts the `s3://` URL stored in the annotation to a pre-signed HTTPS URL so the `etcd-init` container can download it via `curl`.

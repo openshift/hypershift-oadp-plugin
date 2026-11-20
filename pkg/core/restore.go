@@ -3,8 +3,11 @@ package core
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
+	"path"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,6 +24,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -38,7 +42,7 @@ type RestorePlugin struct {
 	hasDPA    bool // true when OADP+DPA is detected, false for standalone Velero
 
 	newTokenProvider func(creds *azblobsas.AADCredentials) (azblobsas.TokenProvider, error)
-	newSTSClient    func() s3presign.STSAssumeRoler
+	newSTSClient     func() s3presign.STSAssumeRoler
 
 	*plugtypes.RestoreOptions
 }
@@ -112,7 +116,7 @@ func NewRestorePlugin(logger logrus.FieldLogger) (*RestorePlugin, error) {
 		config:           pluginConfig.Data,
 		validator:        validator,
 		newTokenProvider: azblobsas.NewAADTokenProvider,
-		newSTSClient:    func() s3presign.STSAssumeRoler { return s3presign.NewSTSClient() },
+		newSTSClient:     func() s3presign.STSAssumeRoler { return s3presign.NewSTSClient() },
 	}
 
 	if rp.RestoreOptions, err = rp.validator.ValidatePluginConfig(rp.config); err != nil {
@@ -170,38 +174,55 @@ func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*v
 
 	kind := input.Item.GetObjectKind().GroupVersionKind().Kind
 	switch {
-	case kind == common.HostedControlPlaneKind:
-		hcp := &hyperv1.HostedControlPlane{}
-		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(input.Item.UnstructuredContent(), hcp); err != nil {
-			return nil, fmt.Errorf("error converting item to HostedControlPlane: %v", err)
+	case kind == common.HostedControlPlaneKind || kind == common.HostedClusterKind:
+		if kind == common.HostedControlPlaneKind {
+			hcp := &hyperv1.HostedControlPlane{}
+			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(input.Item.UnstructuredContent(), hcp); err != nil {
+				return nil, fmt.Errorf("error converting item to HostedControlPlane: %w", err)
+			}
+			if err := p.validator.ValidatePlatformConfig(hcp, p.config); err != nil {
+				return nil, fmt.Errorf("error checking platform configuration: %w", err)
+			}
 		}
-		if err := p.validator.ValidatePlatformConfig(hcp, p.config); err != nil {
-			return nil, fmt.Errorf("error checking platform configuration: %v", err)
-		}
-
 		metadata, err := meta.Accessor(input.Item)
 		if err != nil {
-			return nil, fmt.Errorf("error getting metadata accessor: %v", err)
+			return nil, fmt.Errorf("error getting metadata accessor: %w", err)
 		}
-		annotations := metadata.GetAnnotations()
-		snapshotURL := annotations[common.EtcdSnapshotURLAnnotation]
-		if snapshotURL != "" {
-			snapshotURL, err = p.signSnapshotURL(ctx, backup, snapshotURL, hcp.Name)
-			if err != nil {
-				return nil, err
-			}
-
-			if hcp.Spec.Etcd.Managed != nil {
-				hcp.Spec.Etcd.Managed.Storage.RestoreSnapshotURL = []string{snapshotURL}
-				p.log.Infof("Injected restoreSnapshotURL into HostedControlPlane %s", hcp.Name)
-
-				unstructuredHCP, err := runtime.DefaultUnstructuredConverter.ToUnstructured(hcp)
-				if err != nil {
-					return nil, fmt.Errorf("error converting HostedControlPlane to unstructured: %v", err)
-				}
-				input.Item.SetUnstructuredContent(unstructuredHCP)
-			}
+		if kind == common.HostedClusterKind {
+			common.AddAnnotation(metadata, common.HostedClusterRestoredFromBackupAnnotation, "")
+			p.log.Infof("Added restore annotation to HostedCluster %s", metadata.GetName())
 		}
+
+		content := input.Item.UnstructuredContent()
+		managed, _, err := unstructured.NestedFieldNoCopy(content, "spec", "etcd", "managed")
+		if err != nil {
+			return nil, fmt.Errorf("error reading managed etcd configuration: %w", err)
+		}
+		// Velero strips status. The annotation and the immutable spec field may
+		// have survived an earlier restore. Do not carry either into a PVC restore.
+		snapshotURL := metadata.GetAnnotations()[common.EtcdSnapshotURLAnnotation]
+		if managed == nil || !isSnapshotForBackup(snapshotURL, backup) {
+			// The logical snapshot workflow explicitly disables volume backup and restore.
+			if managed != nil && backup.Spec.SnapshotVolumes != nil && !*backup.Spec.SnapshotVolumes &&
+				backup.Spec.DefaultVolumesToFsBackup != nil && !*backup.Spec.DefaultVolumesToFsBackup &&
+				input.Restore.Spec.RestorePVs != nil && !*input.Restore.Spec.RestorePVs {
+				return nil, fmt.Errorf("no valid etcd snapshot URL for Velero backup %q with volume backup and restore disabled", backup.Name)
+			}
+			common.RemoveAnnotation(metadata, common.EtcdSnapshotURLAnnotation)
+			content = input.Item.UnstructuredContent()
+			unstructured.RemoveNestedField(content, "spec", "etcd", "managed", "storage", "restoreSnapshotURL")
+			input.Item.SetUnstructuredContent(content)
+			break
+		}
+		signedURL, err := p.signSnapshotURL(ctx, backup, snapshotURL, metadata.GetName())
+		if err != nil {
+			return nil, err
+		}
+		if err := unstructured.SetNestedStringSlice(content, []string{signedURL}, "spec", "etcd", "managed", "storage", "restoreSnapshotURL"); err != nil {
+			return nil, fmt.Errorf("error setting restoreSnapshotURL: %w", err)
+		}
+		input.Item.SetUnstructuredContent(content)
+		p.log.Infof("Injected restoreSnapshotURL into %s %s", kind, metadata.GetName())
 
 	case kind == "Pod":
 		p.log.Debugf("Pod found, skipping restore")
@@ -227,43 +248,6 @@ func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*v
 			return velero.NewRestoreItemActionExecuteOutput(input.Item).WithoutRestore(), nil
 		}
 
-	case common.MainKinds[kind]:
-		if kind == common.HostedClusterKind {
-			metadata, err := meta.Accessor(input.Item)
-			if err != nil {
-				return nil, fmt.Errorf("error getting metadata accessor: %v", err)
-			}
-			common.AddAnnotation(metadata, common.HostedClusterRestoredFromBackupAnnotation, "")
-			hcName := metadata.GetName()
-			p.log.Infof("Added restore annotation to HostedCluster %s", hcName)
-
-			// Inject restoreSnapshotURL if etcd backup URL is available.
-			// Read from annotation because Velero strips status during restore.
-			annotations := metadata.GetAnnotations()
-			snapshotURL := annotations[common.EtcdSnapshotURLAnnotation]
-			if snapshotURL != "" {
-				snapshotURL, err = p.signSnapshotURL(ctx, backup, snapshotURL, hcName)
-				if err != nil {
-					return nil, err
-				}
-
-				hc := &hyperv1.HostedCluster{}
-				if err := runtime.DefaultUnstructuredConverter.FromUnstructured(input.Item.UnstructuredContent(), hc); err != nil {
-					return nil, fmt.Errorf("error converting item to HostedCluster: %v", err)
-				}
-				if hc.Spec.Etcd.Managed != nil {
-					hc.Spec.Etcd.Managed.Storage.RestoreSnapshotURL = []string{snapshotURL}
-					p.log.Infof("Injected restoreSnapshotURL into HostedCluster %s", hc.Name)
-
-					unstructuredHC, err := runtime.DefaultUnstructuredConverter.ToUnstructured(hc)
-					if err != nil {
-						return nil, fmt.Errorf("error converting HostedCluster to unstructured: %v", err)
-					}
-					input.Item.SetUnstructuredContent(unstructuredHC)
-				}
-			}
-		}
-
 	case kind == common.ClusterDeploymentKind:
 		clusterdDeployment := &hive.ClusterDeployment{}
 		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(input.Item.UnstructuredContent(), clusterdDeployment); err != nil {
@@ -280,6 +264,32 @@ func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*v
 	}
 
 	return velero.NewRestoreItemActionExecuteOutput(input.Item), nil
+}
+
+func isSnapshotForBackup(rawURL string, backup *velerov1api.Backup) bool {
+	if rawURL == "" {
+		return false
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	// The backup orchestrator stores files directly under backups/<name>/etcd-backup/.
+	// The storage location may add a prefix, and Azure URLs also include the container.
+	dir, file := path.Split(u.Path)
+	if file == "" || !strings.HasSuffix(dir, "/backups/"+backup.Name+"/etcd-backup/") {
+		return false
+	}
+	// etcd-upload names snapshots <unix-seconds>.db. A reused backup name is not
+	// enough to match if the file's timestamp predates this Velero backup.
+	if start := backup.Status.StartTimestamp; start != nil {
+		if stamp, ok := strings.CutSuffix(file, ".db"); ok {
+			if uploaded, err := strconv.ParseInt(stamp, 10, 64); err == nil && uploaded < start.Unix() {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // signSnapshotURL converts a raw snapshot URL (s3:// or Azure Blob https://) into a
