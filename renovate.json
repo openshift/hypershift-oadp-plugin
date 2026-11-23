@@ -4,6 +4,10 @@
   "branchPrefix": "konflux/mintmaker/",
   "labels": ["area/ci-tooling", "ok-to-test"],
   "pruneStaleBranches": true,
+  "ignoreDeps": [
+    "github.com/vmware-tanzu/velero",
+    "github.com/openshift/velero"
+  ],
   "packageRules": [
     {
       "description": "Group Kubernetes dependencies (k8s.io, sigs.k8s.io)",
