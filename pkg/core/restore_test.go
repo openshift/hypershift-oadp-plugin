@@ -10,11 +10,12 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openshift/hypershift-oadp-plugin/pkg/azblobsas"
 	common "github.com/openshift/hypershift-oadp-plugin/pkg/common"
-	"github.com/openshift/hypershift-oadp-plugin/pkg/s3presign"
 	plugtypes "github.com/openshift/hypershift-oadp-plugin/pkg/core/types"
+	"github.com/openshift/hypershift-oadp-plugin/pkg/s3presign"
 	hyperv1 "github.com/openshift/hypershift/api/hypershift/v1beta1"
 	"github.com/sirupsen/logrus"
 	velerov1api "github.com/vmware-tanzu/velero/pkg/apis/velero/v1"
@@ -29,10 +30,10 @@ import (
 )
 
 type mockSTSClient struct {
-	creds       *s3presign.AWSCredentials
-	err         error
-	receivedCtx context.Context
-	receivedARN string
+	creds           *s3presign.AWSCredentials
+	err             error
+	receivedCtx     context.Context
+	receivedARN     string
 	receivedSession string
 }
 
@@ -237,9 +238,9 @@ aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
 					},
 				}
 				plugin := &RestorePlugin{
-					log:    logrus.New(),
-					ctx:    context.Background(),
-					client: client,
+					log:          logrus.New(),
+					ctx:          context.Background(),
+					client:       client,
 					newSTSClient: func() s3presign.STSAssumeRoler { return mock },
 				}
 				return plugin, backup
@@ -281,9 +282,9 @@ aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
 					err: fmt.Errorf("AccessDenied: not authorized to assume role"),
 				}
 				plugin := &RestorePlugin{
-					log:    logrus.New(),
-					ctx:    context.Background(),
-					client: client,
+					log:          logrus.New(),
+					ctx:          context.Background(),
+					client:       client,
 					newSTSClient: func() s3presign.STSAssumeRoler { return mock },
 				}
 				return plugin, backup
@@ -878,28 +879,28 @@ func TestRestoreExecuteEtcdStatefulSet(t *testing.T) {
 	t.Cleanup(func() { common.SetK8sSAFilePath(origSAPath) })
 
 	tests := []struct {
-		name            string
-		stsName         string
+		name             string
+		stsName          string
 		etcdBackupMethod string
-		wantSkipped     bool
+		wantSkipped      bool
 	}{
 		{
-			name:            "When etcdSnapshot method and etcd StatefulSet, it should skip restore",
-			stsName:         "etcd",
+			name:             "When etcdSnapshot method and etcd StatefulSet, it should skip restore",
+			stsName:          "etcd",
 			etcdBackupMethod: common.EtcdBackupMethodEtcdSnapshot,
-			wantSkipped:     true,
+			wantSkipped:      true,
 		},
 		{
-			name:            "When volumeSnapshot method and etcd StatefulSet, it should restore normally",
-			stsName:         "etcd",
+			name:             "When volumeSnapshot method and etcd StatefulSet, it should restore normally",
+			stsName:          "etcd",
 			etcdBackupMethod: common.EtcdBackupMethodVolume,
-			wantSkipped:     false,
+			wantSkipped:      false,
 		},
 		{
-			name:            "When etcdSnapshot method and non-etcd StatefulSet, it should restore normally",
-			stsName:         "other-sts",
+			name:             "When etcdSnapshot method and non-etcd StatefulSet, it should restore normally",
+			stsName:          "other-sts",
 			etcdBackupMethod: common.EtcdBackupMethodEtcdSnapshot,
-			wantSkipped:     false,
+			wantSkipped:      false,
 		},
 	}
 
@@ -936,6 +937,182 @@ func TestRestoreExecuteEtcdStatefulSet(t *testing.T) {
 	}
 }
 
+func TestRestoreExecuteStaleSnapshotURL(t *testing.T) {
+	const oldAzureURL = "https://account.blob.core.windows.net/container/prefix/backups/old-backup/etcd-backup/12345.db"
+	for _, kind := range []string{common.HostedClusterKind, common.HostedControlPlaneKind} {
+		tests := []struct {
+			name             string
+			annotation       string
+			snapshotMoveData bool
+			logicalRestore   bool
+			unmanagedEtcd    bool
+			malformedPath    []string
+			wantError        string
+		}{
+			{
+				name:             "When a PVC backup carries an older Azure snapshot URL, it should not require signing credentials",
+				annotation:       oldAzureURL,
+				snapshotMoveData: true,
+			},
+			{
+				name:       "When a PVC backup does not move data, it should still ignore a different backup's snapshot",
+				annotation: "s3://bucket/prefix/backups/test-backup-older/etcd-backup/1793360400.db",
+			},
+			{
+				name:             "When a PVC backup reuses an older logical backup name, it should not sign the old snapshot",
+				annotation:       "https://account.blob.core.windows.net/container/prefix/backups/test-backup/etcd-backup/1793356800.db",
+				snapshotMoveData: true,
+			},
+			{
+				name: "When only the immutable spec field is inherited, it should remove it before restore",
+			},
+			{
+				name:             "When a PVC backup has a malformed annotation, it should restore without using it",
+				annotation:       "https://account.blob.core.windows.net/container/%broken",
+				snapshotMoveData: true,
+			},
+			{
+				name:           "When a logical restore has a malformed annotation, it should fail rather than proceed without etcd data",
+				annotation:     "https://account.blob.core.windows.net/container/%broken",
+				logicalRestore: true,
+				wantError:      "no valid etcd snapshot URL",
+			},
+			{
+				name:           "When a logical restore has no annotation, it should not fall back to an inherited URL",
+				logicalRestore: true,
+				wantError:      "no valid etcd snapshot URL",
+			},
+			{
+				name:           "When etcd is unmanaged, it should not sign or inject even a matching snapshot URL",
+				annotation:     "https://account.blob.core.windows.net/container/backups/test-backup/etcd-backup/1793360400.db",
+				logicalRestore: true,
+				unmanagedEtcd:  true,
+			},
+			{
+				name:          "When archived etcd settings are malformed, it should report the error",
+				malformedPath: []string{"spec", "etcd"},
+				wantError:     "error reading managed etcd configuration",
+			},
+			{
+				name:          "When archived storage cannot hold a snapshot URL, it should report the error",
+				annotation:    "https://s3.example.com/bucket/backups/test-backup/etcd-backup/1793360401.db",
+				malformedPath: []string{"spec", "etcd", "managed", "storage"},
+				wantError:     "error setting restoreSnapshotURL",
+			},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name+" ("+kind+")", func(t *testing.T) {
+				backup := newTestBackup()
+				backup.Status.StartTimestamp = new(metav1.NewTime(time.Unix(1793360400, 0)))
+				restore := &velerov1api.Restore{
+					ObjectMeta: metav1.ObjectMeta{Namespace: backup.Namespace},
+					Spec:       velerov1api.RestoreSpec{BackupName: backup.Name},
+				}
+				if tt.snapshotMoveData {
+					backup.Spec.SnapshotMoveData = new(true)
+					backup.Spec.SnapshotVolumes = new(true)
+					restore.Spec.RestorePVs = new(true)
+				}
+				if tt.logicalRestore {
+					backup.Spec.SnapshotVolumes = new(false)
+					backup.Spec.DefaultVolumesToFsBackup = new(false)
+					restore.Spec.RestorePVs = new(false)
+				}
+				plugin := &RestorePlugin{
+					log:       logrus.New(),
+					ctx:       t.Context(),
+					client:    fake.NewClientBuilder().WithScheme(common.CustomScheme).WithObjects(backup).Build(),
+					validator: &mockRestoreValidator{},
+					config:    map[string]string{common.ConfigKeyEtcdBackupMethod: common.EtcdBackupMethodEtcdSnapshot},
+				}
+				annotations := map[string]string{"example.com/keep": "true"}
+				if tt.annotation != "" {
+					annotations[common.EtcdSnapshotURLAnnotation] = tt.annotation
+				}
+				item := newHCUnstructured("test", "clusters", annotations)
+				if kind == common.HostedControlPlaneKind {
+					item = newHCPUnstructured(t, "test", "clusters-test", annotations)
+				}
+				if tt.unmanagedEtcd {
+					if err := unstructured.SetNestedField(item.Object, string(hyperv1.Unmanaged), "spec", "etcd", "managementType"); err != nil {
+						t.Fatal(err)
+					}
+					unstructured.RemoveNestedField(item.Object, "spec", "etcd", "managed")
+				} else if err := unstructured.SetNestedStringSlice(item.Object, []string{oldAzureURL}, "spec", "etcd", "managed", "storage", "restoreSnapshotURL"); err != nil {
+					t.Fatal(err)
+				}
+				wantError := tt.wantError
+				if tt.malformedPath != nil {
+					if err := unstructured.SetNestedField(item.Object, "invalid", tt.malformedPath...); err != nil {
+						t.Fatal(err)
+					}
+					if kind == common.HostedControlPlaneKind {
+						wantError = "error converting item to HostedControlPlane"
+					}
+				}
+
+				output, err := plugin.Execute(&veleroapiv1.RestoreItemActionExecuteInput{
+					Item:    item,
+					Restore: restore,
+				})
+				if wantError != "" {
+					if err == nil || !strings.Contains(err.Error(), wantError) {
+						t.Fatalf("expected an error containing %q, got %v", wantError, err)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatalf("unexpected restore error: %v", err)
+				}
+				content := output.UpdatedItem.UnstructuredContent()
+				if _, found, err := unstructured.NestedFieldNoCopy(content, "spec", "etcd", "managed", "storage", "restoreSnapshotURL"); err != nil || found {
+					t.Fatalf("expected restoreSnapshotURL to be absent, found=%v, err=%v", found, err)
+				}
+				if !tt.unmanagedEtcd {
+					storageType, _, err := unstructured.NestedString(content, "spec", "etcd", "managed", "storage", "type")
+					if err != nil || storageType != string(hyperv1.PersistentVolumeEtcdStorage) {
+						t.Fatalf("expected to keep the PVC storage type, got %q: %v", storageType, err)
+					}
+				}
+				got, _, err := unstructured.NestedStringMap(content, "metadata", "annotations")
+				if _, found := got[common.EtcdSnapshotURLAnnotation]; err != nil || found || got["example.com/keep"] != "true" {
+					t.Fatalf("expected to remove only the stale snapshot annotation, err=%v", err)
+				}
+				if _, found := got[common.HostedClusterRestoredFromBackupAnnotation]; kind == common.HostedClusterKind && !found {
+					t.Error("expected HostedCluster recovery annotation to be set")
+				}
+			})
+		}
+	}
+}
+
+func TestIsSnapshotForBackup(t *testing.T) {
+	const baseURL = "s3://bucket/prefix/backups/test-backup/etcd-backup/"
+	start := metav1.NewTime(time.Unix(1793360400, 0))
+	tests := []struct {
+		name string
+		url  string
+		want bool
+	}{
+		{"When the snapshot timestamp matches the backup start second, it should be accepted", baseURL + "1793360400.db", true},
+		{"When the snapshot was taken after backup start, it should be accepted", baseURL + "1793360401.db", true},
+		{"When the snapshot file predates a backup with the same name, it should be rejected", baseURL + "1793360399.db", false},
+		{"When a legacy file name has no timestamp, it should still match the backup directory", baseURL + "snapshot.db", true},
+		{"When the URL points only to the backup directory, it should be rejected", baseURL, false},
+		{"When the backup name is present only in the query, it should be rejected", "https://host/older.db?path=" + baseURL, false},
+		{"When the URL has no host, it should be rejected", "/backups/test-backup/etcd-backup/1793360400.db", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			backup := newTestBackup()
+			backup.Status.StartTimestamp = &start
+			if got := isSnapshotForBackup(tt.url, backup); got != tt.want {
+				t.Errorf("isSnapshotForBackup(%q) = %v, want %v", tt.url, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRestoreExecuteSnapshotURL(t *testing.T) {
 	s := common.CustomScheme
 
@@ -966,6 +1143,7 @@ func TestRestoreExecuteSnapshotURL(t *testing.T) {
 			IncludedNamespaces: []string{"clusters", "clusters-test"},
 			IncludedResources:  testHCPResources,
 		},
+		Status: velerov1api.BackupStatus{StartTimestamp: new(metav1.NewTime(time.Unix(1793360400, 0)))},
 	}
 	restore := &velerov1api.Restore{
 		ObjectMeta: metav1.ObjectMeta{Name: "test-restore", Namespace: "openshift-adp"},
@@ -1000,7 +1178,7 @@ func TestRestoreExecuteSnapshotURL(t *testing.T) {
 		{
 			name: "When HC has etcd-snapshot-url annotation with s3 scheme, it should inject pre-signed restoreSnapshotURL",
 			annotations: map[string]string{
-				common.EtcdSnapshotURLAnnotation: "s3://my-bucket/path/to/snapshot.db",
+				common.EtcdSnapshotURLAnnotation: "s3://my-bucket/backups/test-backup/etcd-backup/snapshot.db",
 			},
 			assert: func(t *testing.T, output *veleroapiv1.RestoreItemActionExecuteOutput) {
 				urls, ok := extractRestoreSnapshotURL(output)
@@ -1035,14 +1213,14 @@ func TestRestoreExecuteSnapshotURL(t *testing.T) {
 		{
 			name: "When HC has https annotation, it should inject it directly without presigning",
 			annotations: map[string]string{
-				common.EtcdSnapshotURLAnnotation: "https://my-bucket.s3.us-east-1.amazonaws.com/path/to/snapshot.db?X-Amz-Signature=abc123",
+				common.EtcdSnapshotURLAnnotation: "https://my-bucket.s3.us-east-1.amazonaws.com/backups/test-backup/etcd-backup/snapshot.db?X-Amz-Signature=abc123",
 			},
 			assert: func(t *testing.T, output *veleroapiv1.RestoreItemActionExecuteOutput) {
 				urls, ok := extractRestoreSnapshotURL(output)
 				if !ok || len(urls) == 0 {
 					t.Fatal("expected restoreSnapshotURL to be set for https URL")
 				}
-				expected := "https://my-bucket.s3.us-east-1.amazonaws.com/path/to/snapshot.db?X-Amz-Signature=abc123"
+				expected := "https://my-bucket.s3.us-east-1.amazonaws.com/backups/test-backup/etcd-backup/snapshot.db?X-Amz-Signature=abc123"
 				if urls[0].(string) != expected {
 					t.Errorf("expected URL to pass through unchanged, got %s", urls[0])
 				}
@@ -1051,7 +1229,7 @@ func TestRestoreExecuteSnapshotURL(t *testing.T) {
 		{
 			name: "When HC has Azure Blob https annotation, it should generate SAS URL",
 			annotations: map[string]string{
-				common.EtcdSnapshotURLAnnotation: "https://mystorageaccount.blob.core.windows.net/backups/etcd-snapshot/snapshot.db",
+				common.EtcdSnapshotURLAnnotation: "https://mystorageaccount.blob.core.windows.net/container/prefix/backups/test-backup/etcd-backup/1793360401.db",
 			},
 			setup: func() *RestorePlugin {
 				accountKeyData := []byte("AZURE_STORAGE_ACCOUNT_ACCESS_KEY=" + base64.StdEncoding.EncodeToString([]byte("test-storage-account-key-value!!")) + "\n")
@@ -1211,7 +1389,7 @@ func TestRestoreExecuteHCPSnapshotURL(t *testing.T) {
 		{
 			name: "When HCP has s3 annotation and BSL is missing, it should return presign error",
 			annotations: map[string]string{
-				common.EtcdSnapshotURLAnnotation: "s3://my-bucket/path/to/snapshot.db",
+				common.EtcdSnapshotURLAnnotation: "s3://my-bucket/backups/test-backup/etcd-backup/snapshot.db",
 			},
 			missingBSL: true,
 			wantErr:    true,
@@ -1219,7 +1397,7 @@ func TestRestoreExecuteHCPSnapshotURL(t *testing.T) {
 		{
 			name: "When HCP has etcd-snapshot-url annotation with s3 scheme, it should inject pre-signed restoreSnapshotURL",
 			annotations: map[string]string{
-				common.EtcdSnapshotURLAnnotation: "s3://my-bucket/path/to/snapshot.db",
+				common.EtcdSnapshotURLAnnotation: "s3://my-bucket/backups/test-backup/etcd-backup/snapshot.db",
 			},
 			assert: func(t *testing.T, output *veleroapiv1.RestoreItemActionExecuteOutput) {
 				urls, ok := extractRestoreSnapshotURL(output)
@@ -1254,14 +1432,14 @@ func TestRestoreExecuteHCPSnapshotURL(t *testing.T) {
 		{
 			name: "When HCP has https annotation, it should inject it directly without presigning",
 			annotations: map[string]string{
-				common.EtcdSnapshotURLAnnotation: "https://my-bucket.s3.us-east-1.amazonaws.com/path/to/snapshot.db?X-Amz-Signature=abc123",
+				common.EtcdSnapshotURLAnnotation: "https://my-bucket.s3.us-east-1.amazonaws.com/backups/test-backup/etcd-backup/snapshot.db?X-Amz-Signature=abc123",
 			},
 			assert: func(t *testing.T, output *veleroapiv1.RestoreItemActionExecuteOutput) {
 				urls, ok := extractRestoreSnapshotURL(output)
 				if !ok || len(urls) == 0 {
 					t.Fatal("expected restoreSnapshotURL to be set for https URL")
 				}
-				expected := "https://my-bucket.s3.us-east-1.amazonaws.com/path/to/snapshot.db?X-Amz-Signature=abc123"
+				expected := "https://my-bucket.s3.us-east-1.amazonaws.com/backups/test-backup/etcd-backup/snapshot.db?X-Amz-Signature=abc123"
 				if urls[0].(string) != expected {
 					t.Errorf("expected URL to pass through unchanged, got %s", urls[0])
 				}
@@ -1270,7 +1448,7 @@ func TestRestoreExecuteHCPSnapshotURL(t *testing.T) {
 		{
 			name: "When HCP has Azure Blob https annotation, it should generate SAS URL",
 			annotations: map[string]string{
-				common.EtcdSnapshotURLAnnotation: "https://mystorageaccount.blob.core.windows.net/backups/etcd-snapshot/snapshot.db",
+				common.EtcdSnapshotURLAnnotation: "https://mystorageaccount.blob.core.windows.net/container/prefix/backups/test-backup/etcd-backup/snapshot.db",
 			},
 			setup: func() *RestorePlugin {
 				accountKeyData := []byte("AZURE_STORAGE_ACCOUNT_ACCESS_KEY=" + base64.StdEncoding.EncodeToString([]byte("test-storage-account-key-value!!")) + "\n")
